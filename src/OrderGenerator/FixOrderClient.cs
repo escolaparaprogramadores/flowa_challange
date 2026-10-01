@@ -25,19 +25,19 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
 {
     public static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(5);
 
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<Message>> _pending = new();
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<Message>> _ordersAwaitingExecutionReport = new();
     private readonly SocketInitiator _initiator;
     private SessionID? _sessionId;
 
     public FixOrderClient(IConfiguration configuration)
     {
-        var settings = LoadSettings(configuration);
-        _initiator = new SocketInitiator(this, new MemoryStoreFactory(), settings, new ScreenLogFactory(settings), null);
+        var initiatorSettings = LoadInitiatorSessionSettings(configuration);
+        _initiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, new ScreenLogFactory(initiatorSettings), null);
     }
 
-    internal int PendingCount => _pending.Count;
+    internal int OrdersAwaitingExecutionReportCount => _ordersAwaitingExecutionReport.Count;
 
-    public async Task<OrderResult> SendAsync(ValidOrder order)
+    public async Task<OrderResult> SendNewOrderSingleAsync(ValidOrder order)
     {
         var clOrdId = Guid.NewGuid().ToString("N");
 
@@ -48,14 +48,14 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
             return new OrderResult(OrderOutcome.NoSession, clOrdId);
 
         // A espera é registrada antes do envio porque a resposta pode chegar antes do Send voltar.
-        var waiter = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[clOrdId] = waiter;
+        var executionReportWaiter = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _ordersAwaitingExecutionReport[clOrdId] = executionReportWaiter;
         try
         {
             if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order), sessionId))
                 return new OrderResult(OrderOutcome.NoSession, clOrdId);
 
-            return ToResult(clOrdId, await waiter.Task.WaitAsync(ResponseTimeout));
+            return ToOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ResponseTimeout));
         }
         catch (TimeoutException)
         {
@@ -63,11 +63,11 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         }
         finally
         {
-            _pending.TryRemove(clOrdId, out _);
+            _ordersAwaitingExecutionReport.TryRemove(clOrdId, out _);
         }
     }
 
-    private static SessionSettings LoadSettings(IConfiguration configuration)
+    private static SessionSettings LoadInitiatorSessionSettings(IConfiguration configuration)
     {
         var settings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, "initiator.cfg"));
         var host = configuration["Fix:AcceptorHost"]
@@ -89,18 +89,18 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
 
     private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, ValidOrder order)
     {
-        var message = new QuickFix.FIX44.NewOrderSingle(
+        var newOrderSingle = new QuickFix.FIX44.NewOrderSingle(
             new ClOrdID(clOrdId),
             new Symbol(order.OrderSymbol),
             new FixSide(order.OrderSide.ToFixOrderSide()),
             new TransactTime(DateTime.UtcNow),
             new OrdType(OrdType.LIMIT));
-        message.Set(new OrderQty(order.OrderQuantity));
-        message.Set(new Price(order.OrderPrice));
-        return message;
+        newOrderSingle.Set(new OrderQty(order.OrderQuantity));
+        newOrderSingle.Set(new Price(order.OrderPrice));
+        return newOrderSingle;
     }
 
-    private static OrderResult ToResult(string clOrdId, Message report)
+    private static OrderResult ToOrderResult(string clOrdId, Message report)
     {
         var orderId = report.GetString(Tags.OrderID);
         var execId = report.GetString(Tags.ExecID);
@@ -120,8 +120,8 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
             return;
 
         // Resposta que chega depois dos 5 s não acha mais quem esperava e é descartada.
-        if (_pending.TryGetValue(message.GetString(Tags.ClOrdID), out var waiter))
-            waiter.TrySetResult(message);
+        if (_ordersAwaitingExecutionReport.TryGetValue(message.GetString(Tags.ClOrdID), out var executionReportWaiter))
+            executionReportWaiter.TrySetResult(message);
     }
 
     public void OnCreate(SessionID sessionID) => _sessionId = sessionID;

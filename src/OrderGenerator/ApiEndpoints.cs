@@ -17,32 +17,34 @@ public static class ApiEndpoints
     public const string ExposureCommunicationMessage = "Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.";
     public const string UnexpectedMessage = "Erro inesperado ao processar a ordem.";
 
-    public static void MapApi(this WebApplication app)
+    public static void MapApi(this WebApplication app, string buildCommitSha)
     {
         app.MapPost("/api/orders", PostOrder);
         app.MapGet("/api/exposures", GetExposures);
         app.MapGet("/health", () => Results.Text("Healthy"));
-        app.MapGet("/version", () => Results.Json(new { commit = BuildCommit() }));
+        app.MapGet("/version", () => Results.Json(new { commit = buildCommitSha }));
 
         // Caminho de API que não existe responde 404; nunca cai no index.html da tela.
         app.Map("/api/{**rest}", () => Results.NotFound());
     }
 
     // O SDK grava o commit na versão informativa do assembly ("1.0.0+<sha>") quando compila dentro do git.
-    public static string? BuildCommit()
+    public static string? ReadBuildCommitSha()
     {
-        var version = typeof(ApiEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-        var plus = version?.IndexOf('+') ?? -1;
-        return plus < 0 ? null : version![(plus + 1)..];
+        var informationalVersion = typeof(ApiEndpoints).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var commitSeparatorIndex = informationalVersion?.IndexOf('+') ?? -1;
+        return commitSeparatorIndex < 0 ? null : informationalVersion![(commitSeparatorIndex + 1)..];
     }
 
     public static IResult UnexpectedError() =>
         Results.Json(new { status = "error", message = UnexpectedMessage }, statusCode: StatusCodes.Status500InternalServerError);
 
-    private static async Task<IResult> PostOrder(HttpRequest request, FixOrderClient fix)
+    private static async Task<IResult> PostOrder(HttpRequest request, FixOrderClient fixOrderClient)
     {
-        var fields = await ReadRawFields(request);
-        var validation = OrderValidator.ValidateOrderFromJson(fields.Symbol, fields.Side, fields.Quantity, fields.Price);
+        var rawOrderFields = await ReadRawOrderFields(request);
+        var validation = OrderValidator.ValidateOrderFromJson(
+            rawOrderFields.Symbol, rawOrderFields.Side, rawOrderFields.Quantity, rawOrderFields.Price);
         if (!validation.IsOrderValid)
         {
             return Results.Json(
@@ -51,28 +53,28 @@ public static class ApiEndpoints
         }
 
         var order = validation.ValidatedOrder!;
-        var result = await fix.SendAsync(order);
+        var fixOrderResult = await fixOrderClient.SendNewOrderSingleAsync(order);
 
-        return result.Outcome switch
+        return fixOrderResult.Outcome switch
         {
-            OrderOutcome.Accepted => Results.Json(OrderBody("accepted", result, order, AcceptedMessage)),
-            OrderOutcome.Rejected => Results.Json(OrderBody("rejected", result, order, result.Text ?? RejectedWithoutTextMessage)),
+            OrderOutcome.Accepted => Results.Json(OrderBody("accepted", fixOrderResult, order, AcceptedMessage)),
+            OrderOutcome.Rejected => Results.Json(OrderBody("rejected", fixOrderResult, order, fixOrderResult.Text ?? RejectedWithoutTextMessage)),
             OrderOutcome.NoSession or OrderOutcome.Timeout => CommunicationError(OrderCommunicationMessage),
             _ => UnexpectedError()
         };
     }
 
-    private static async Task<IResult> GetExposures(IHttpClientFactory clients, CancellationToken cancellationToken)
+    private static async Task<IResult> GetExposures(IHttpClientFactory httpClientFactory, CancellationToken cancellationToken)
     {
-        var client = clients.CreateClient(AccumulatorClient);
+        var accumulatorClient = httpClientFactory.CreateClient(AccumulatorClient);
         try
         {
-            using var response = await client.GetAsync("/api/exposures", cancellationToken);
-            if (response.StatusCode != HttpStatusCode.OK)
+            using var accumulatorExposuresResponse = await accumulatorClient.GetAsync("/api/exposures", cancellationToken);
+            if (accumulatorExposuresResponse.StatusCode != HttpStatusCode.OK)
                 return CommunicationError(ExposureCommunicationMessage);
 
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            return Results.Content(body, "application/json", statusCode: StatusCodes.Status200OK);
+            var exposuresJson = await accumulatorExposuresResponse.Content.ReadAsStringAsync(cancellationToken);
+            return Results.Content(exposuresJson, "application/json", statusCode: StatusCodes.Status200OK);
         }
         catch (HttpRequestException)
         {
@@ -88,12 +90,12 @@ public static class ApiEndpoints
     private static IResult CommunicationError(string message) =>
         Results.Json(new { status = "communication_error", message }, statusCode: StatusCodes.Status503ServiceUnavailable);
 
-    private static object OrderBody(string status, OrderResult result, ValidOrder order, string message) => new
+    private static object OrderBody(string status, OrderResult fixOrderResult, ValidOrder order, string message) => new
     {
         status,
-        clOrdId = result.ClOrdId,
-        orderId = result.OrderId,
-        execId = result.ExecId,
+        clOrdId = fixOrderResult.ClOrdId,
+        orderId = fixOrderResult.OrderId,
+        execId = fixOrderResult.ExecId,
         symbol = order.OrderSymbol,
         side = order.OrderSide.ToJsonOrderSide(),
         quantity = order.OrderQuantity,
@@ -102,12 +104,12 @@ public static class ApiEndpoints
     };
 
     // Quantidade e preço chegam como texto cru para o validador dar a mensagem certa a "abc" ou 1.5.
-    private static async Task<(string? Symbol, string? Side, string? Quantity, string? Price)> ReadRawFields(HttpRequest request)
+    private static async Task<(string? Symbol, string? Side, string? Quantity, string? Price)> ReadRawOrderFields(HttpRequest request)
     {
-        JsonDocument document;
+        JsonDocument orderJsonDocument;
         try
         {
-            document = await JsonDocument.ParseAsync(request.Body, cancellationToken: request.HttpContext.RequestAborted);
+            orderJsonDocument = await JsonDocument.ParseAsync(request.Body, cancellationToken: request.HttpContext.RequestAborted);
         }
         catch (JsonException)
         {
@@ -115,27 +117,29 @@ public static class ApiEndpoints
             return default;
         }
 
-        using (document)
+        using (orderJsonDocument)
         {
-            var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
+            var orderJson = orderJsonDocument.RootElement;
+            if (orderJson.ValueKind != JsonValueKind.Object)
                 return default;
 
-            return (RawText(root, OrderFields.OrderSymbolFieldName), RawText(root, OrderFields.OrderSideFieldName),
-                RawText(root, OrderFields.OrderQuantityFieldName), RawText(root, OrderFields.OrderPriceFieldName));
+            return (ReadRawOrderFieldText(orderJson, OrderFields.OrderSymbolFieldName),
+                ReadRawOrderFieldText(orderJson, OrderFields.OrderSideFieldName),
+                ReadRawOrderFieldText(orderJson, OrderFields.OrderQuantityFieldName),
+                ReadRawOrderFieldText(orderJson, OrderFields.OrderPriceFieldName));
         }
     }
 
-    private static string? RawText(JsonElement root, string field)
+    private static string? ReadRawOrderFieldText(JsonElement orderJson, string orderFieldName)
     {
-        if (!root.TryGetProperty(field, out var value))
+        if (!orderJson.TryGetProperty(orderFieldName, out var orderFieldValue))
             return null;
 
-        return value.ValueKind switch
+        return orderFieldValue.ValueKind switch
         {
-            JsonValueKind.String => value.GetString(),
+            JsonValueKind.String => orderFieldValue.GetString(),
             JsonValueKind.Null => null,
-            _ => value.GetRawText()
+            _ => orderFieldValue.GetRawText()
         };
     }
 }
