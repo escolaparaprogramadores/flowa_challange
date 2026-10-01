@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>OrderGenerator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Flowa.Shared/Flowa.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QuickFIXn.Core" Version="1.14.1" />
+    <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OrderGenerator.Tests" />
+  </ItemGroup>
+
+  <!-- A sessão e o dicionário FIX 4.4 vão junto do binário; o código lê os dois de lá. -->
+  <ItemGroup>
+    <None Include="initiator.cfg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgQuickFIXn_FIX44)/DataDictionary/FIX44.xml" Link="FIX44.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
