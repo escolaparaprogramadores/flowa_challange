@@ -277,7 +277,7 @@ public sealed class CleanCloneImageCommitTests
 {
     private const string CloneComposeProjectName = "flowa-it-commit";
     private const int CloneOrderGeneratorHostPort = 18093;
-    private static readonly TimeSpan CloneComposeUpTimeout = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan CloneComposeCommandTimeout = TimeSpan.FromMinutes(15);
 
     [Fact]
     public async Task Docker_compose_up_de_um_clone_serve_o_commit_atual_mesmo_com_a_imagem_do_commit_anterior()
@@ -295,27 +295,53 @@ public sealed class CleanCloneImageCommitTests
             ["GIT_COMMITTER_NAME"] = "flowa-it",
             ["GIT_COMMITTER_EMAIL"] = "flowa-it@localhost",
         };
-        Task<string> RunInCloneAsync(TimeSpan commandTimeout, string commandExecutable, params string[] commandArguments) =>
+        Task<string> RunWithCloneEnvironmentAsync(TimeSpan commandTimeout, string commandExecutable, params string[] commandArguments) =>
             ExternalCommand.CaptureOutputAsync(commandExecutable, commandTimeout, cloneEnvironmentVariables, commandArguments);
         Task<string> RunCloneComposeAsync(params string[] composeArguments) =>
-            RunInCloneAsync(CloneComposeUpTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
+            RunWithCloneEnvironmentAsync(CloneComposeCommandTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
 
-        var repoHeadCommit = (await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
+        // A 8081 do OrderAccumulator não sai da rede do compose: o GET /version é feito de dentro do
+        // próprio container, pelo /dev/tcp do bash (a imagem aspnet não tem curl).
+        async Task<string> ReadCloneOrderAccumulatorCommitAsync()
+        {
+            var versionDeadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
+            while (DateTime.UtcNow < versionDeadline)
+            {
+                try
+                {
+                    var accumulatorVersionHttpResponse = await RunCloneComposeAsync("exec", "-T", "orderaccumulator", "bash", "-c",
+                        "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /version HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3");
+                    var versionJsonStart = accumulatorVersionHttpResponse.IndexOf('{');
+                    if (versionJsonStart >= 0)
+                    {
+                        using var accumulatorVersionDocument = JsonDocument.Parse(accumulatorVersionHttpResponse[versionJsonStart..]);
+                        return accumulatorVersionDocument.RootElement.GetProperty("commit").GetString()!;
+                    }
+                }
+                catch (InvalidOperationException) { }
+                await Task.Delay(500);
+            }
+            throw new TimeoutException("o /version do OrderAccumulator do clone não respondeu em 2 minutos");
+        }
+
+        var repoHeadCommit = (await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
         try
         {
-            await RunInCloneAsync(TimeSpan.FromMinutes(2), "git", "clone", "--quiet", "--no-local", repoRoot, cloneDirectory);
-            await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "checkout", "--quiet", repoHeadCommit);
+            await RunWithCloneEnvironmentAsync(TimeSpan.FromMinutes(2), "git", "clone", "--quiet", "--no-local", repoRoot, cloneDirectory);
+            await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "checkout", "--quiet", repoHeadCommit);
 
             await RunCloneComposeAsync("up", "-d", "--wait", "--wait-timeout", "300");
             Assert.Equal(repoHeadCommit, await ReadCloneOrderGeneratorCommitAsync());
+            Assert.Equal(repoHeadCommit, await ReadCloneOrderAccumulatorCommitAsync());
             await RunCloneComposeAsync("down", "-v");
 
-            await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "commit novo do teste");
-            var newCloneCommit = (await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "rev-parse", "HEAD")).Trim();
+            await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "commit novo do teste");
+            var newCloneCommit = (await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "rev-parse", "HEAD")).Trim();
             Assert.NotEqual(repoHeadCommit, newCloneCommit);
 
             await RunCloneComposeAsync("up", "-d", "--wait", "--wait-timeout", "300");
             Assert.Equal(newCloneCommit, await ReadCloneOrderGeneratorCommitAsync());
+            Assert.Equal(newCloneCommit, await ReadCloneOrderAccumulatorCommitAsync());
         }
         finally
         {
