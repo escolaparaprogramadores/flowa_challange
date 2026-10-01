@@ -56,10 +56,10 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
 
     public static int FindFreeFixAcceptorTcpPort()
     {
-        var portProbe = new TcpListener(IPAddress.Loopback, 0);
-        portProbe.Start();
-        var freeFixAcceptorPort = ((IPEndPoint)portProbe.LocalEndpoint).Port;
-        portProbe.Stop();
+        var fixAcceptorPortProbe = new TcpListener(IPAddress.Loopback, 0);
+        fixAcceptorPortProbe.Start();
+        var freeFixAcceptorPort = ((IPEndPoint)fixAcceptorPortProbe.LocalEndpoint).Port;
+        fixAcceptorPortProbe.Stop();
         return freeFixAcceptorPort;
     }
 }
@@ -74,11 +74,11 @@ public sealed class OrderAccumulatorCapturedLogs : ILoggerProvider
 
     private sealed class OrderAccumulatorLogCaptureLogger(string categoryName, ConcurrentQueue<string> capturedOrderAccumulatorLogLines) : ILogger
     {
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public IDisposable? BeginScope<TLogScopeState>(TLogScopeState logScopeState) where TLogScopeState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter) =>
-            capturedOrderAccumulatorLogLines.Enqueue($"{logLevel} {categoryName}: {formatter(state, exception)}");
+        public void Log<TLogEntryState>(LogLevel logLevel, EventId logEventId, TLogEntryState logEntryState, Exception? loggedException,
+            Func<TLogEntryState, Exception?, string> logMessageFormatter) =>
+            capturedOrderAccumulatorLogLines.Enqueue($"{logLevel} {categoryName}: {logMessageFormatter(logEntryState, loggedException)}");
     }
 }
 
@@ -174,8 +174,8 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     {
         if (fixMessage is ExecutionReport receivedExecutionReport)
             executionReports.Writer.TryWrite(receivedExecutionReport);
-        else if (fixMessage is BusinessMessageReject businessReject)
-            businessMessageRejects.Writer.TryWrite(businessReject);
+        else if (fixMessage is BusinessMessageReject receivedBusinessMessageReject)
+            businessMessageRejects.Writer.TryWrite(receivedBusinessMessageReject);
     }
 
     public void OnCreate(SessionID fixSessionId) { }
