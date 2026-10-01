@@ -37,20 +37,26 @@ public sealed class ComposeFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        // Guarda o log FIX dos dois lados para a prova antes de apagar os containers.
-        var fixLogFolder = Environment.GetEnvironmentVariable("FLOWA_IT_LOG_DIR");
-        if (!string.IsNullOrWhiteSpace(fixLogFolder))
+        // Guarda o log FIX dos dois lados para a prova antes de apagar os containers. O down fica no
+        // finally: falhar ao gravar o log não pode deixar o compose de teste de pé.
+        try
         {
-            Directory.CreateDirectory(fixLogFolder);
-            foreach (var serviceName in new[] { "ordergenerator", "orderaccumulator" })
+            var fixLogFolder = Environment.GetEnvironmentVariable("FLOWA_IT_LOG_DIR");
+            if (!string.IsNullOrWhiteSpace(fixLogFolder))
             {
-                var serviceLog = await ReadServiceLogAsync(serviceName);
-                await File.WriteAllTextAsync(Path.Combine(fixLogFolder, $"fix-{serviceName}.log"), serviceLog.Replace('\u0001', '|'));
+                Directory.CreateDirectory(fixLogFolder);
+                foreach (var serviceName in new[] { "ordergenerator", "orderaccumulator" })
+                {
+                    var serviceLog = await ReadServiceLogAsync(serviceName);
+                    await File.WriteAllTextAsync(Path.Combine(fixLogFolder, $"fix-{serviceName}.log"), serviceLog.Replace('\u0001', '|'));
+                }
             }
         }
-
-        await RunComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v", "--remove-orphans");
-        OrderGeneratorHttp.Dispose();
+        finally
+        {
+            await RunComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v", "--remove-orphans");
+            OrderGeneratorHttp.Dispose();
+        }
     }
 
     public Task<string> ReadServiceLogAsync(string serviceName) =>
@@ -72,7 +78,8 @@ public sealed class ComposeFixture : IAsyncLifetime
         {
             if (exposedPort.Value.ValueKind != JsonValueKind.Array) continue;
             foreach (var hostBinding in exposedPort.Value.EnumerateArray())
-                hostPortsByContainerPort[exposedPort.Name] = hostBinding.GetProperty("HostPort").GetString()!;
+                hostPortsByContainerPort[exposedPort.Name] =
+                    $"{hostBinding.GetProperty("HostIp").GetString()}:{hostBinding.GetProperty("HostPort").GetString()}";
         }
 
         return new ServiceContainerState(
@@ -80,6 +87,7 @@ public sealed class ComposeFixture : IAsyncLifetime
             containerState.GetProperty("Status").GetString()!,
             containerState.GetProperty("StartedAt").GetString()!,
             container.GetProperty("Config").GetProperty("User").GetString() ?? "",
+            string.Join(' ', container.GetProperty("Config").GetProperty("Entrypoint").EnumerateArray().Select(entrypointPart => entrypointPart.GetString())),
             hostPortsByContainerPort);
     }
 
@@ -161,6 +169,7 @@ public sealed record ServiceContainerState(
     string Status,
     string StartedAt,
     string RunAsUser,
+    string Entrypoint,
     IReadOnlyDictionary<string, string> HostPortsByContainerPort);
 
 public static class RepoPaths

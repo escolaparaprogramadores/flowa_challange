@@ -1,5 +1,5 @@
 # Sobe tudo com um comando: docker compose up
-# Só a página (OrderGenerator) fica exposta para o navegador; o FIX, a API do
+# Só a página (OrderGenerator) fica exposta, e só nesta máquina (127.0.0.1); o FIX, a API do
 # OrderAccumulator e o banco ficam na rede interna do compose.
 name: flowa
 
@@ -47,7 +47,7 @@ services:
       Fix__AcceptorPort: "9876"
       OrderAccumulator__BaseUrl: http://orderaccumulator:8081
     ports:
-      - "${FLOWA_HTTP_PORT:-8080}:8080"
+      - "127.0.0.1:${FLOWA_HTTP_PORT:-8080}:8080"
     depends_on:
       - orderaccumulator
     restart: unless-stopped

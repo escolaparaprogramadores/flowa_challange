@@ -16,12 +16,12 @@ RUN dotnet restore src/OrderGenerator/OrderGenerator.csproj
 COPY src/Flowa.Shared/ src/Flowa.Shared/
 COPY src/OrderGenerator/ src/OrderGenerator/
 COPY --from=front /repo/src/OrderGenerator/wwwroot/ src/OrderGenerator/wwwroot/
-# Os apps só sobem com o commit gravado no build (rota /version). No clone, o SHA sai do .git;
-# numa worktree, onde .git é só um arquivo, quem chama passa SOURCE_REVISION_ID.
+# Os apps só sobem com o commit gravado no build (rota /version). O build precisa do .git no contexto:
+# num clone o SHA sai dele; numa worktree, onde .git é só um arquivo, quem chama passa SOURCE_REVISION_ID.
 ARG SOURCE_REVISION_ID=
 RUN --mount=type=bind,source=.git,target=/repo/.git \
     sha="${SOURCE_REVISION_ID:-$(git -c safe.directory='*' -C /repo rev-parse HEAD 2>/dev/null)}"; \
-    if [ ${#sha} -ne 40 ]; then echo "Sem o commit: rode dentro de um clone git ou passe SOURCE_REVISION_ID" >&2; exit 1; fi; \
+    if [ ${#sha} -ne 40 ]; then echo "Sem o commit: o .git não deu o SHA (worktree?); passe SOURCE_REVISION_ID=<sha completo>" >&2; exit 1; fi; \
     dotnet publish src/OrderGenerator/OrderGenerator.csproj -c Release -o /app --no-restore \
         -p:SourceRevisionId=$sha -p:EnableSourceControlManagerQueries=false
 

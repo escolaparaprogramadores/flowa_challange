@@ -18,7 +18,8 @@ public sealed class ComposeTests(ComposeFixture compose)
 
         Assert.Equal("running", orderGenerator.Status);
         Assert.Equal("running", orderAccumulator.Status);
-        Assert.NotEqual(orderGenerator.ContainerId, orderAccumulator.ContainerId);
+        Assert.Equal("dotnet OrderGenerator.dll", orderGenerator.Entrypoint);
+        Assert.Equal("dotnet OrderAccumulator.dll", orderAccumulator.Entrypoint);
 
         // O initiator é quem manda o primeiro Logon; o acceptor só responde.
         var generatorFixMessages = FixLog.ParseFixMessages(await compose.ReadServiceLogAsync("ordergenerator"));
@@ -38,7 +39,7 @@ public sealed class ComposeTests(ComposeFixture compose)
 
         // O acceptor FIX só confere SenderCompID/TargetCompID: a 9876 não pode sair da rede do compose.
         Assert.Equal(
-            new Dictionary<string, string> { ["8080/tcp"] = ComposeFixture.OrderGeneratorHostPort.ToString() },
+            new Dictionary<string, string> { ["8080/tcp"] = $"127.0.0.1:{ComposeFixture.OrderGeneratorHostPort}" },
             orderGenerator.HostPortsByContainerPort);
         Assert.Empty(orderAccumulator.HostPortsByContainerPort);
         Assert.Empty(postgres.HostPortsByContainerPort);
@@ -167,7 +168,7 @@ public sealed class ExposureLimitOutsideConfigTests
         Assert.All(packagingFiles, packagingPath => Assert.True(File.Exists(packagingPath), $"{packagingPath} não existe"));
         Assert.Contains(appSettingsFiles, settingsPath => settingsPath.Contains("OrderAccumulator"));
 
-        var exposureLimitPattern = new Regex(@"100[._ ]?000[._ ]?000|1e\+?8", RegexOptions.IgnoreCase);
+        var exposureLimitPattern = new Regex(@"100[.,_ ]?000[.,_ ]?000|\b1(\.0+)?e\+?0*8\b", RegexOptions.IgnoreCase);
         var filesWithLimit = packagingFiles.Concat(appSettingsFiles)
             .Where(configPath => exposureLimitPattern.IsMatch(File.ReadAllText(configPath)))
             .Select(configPath => Path.GetRelativePath(repoRoot, configPath))

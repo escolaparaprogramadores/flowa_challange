@@ -14,7 +14,7 @@ docker compose up
 ```
 
 Isso constrói as imagens, sobe o PostgreSQL, o OrderAccumulator e o OrderGenerator, e a página
-fica em http://localhost:8080. Para parar, `Ctrl+C`; para apagar também os dados do banco,
+fica em http://localhost:8080 (só nesta máquina). Para parar, `Ctrl+C`; para apagar também os dados do banco,
 `docker compose down -v`.
 
 A senha do PostgreSQL vem da variável `POSTGRES_PASSWORD`. Sem ela, o compose usa `flowa_dev`,
