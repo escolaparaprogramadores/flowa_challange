@@ -11,49 +11,49 @@ const COR_DO_STATUS_REJEITADO = 'rgb(255, 164, 151)';
 
 type OrdemDoTeste = { simbolo: string; lado: 'Compra' | 'Venda'; quantidade: string; preco: string };
 
-async function enviarOrdemPelaBoleta(page: Page, ordem: OrdemDoTeste) {
-  await page.getByLabel('Símbolo').selectOption(ordem.simbolo);
-  await page.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: ordem.lado }).click();
-  await page.getByLabel(/^Quantidade de/).fill(ordem.quantidade);
-  await page.getByLabel('Preço por ação (R$)').fill(ordem.preco);
-  const respostaDaCriacaoDaOrdem = page.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
-  await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+async function enviarOrdemPelaBoleta(paginaDaBoleta: Page, ordemDoTeste: OrdemDoTeste) {
+  await paginaDaBoleta.getByLabel('Símbolo').selectOption(ordemDoTeste.simbolo);
+  await paginaDaBoleta.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: ordemDoTeste.lado }).click();
+  await paginaDaBoleta.getByLabel(/^Quantidade de/).fill(ordemDoTeste.quantidade);
+  await paginaDaBoleta.getByLabel('Preço por ação (R$)').fill(ordemDoTeste.preco);
+  const respostaDaCriacaoDaOrdem = paginaDaBoleta.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
+  await paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ }).click();
   await respostaDaCriacaoDaOrdem;
-  await expect(page.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
+  await expect(paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
 }
 
 type ExposicaoNoServidor = { symbol: string; exposure: number; remaining: number };
 
-async function lerExposicaoNoServidor(page: Page, simbolo: string): Promise<ExposicaoNoServidor> {
-  const respostaDasExposicoes = await page.request.get(ROTA_DAS_EXPOSICOES);
+async function lerExposicaoNoServidor(paginaDaBoleta: Page, simboloDaExposicao: string): Promise<ExposicaoNoServidor> {
+  const respostaDasExposicoes = await paginaDaBoleta.request.get(ROTA_DAS_EXPOSICOES);
   expect(respostaDasExposicoes.status()).toBe(200);
   const corpoDasExposicoes = (await respostaDasExposicoes.json()) as { exposures: ExposicaoNoServidor[] };
-  const exposicaoDoSimbolo = corpoDasExposicoes.exposures.find((exposicao) => exposicao.symbol === simbolo);
-  if (!exposicaoDoSimbolo) throw new Error('Símbolo ' + simbolo + ' ausente em /api/exposures');
+  const exposicaoDoSimbolo = corpoDasExposicoes.exposures.find((exposicaoDoSimbolo) => exposicaoDoSimbolo.symbol === simboloDaExposicao);
+  if (!exposicaoDoSimbolo) throw new Error('Símbolo ' + simboloDaExposicao + ' ausente em /api/exposures');
   return exposicaoDoSimbolo;
 }
 
 const formatadorDeReais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-async function conferirPainelDeExposicao(page: Page, simbolo: string, exposicao: number, restanteAteOLimite: number) {
-  const linhaDoSimbolo = page.getByTestId('exposicao-' + simbolo);
-  await expect(linhaDoSimbolo.getByTestId('exposicao-atual')).toHaveText(formatadorDeReais.format(exposicao));
+async function conferirPainelDeExposicao(paginaDaBoleta: Page, simboloDaExposicao: string, exposicaoAtual: number, restanteAteOLimite: number) {
+  const linhaDoSimbolo = paginaDaBoleta.getByTestId('exposicao-' + simboloDaExposicao);
+  await expect(linhaDoSimbolo.getByTestId('exposicao-atual')).toHaveText(formatadorDeReais.format(exposicaoAtual));
   await expect(linhaDoSimbolo.getByTestId('exposicao-restante')).toHaveText(formatadorDeReais.format(restanteAteOLimite));
 }
 
-function celulaDaResposta(page: Page, rotuloDaCelula: string) {
-  return page
+function celulaDaResposta(paginaDaBoleta: Page, rotuloDaCelula: string) {
+  return paginaDaBoleta
     .locator('.resposta-celula')
-    .filter({ has: page.locator('dt', { hasText: new RegExp('^' + rotuloDaCelula + '$') }) })
+    .filter({ has: paginaDaBoleta.locator('dt', { hasText: new RegExp('^' + rotuloDaCelula + '$') }) })
     .locator('dd');
 }
 
-async function conferirDadosDaResposta(page: Page, respostaEsperada: { ativo: string; lado: string; quantidade: string; preco: string }) {
-  await expect(celulaDaResposta(page, 'Ativo')).toHaveText(respostaEsperada.ativo);
-  await expect(celulaDaResposta(page, 'Lado')).toHaveText(respostaEsperada.lado);
-  await expect(celulaDaResposta(page, 'Quantidade')).toHaveText(respostaEsperada.quantidade);
-  await expect(celulaDaResposta(page, 'Preço')).toHaveText(respostaEsperada.preco);
-  await expect(celulaDaResposta(page, 'Identificador do envio')).toHaveText(/^[0-9a-f]{32}$/i);
+async function conferirDadosDaResposta(paginaDaBoleta: Page, respostaEsperada: { ativo: string; lado: string; quantidade: string; preco: string }) {
+  await expect(celulaDaResposta(paginaDaBoleta, 'Ativo')).toHaveText(respostaEsperada.ativo);
+  await expect(celulaDaResposta(paginaDaBoleta, 'Lado')).toHaveText(respostaEsperada.lado);
+  await expect(celulaDaResposta(paginaDaBoleta, 'Quantidade')).toHaveText(respostaEsperada.quantidade);
+  await expect(celulaDaResposta(paginaDaBoleta, 'Preço')).toHaveText(respostaEsperada.preco);
+  await expect(celulaDaResposta(paginaDaBoleta, 'Identificador do envio')).toHaveText(/^[0-9a-f]{32}$/i);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -76,9 +76,9 @@ test('CA-14: venda válida é enviada e a tela mostra a resposta aceita', async 
 });
 
 test('CA-17: o painel mostra os três ativos e muda depois de uma ordem aceita', async ({ page }) => {
-  for (const simbolo of ['PETR4', 'VALE3', 'VIIA4']) {
-    const exposicaoAtual = await lerExposicaoNoServidor(page, simbolo);
-    await conferirPainelDeExposicao(page, simbolo, exposicaoAtual.exposure, exposicaoAtual.remaining);
+  for (const simboloDaOrdem of ['PETR4', 'VALE3', 'VIIA4']) {
+    const exposicaoAtual = await lerExposicaoNoServidor(page, simboloDaOrdem);
+    await conferirPainelDeExposicao(page, simboloDaOrdem, exposicaoAtual.exposure, exposicaoAtual.remaining);
   }
   const exposicaoAntes = await lerExposicaoNoServidor(page, 'PETR4');
   await enviarOrdemPelaBoleta(page, { simbolo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: '10,00' });
@@ -95,7 +95,7 @@ test('CA-16 e CA-17: ordem que estoura o limite aparece rejeitada com o motivo e
     if (new URL(requisicaoDaPagina.url()).pathname === ROTA_DAS_EXPOSICOES) leiturasDaExposicao.push(requisicaoDaPagina.url());
   });
   let houveRejeicao = false;
-  for (let tentativa = 0; tentativa < 6 && !houveRejeicao; tentativa++) {
+  for (let tentativaDeLeitura = 0; tentativaDeLeitura < 6 && !houveRejeicao; tentativaDeLeitura++) {
     const exposicaoAntes = await lerExposicaoNoServidor(page, 'VIIA4');
     const leiturasAntesDoEnvio = leiturasDaExposicao.length;
     await enviarOrdemPelaBoleta(page, { simbolo: 'VIIA4', lado: 'Compra', quantidade: '99.999', preco: '999,99' });
@@ -182,9 +182,9 @@ test('RNF-02: cada número da tela usa algarismos tabulares', async ({ page }) =
     celulaDaResposta(page, 'Preço'),
     celulaDaResposta(page, 'Número da ordem'),
     celulaDaResposta(page, 'Identificador do envio'),
-    ...['PETR4', 'VALE3', 'VIIA4'].flatMap((simbolo) => [
-      page.getByTestId('exposicao-' + simbolo).getByTestId('exposicao-atual'),
-      page.getByTestId('exposicao-' + simbolo).getByTestId('exposicao-restante'),
+    ...['PETR4', 'VALE3', 'VIIA4'].flatMap((simboloDoPainel) => [
+      page.getByTestId('exposicao-' + simboloDoPainel).getByTestId('exposicao-atual'),
+      page.getByTestId('exposicao-' + simboloDoPainel).getByTestId('exposicao-restante'),
     ]),
   ];
   for (const numeroDaTela of numerosDaTela) {

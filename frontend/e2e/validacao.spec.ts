@@ -3,9 +3,9 @@ import { ROTA_DE_CRIACAO_DE_ORDEM } from '../src/ordensService';
 
 // Conta toda requisição de criação de ordem que sair da página, para provar
 // que os casos inválidos são barrados antes de chegar ao servidor (CA-15).
-function contarEnviosDeOrdem(page: Page) {
+function contarEnviosDeOrdem(paginaDaBoleta: Page) {
   const enviosDeOrdem: string[] = [];
-  page.on('request', (requisicaoDaPagina) => {
+  paginaDaBoleta.on('request', (requisicaoDaPagina) => {
     if (requisicaoDaPagina.method() === 'POST' && new URL(requisicaoDaPagina.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM) {
       enviosDeOrdem.push(requisicaoDaPagina.url());
     }
@@ -13,13 +13,13 @@ function contarEnviosDeOrdem(page: Page) {
   return enviosDeOrdem;
 }
 
-async function preencherBoleta(page: Page, quantidadeDigitada: string, precoDigitado: string) {
-  await page.getByLabel(/^Quantidade de/).fill(quantidadeDigitada);
-  await page.getByLabel('Preço por ação (R$)').fill(precoDigitado);
+async function preencherBoleta(paginaDaBoleta: Page, quantidadeDigitada: string, precoDigitado: string) {
+  await paginaDaBoleta.getByLabel(/^Quantidade de/).fill(quantidadeDigitada);
+  await paginaDaBoleta.getByLabel('Preço por ação (R$)').fill(precoDigitado);
 }
 
-function boletaDaPagina(page: Page) {
-  return page.getByRole('form', { name: 'Boleta de ordem' });
+function boletaDaPagina(paginaDaBoleta: Page) {
+  return paginaDaBoleta.getByRole('form', { name: 'Boleta de ordem' });
 }
 
 test.beforeEach(async ({ page }) => {
@@ -47,10 +47,10 @@ const quantidadesRecusadas: Array<[string, string]> = [
   ['100.000', 'A quantidade deve ser menor que 100.000.'],
 ];
 
-for (const [quantidade, mensagemEsperada] of quantidadesRecusadas) {
-  test(`CA-3/CA-15: quantidade "${quantidade}" é recusada na tela, sem envio`, async ({ page }) => {
+for (const [quantidadeRecusada, mensagemEsperada] of quantidadesRecusadas) {
+  test(`CA-3/CA-15: quantidade "${quantidadeRecusada}" é recusada na tela, sem envio`, async ({ page }) => {
     const enviosDeOrdem = contarEnviosDeOrdem(page);
-    await preencherBoleta(page, quantidade, '10,00');
+    await preencherBoleta(page, quantidadeRecusada, '10,00');
     await page.getByRole('button', { name: /^Enviar ordem/ }).click();
     const alertaDaBoleta = boletaDaPagina(page).getByRole('alert');
     await expect(alertaDaBoleta).toHaveCount(1);
@@ -70,10 +70,10 @@ const precosRecusados: Array<[string, string]> = [
   ['abc', 'O preço deve ser um número.'],
 ];
 
-for (const [preco, mensagemEsperada] of precosRecusados) {
-  test(`CA-4/CA-15: preço "${preco}" é recusado na tela, sem envio`, async ({ page }) => {
+for (const [precoRecusado, mensagemEsperada] of precosRecusados) {
+  test(`CA-4/CA-15: preço "${precoRecusado}" é recusado na tela, sem envio`, async ({ page }) => {
     const enviosDeOrdem = contarEnviosDeOrdem(page);
-    await preencherBoleta(page, '10', preco);
+    await preencherBoleta(page, '10', precoRecusado);
     await page.getByRole('button', { name: /^Enviar ordem/ }).click();
     const alertaDaBoleta = boletaDaPagina(page).getByRole('alert');
     await expect(alertaDaBoleta).toHaveCount(1);
@@ -94,11 +94,11 @@ test('RF-14: quantidade e preço vazios são recusados na tela, cada um com sua 
 });
 
 test('CA-3/CA-4: limites válidos (1 e 99.999; 0,01 e 999,99) viram valor aceito no total estimado', async ({ page }) => {
-  for (const [quantidade, preco, totalEsperado] of [
+  for (const [quantidadeValida, precoValido, totalEsperado] of [
     ['1', '0,01', 'R$ 0,01'],
     ['99.999', '999,99', 'R$ 99.998.000,01'],
   ]) {
-    await preencherBoleta(page, quantidade, preco);
+    await preencherBoleta(page, quantidadeValida, precoValido);
     await expect(page.getByTestId('total-estimado')).toHaveText(totalEsperado);
   }
 });

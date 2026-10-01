@@ -35,10 +35,10 @@ export function PaginaDaBoletaEExposicao() {
     void atualizarExposicoes();
   }, [atualizarExposicoes]);
 
-  async function aoEnviarOrdem(ordem: OrdemParaEnviar) {
+  async function aoEnviarOrdem(ordemParaEnviar: OrdemParaEnviar) {
     setEnviandoOrdem(true);
     try {
-      setRespostaDaUltimaOrdem(await enviarOrdem(ordem));
+      setRespostaDaUltimaOrdem(await enviarOrdem(ordemParaEnviar));
     } finally {
       setEnviandoOrdem(false);
     }

@@ -45,7 +45,7 @@ type CorpoDasExposicoes = { exposures?: Array<{ symbol: string; exposure: number
 
 // O prazo vale até o corpo terminar de chegar: um servidor que manda os cabeçalhos e trava
 // no corpo também é abandonado. Corpo vazio, HTML ou cortado vira "sem corpo".
-async function chamarApiComPrazo<CorpoEsperado>(rotaDaApi: string, opcoesDaRequisicao: RequestInit = {}) {
+async function chamarApiDoOrderGeneratorComPrazo<CorpoEsperado>(rotaDaApi: string, opcoesDaRequisicao: RequestInit = {}) {
   const cancelamentoPorPrazo = new AbortController();
   const temporizadorDoPrazo = setTimeout(() => cancelamentoPorPrazo.abort(), PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS);
   try {
@@ -57,17 +57,17 @@ async function chamarApiComPrazo<CorpoEsperado>(rotaDaApi: string, opcoesDaRequi
   }
 }
 
-export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrdem> {
-  let respostaDaCriacaoDaOrdem: Awaited<ReturnType<typeof chamarApiComPrazo<CorpoDaRespostaDaOrdem>>>;
+export async function enviarOrdem(ordemParaEnviar: OrdemParaEnviar): Promise<RespostaDaOrdem> {
+  let respostaDaCriacaoDaOrdem: Awaited<ReturnType<typeof chamarApiDoOrderGeneratorComPrazo<CorpoDaRespostaDaOrdem>>>;
   try {
-    respostaDaCriacaoDaOrdem = await chamarApiComPrazo<CorpoDaRespostaDaOrdem>(ROTA_DE_CRIACAO_DE_ORDEM, {
+    respostaDaCriacaoDaOrdem = await chamarApiDoOrderGeneratorComPrazo<CorpoDaRespostaDaOrdem>(ROTA_DE_CRIACAO_DE_ORDEM, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        symbol: ordem.simbolo,
-        side: ordem.lado === 'Compra' ? 'buy' : 'sell',
-        quantity: ordem.quantidade,
-        price: ordem.precoEmCentavos / 100,
+        symbol: ordemParaEnviar.simbolo,
+        side: ordemParaEnviar.lado === 'Compra' ? 'buy' : 'sell',
+        quantity: ordemParaEnviar.quantidade,
+        price: ordemParaEnviar.precoEmCentavos / 100,
       }),
     });
   } catch {
@@ -81,10 +81,10 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
       mensagemDoServidor: corpoDaResposta.message ?? '',
       clOrdId: corpoDaResposta.clOrdId ?? '',
       orderId: corpoDaResposta.orderId ?? '',
-      simbolo: corpoDaResposta.symbol ?? ordem.simbolo,
+      simbolo: corpoDaResposta.symbol ?? ordemParaEnviar.simbolo,
       lado: corpoDaResposta.side === 'sell' ? 'Venda' : 'Compra',
-      quantidade: corpoDaResposta.quantity ?? ordem.quantidade,
-      precoEmReais: corpoDaResposta.price ?? ordem.precoEmCentavos / 100,
+      quantidade: corpoDaResposta.quantity ?? ordemParaEnviar.quantidade,
+      precoEmReais: corpoDaResposta.price ?? ordemParaEnviar.precoEmCentavos / 100,
     };
   }
   if (respostaHttp.status === 400 && corpoDaResposta?.status === 'validation_error') {
@@ -103,7 +103,7 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
 }
 
 export async function lerExposicoes(): Promise<ExposicaoDoSimbolo[]> {
-  const { respostaHttp, corpoDaResposta } = await chamarApiComPrazo<CorpoDasExposicoes>(ROTA_DAS_EXPOSICOES).catch(() => {
+  const { respostaHttp, corpoDaResposta } = await chamarApiDoOrderGeneratorComPrazo<CorpoDasExposicoes>(ROTA_DAS_EXPOSICOES).catch(() => {
     throw new Error(MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
   });
   if (!respostaHttp.ok || !corpoDaResposta?.exposures) {

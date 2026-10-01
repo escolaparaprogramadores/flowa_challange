@@ -19,7 +19,7 @@ function motivoDoValorCruNoCss(propriedadeDaDeclaracao, valorDaDeclaracao) {
   const valorDaDeclaracaoSemTokens = removerTokensCssDoValorDaDeclaracao(valorDaDeclaracao);
   if (/#[0-9a-f]{3,8}\b|\b(rgb|hsl|hwb|lab|lch|oklab|oklch)a?\(/i.test(valorDaDeclaracaoSemTokens)) return 'cor escrita direto';
   if (PROPRIEDADES_DE_COR.test(propriedadeDaDeclaracao)) {
-    const palavraDeCor = (valorDaDeclaracaoSemTokens.match(/[a-z]+/gi) ?? []).find((palavra) => !PALAVRAS_SEM_COR.has(palavra.toLowerCase()) && !/^(px|em|rem|s|ms|deg)$/i.test(palavra));
+    const palavraDeCor = (valorDaDeclaracaoSemTokens.match(/[a-z]+/gi) ?? []).find((palavraDoValor) => !PALAVRAS_SEM_COR.has(palavraDoValor.toLowerCase()) && !/^(px|em|rem|s|ms|deg)$/i.test(palavraDoValor));
     if (palavraDeCor) return `cor por nome (${palavraDeCor})`;
   }
   if ((propriedadeDaDeclaracao === 'font-family' || propriedadeDaDeclaracao === 'font') && valorDaDeclaracaoSemTokens !== '' && valorDaDeclaracaoSemTokens !== 'inherit') return 'fonte escrita direto';
@@ -31,19 +31,19 @@ function motivoDoValorCruNoCss(propriedadeDaDeclaracao, valorDaDeclaracao) {
 function acharValoresCrus(nomeDoArquivo, conteudoDoArquivo) {
   const achadosDeValoresCrusDaTela = [];
   if (/\.tsx?$/.test(nomeDoArquivo)) {
-    conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indice) => {
-      if (JSX_COM_VALOR_CRU.test(linhaDoArquivo)) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indice + 1}: estilo com cor, fonte, raio, espaço ou letra no componente`);
-      if (/#[0-9a-f]{3,8}\b|\brgba?\(/i.test(linhaDoArquivo)) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indice + 1}: cor escrita direto no componente`);
+    conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indiceDaLinha) => {
+      if (JSX_COM_VALOR_CRU.test(linhaDoArquivo)) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indiceDaLinha + 1}: estilo com cor, fonte, raio, espaço ou letra no componente`);
+      if (/#[0-9a-f]{3,8}\b|\brgba?\(/i.test(linhaDoArquivo)) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indiceDaLinha + 1}: cor escrita direto no componente`);
     });
     return achadosDeValoresCrusDaTela;
   }
   let dentroDoRoot = false;
-  conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indice) => {
+  conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indiceDaLinha) => {
     if (/^:root\s*\{/.test(linhaDoArquivo)) dentroDoRoot = true;
     for (const [, propriedadeDaDeclaracao, valorDaDeclaracao] of linhaDoArquivo.matchAll(/([a-z-]+)\s*:\s*([^;{}]+)/gi)) {
       if (dentroDoRoot && propriedadeDaDeclaracao.startsWith('--')) continue;
       const motivoDoValorCruNaDeclaracaoCss = motivoDoValorCruNoCss(propriedadeDaDeclaracao.toLowerCase(), valorDaDeclaracao);
-      if (motivoDoValorCruNaDeclaracaoCss) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indice + 1}: ${motivoDoValorCruNaDeclaracaoCss}: ${linhaDoArquivo.trim()}`);
+      if (motivoDoValorCruNaDeclaracaoCss) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indiceDaLinha + 1}: ${motivoDoValorCruNaDeclaracaoCss}: ${linhaDoArquivo.trim()}`);
     }
     if (dentroDoRoot && /^\}/.test(linhaDoArquivo)) dentroDoRoot = false;
   });
@@ -93,8 +93,8 @@ function listarArquivosDaTela(pastaComArquivosDaTela) {
 }
 
 const achadosNaTela = listarArquivosDaTela(PASTA_DA_TELA)
-  .filter((arquivo) => /\.(tsx?|css)$/.test(arquivo) && !/\.test\.tsx?$/.test(arquivo))
-  .flatMap((arquivo) => acharValoresCrus(arquivo, readFileSync(arquivo, 'utf8')));
+  .filter((caminhoDoArquivoDaTela) => /\.(tsx?|css)$/.test(caminhoDoArquivoDaTela) && !/\.test\.tsx?$/.test(caminhoDoArquivoDaTela))
+  .flatMap((caminhoDoArquivoDaTela) => acharValoresCrus(caminhoDoArquivoDaTela, readFileSync(caminhoDoArquivoDaTela, 'utf8')));
 
 if (achadosNaTela.length > 0) {
   console.error(`Valores crus fora do :root do tema (${achadosNaTela.length}):\n${achadosNaTela.join('\n')}`);

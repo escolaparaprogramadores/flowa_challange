@@ -13,14 +13,14 @@ import type { OrdemParaEnviar } from './ordensService';
 
 type PropsDaBoleta = {
   enviandoOrdem: boolean;
-  aoEnviarOrdem: (ordem: OrdemParaEnviar) => void;
+  aoEnviarOrdem: (ordemParaEnviar: OrdemParaEnviar) => void;
 };
 
 type ErrosDaBoleta = { erroDaQuantidade?: string; erroDoPreco?: string };
 
 export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
-  const [simbolo, setSimbolo] = useState<SimboloDaBoleta>('PETR4');
-  const [lado, setLado] = useState<LadoDaOrdem>('Compra');
+  const [simboloDaOrdem, setSimboloDaOrdem] = useState<SimboloDaBoleta>('PETR4');
+  const [ladoDaOrdem, setLadoDaOrdem] = useState<LadoDaOrdem>('Compra');
   const [quantidadeDigitada, setQuantidadeDigitada] = useState('100');
   const [precoDigitado, setPrecoDigitado] = useState('');
   const [errosDaBoleta, setErrosDaBoleta] = useState<ErrosDaBoleta>({});
@@ -48,10 +48,10 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
       erroDoPreco: validacaoDoPreco.mensagemDeErro,
     });
     if (quantidadeAceita === undefined || precoAceitoEmCentavos === undefined || enviandoOrdem) return;
-    aoEnviarOrdem({ simbolo, lado, quantidade: quantidadeAceita, precoEmCentavos: precoAceitoEmCentavos });
+    aoEnviarOrdem({ simbolo: simboloDaOrdem, lado: ladoDaOrdem, quantidade: quantidadeAceita, precoEmCentavos: precoAceitoEmCentavos });
   }
 
-  const classeCssDoLado = lado === 'Compra' ? 'compra' : 'venda';
+  const classeCssDoLado = ladoDaOrdem === 'Compra' ? 'compra' : 'venda';
   const { erroDaQuantidade, erroDoPreco } = errosDaBoleta;
 
   return (
@@ -60,10 +60,10 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
 
       <fieldset className="alternador">
         <legend className="sr">Lado da ordem</legend>
-        <button type="button" className="alternador-opcao compra" aria-pressed={lado === 'Compra'} onClick={() => setLado('Compra')}>
+        <button type="button" className="alternador-opcao compra" aria-pressed={ladoDaOrdem === 'Compra'} onClick={() => setLadoDaOrdem('Compra')}>
           Compra
         </button>
-        <button type="button" className="alternador-opcao venda" aria-pressed={lado === 'Venda'} onClick={() => setLado('Venda')}>
+        <button type="button" className="alternador-opcao venda" aria-pressed={ladoDaOrdem === 'Venda'} onClick={() => setLadoDaOrdem('Venda')}>
           Venda
         </button>
       </fieldset>
@@ -73,8 +73,8 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
         <select
           id="simbolo"
           className="seletor"
-          value={simbolo}
-          onChange={(eventoDoSeletor) => setSimbolo(eventoDoSeletor.target.value as SimboloDaBoleta)}
+          value={simboloDaOrdem}
+          onChange={(eventoDoSeletor) => setSimboloDaOrdem(eventoDoSeletor.target.value as SimboloDaBoleta)}
         >
           {SIMBOLOS_DA_BOLETA.map((simboloDisponivel) => (
             <option key={simboloDisponivel} value={simboloDisponivel}>{simboloDisponivel}</option>
@@ -83,7 +83,7 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
       </div>
 
       <div className="campo">
-        <label className="campo-rotulo" htmlFor="quantidade">Quantidade de {simbolo}</label>
+        <label className="campo-rotulo" htmlFor="quantidade">Quantidade de {simboloDaOrdem}</label>
         <div className={erroDaQuantidade ? 'quantidade invalida' : 'quantidade'}>
           <button type="button" onClick={() => ajustarQuantidadeEm(-1)} aria-label="Diminuir quantidade">−</button>
           <input
@@ -137,7 +137,7 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
       </dl>
 
       <button type="submit" className={`botao-enviar ${classeCssDoLado}`} disabled={enviandoOrdem}>
-        {enviandoOrdem ? 'Enviando…' : lado === 'Compra' ? 'Enviar ordem de compra' : 'Enviar ordem de venda'}
+        {enviandoOrdem ? 'Enviando…' : ladoDaOrdem === 'Compra' ? 'Enviar ordem de compra' : 'Enviar ordem de venda'}
       </button>
       <p className="nota">Ordem de demonstração: nenhuma operação real é feita.</p>
     </form>

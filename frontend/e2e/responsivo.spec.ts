@@ -17,40 +17,40 @@ const COR_DO_TEXTO_APAGADO = 'rgb(157, 176, 174)';
 // Razão de contraste da WCAG 2 entre duas cores "rgb(r, g, b)" (luminância relativa).
 function calcularContrasteWcag(corDoTexto: string, corDoFundo: string) {
   const luminanciaDaCor = (corRgb: string) => {
-    const [vermelho, verde, azul] = (corRgb.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number).map((canalDe0a255) => {
+    const [canalVermelho, canalVerde, canalAzul] = (corRgb.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number).map((canalDe0a255) => {
       const canalDe0a1 = canalDe0a255 / 255;
       return canalDe0a1 <= 0.03928 ? canalDe0a1 / 12.92 : ((canalDe0a1 + 0.055) / 1.055) ** 2.4;
     });
-    return 0.2126 * vermelho + 0.7152 * verde + 0.0722 * azul;
+    return 0.2126 * canalVermelho + 0.7152 * canalVerde + 0.0722 * canalAzul;
   };
   const [luminanciaMaior, luminanciaMenor] = [luminanciaDaCor(corDoTexto), luminanciaDaCor(corDoFundo)].sort((luminanciaDaPrimeira, luminanciaDaSegunda) => luminanciaDaSegunda - luminanciaDaPrimeira);
   return (luminanciaMaior + 0.05) / (luminanciaMenor + 0.05);
 }
 
-async function contarColunasDaGrade(page: Page) {
-  return page.locator('.grade').evaluate((grade) => getComputedStyle(grade).gridTemplateColumns.split(' ').length);
+async function contarColunasDaGrade(paginaDaBoleta: Page) {
+  return paginaDaBoleta.locator('.grade').evaluate((gradeDaPagina) => getComputedStyle(gradeDaPagina).gridTemplateColumns.split(' ').length);
 }
 
-function controlesDaBoleta(page: Page): Array<[string, Locator]> {
+function controlesDaBoleta(paginaDaBoleta: Page): Array<[string, Locator]> {
   return [
-    ['Compra', page.getByRole('button', { name: 'Compra', exact: true })],
-    ['Venda', page.getByRole('button', { name: 'Venda', exact: true })],
-    ['Símbolo', page.getByLabel('Símbolo')],
-    ['Diminuir quantidade', page.getByRole('button', { name: 'Diminuir quantidade' })],
-    ['Quantidade', page.getByLabel(/^Quantidade de/)],
-    ['Aumentar quantidade', page.getByRole('button', { name: 'Aumentar quantidade' })],
-    ['Preço', page.getByLabel('Preço por ação (R$)')],
-    ['Enviar', page.getByRole('button', { name: /^Enviar ordem/ })],
+    ['Compra', paginaDaBoleta.getByRole('button', { name: 'Compra', exact: true })],
+    ['Venda', paginaDaBoleta.getByRole('button', { name: 'Venda', exact: true })],
+    ['Símbolo', paginaDaBoleta.getByLabel('Símbolo')],
+    ['Diminuir quantidade', paginaDaBoleta.getByRole('button', { name: 'Diminuir quantidade' })],
+    ['Quantidade', paginaDaBoleta.getByLabel(/^Quantidade de/)],
+    ['Aumentar quantidade', paginaDaBoleta.getByRole('button', { name: 'Aumentar quantidade' })],
+    ['Preço', paginaDaBoleta.getByLabel('Preço por ação (R$)')],
+    ['Enviar', paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ })],
   ];
 }
 
-for (const { largura, colunasEsperadas } of LARGURAS_DO_TEMA) {
-  test(`RNF-03: em ${largura} px a página não rola para o lado e a grade tem ${colunasEsperadas} coluna(s)`, async ({ page }) => {
-    await page.setViewportSize({ width: largura, height: 900 });
+for (const { largura: larguraDaJanela, colunasEsperadas } of LARGURAS_DO_TEMA) {
+  test(`RNF-03: em ${larguraDaJanela} px a página não rola para o lado e a grade tem ${colunasEsperadas} coluna(s)`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Boleta de ordens' })).toBeVisible();
     const larguraDoConteudo = await page.evaluate(() => document.documentElement.scrollWidth);
-    expect(larguraDoConteudo).toBe(largura);
+    expect(larguraDoConteudo).toBe(larguraDaJanela);
     expect(await contarColunasDaGrade(page)).toBe(colunasEsperadas);
   });
 }
@@ -77,13 +77,13 @@ test('ASSUMI-05: no celular a boleta vem primeiro, depois a resposta e por últi
   expect(topoDaResposta).toBeLessThan(topoDaExposicao);
 });
 
-for (const largura of LARGURAS_DO_CA_23) {
-  test(`RNF-05: em ${largura} px cada controle da boleta tem área de toque de pelo menos 44 px`, async ({ page }) => {
-    await page.setViewportSize({ width: largura, height: 900 });
+for (const larguraDaJanela of LARGURAS_DO_CA_23) {
+  test(`RNF-05: em ${larguraDaJanela} px cada controle da boleta tem área de toque de pelo menos 44 px`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
     await page.goto('/');
-    for (const [nomeDoControle, controle] of controlesDaBoleta(page)) {
-      await expect(controle, nomeDoControle).toHaveCount(1);
-      const caixaDoControle = (await controle.boundingBox())!;
+    for (const [nomeDoControle, controleDaBoleta] of controlesDaBoleta(page)) {
+      await expect(controleDaBoleta, nomeDoControle).toHaveCount(1);
+      const caixaDoControle = (await controleDaBoleta.boundingBox())!;
       expect(caixaDoControle.height, `${nomeDoControle}: altura`).toBeGreaterThanOrEqual(44);
       expect(caixaDoControle.width, `${nomeDoControle}: largura`).toBeGreaterThanOrEqual(44);
     }
@@ -92,13 +92,13 @@ for (const largura of LARGURAS_DO_CA_23) {
 
 test('RNF-05: o foco pelo teclado é visível em cada controle da boleta, na cor do acento', async ({ page }) => {
   await page.goto('/');
-  for (const [nomeDoControle, controle] of controlesDaBoleta(page)) {
-    await controle.focus();
+  for (const [nomeDoControle, controleDaBoleta] of controlesDaBoleta(page)) {
+    await controleDaBoleta.focus();
     // A borda muda com transição de 180 ms; espera a cor assentar em vez de ler no meio do caminho.
     await expect
       .poll(
         () =>
-          controle.evaluate((controleNaPagina) => {
+          controleDaBoleta.evaluate((controleNaPagina) => {
             const estiloDoControle = getComputedStyle(controleNaPagina);
             const molduraDaQuantidade = controleNaPagina.closest('.quantidade');
             const corDoContornoDeFoco = estiloDoControle.outlineStyle === 'solid' ? estiloDoControle.outlineColor : '';
@@ -127,19 +127,19 @@ test('RNF-01: a página declara o esquema escuro, para seleção, rolagem e cont
   expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe('dark');
 });
 
-for (const largura of [390, 1024, 1179, 1280]) {
-  test(`RNF-03: em ${largura} px os rótulos do painel de exposição cabem numa linha`, async ({ page }) => {
-    await page.setViewportSize({ width: largura, height: 900 });
+for (const larguraDaJanela of [390, 1024, 1179, 1280]) {
+  test(`RNF-03: em ${larguraDaJanela} px os rótulos do painel de exposição cabem numa linha`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
     await page.goto('/');
-    for (const simbolo of ['PETR4', 'VALE3', 'VIIA4']) {
+    for (const simboloDaExposicao of ['PETR4', 'VALE3', 'VIIA4']) {
       for (const rotuloDaExposicao of ['Exposição atual', 'Falta até o limite']) {
-        const rotuloDoSimbolo = page.getByTestId('exposicao-' + simbolo).locator('dt', { hasText: rotuloDaExposicao });
+        const rotuloDoSimbolo = page.getByTestId('exposicao-' + simboloDaExposicao).locator('dt', { hasText: rotuloDaExposicao });
         await expect(rotuloDoSimbolo).toHaveCount(1);
         // Uma linha mede menos que duas vezes o tamanho da letra; quebrado em duas, passa disso.
         const cabeEmUmaLinha = await rotuloDoSimbolo.evaluate(
           (rotuloNaPagina) => rotuloNaPagina.getBoundingClientRect().height < parseFloat(getComputedStyle(rotuloNaPagina).fontSize) * 2,
         );
-        expect(cabeEmUmaLinha, `${simbolo} / ${rotuloDaExposicao}`).toBe(true);
+        expect(cabeEmUmaLinha, `${simboloDaExposicao} / ${rotuloDaExposicao}`).toBe(true);
       }
     }
   });
@@ -150,8 +150,8 @@ test('RNF-02: as fontes Sora e Manrope do tema carregam e os números usam algar
   const fontesCarregadas = await page.evaluate(async () => {
     await document.fonts.ready;
     return [...document.fonts]
-      .filter((fonte) => fonte.status === 'loaded')
-      .map((fonte) => `${fonte.family.replaceAll('"', '')} ${fonte.weight}`);
+      .filter((fonteCarregada) => fonteCarregada.status === 'loaded')
+      .map((fonteCarregada) => `${fonteCarregada.family.replaceAll('"', '')} ${fonteCarregada.weight}`);
   });
   expect(fontesCarregadas).toContain('Sora 600');
   expect(fontesCarregadas).toContain('Manrope 400');
