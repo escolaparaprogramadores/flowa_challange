@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Hosting;
 using QuickFix;
 using QuickFix.Fields;
 using QuickFix.Logger;
@@ -178,6 +179,9 @@ public static class OrderGeneratorTestHost
     public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixAcceptorPort, string accumulatorBaseUrl = "http://127.0.0.1:1", string? orderGeneratorWebRoot = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(orderGeneratorWebHostBuilder =>
         {
+            // Em Development o ASP.NET põe o wwwroot do projeto (static web assets) na frente da raiz do teste;
+            // com o build da tela presente, o index.html real venceria. Production é como o app roda de verdade.
+            orderGeneratorWebHostBuilder.UseEnvironment(Environments.Production);
             orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
             orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorPort", fixAcceptorPort.ToString());
             orderGeneratorWebHostBuilder.UseSetting("OrderAccumulator:BaseUrl", accumulatorBaseUrl);

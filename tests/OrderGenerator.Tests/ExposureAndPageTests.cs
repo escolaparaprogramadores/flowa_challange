@@ -151,6 +151,9 @@ public sealed class OrderGeneratorPageTests : IDisposable
 
         var pageResponse = await orderGeneratorClient.GetAsync(pagePath);
 
+        // A página tem de sair da raiz do teste mesmo quando o build da tela existe em src/OrderGenerator/wwwroot.
+        var orderGeneratorHostEnvironment = orderGeneratorFactory.Services.GetRequiredService<IWebHostEnvironment>();
+        Assert.Equal(Path.TrimEndingDirectorySeparator(_temporaryWebRoot), Path.TrimEndingDirectorySeparator(orderGeneratorHostEnvironment.WebRootPath));
         Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
         Assert.Equal("text/html", pageResponse.Content.Headers.ContentType?.MediaType);
         Assert.Equal(BoletaTestIndexHtml, await pageResponse.Content.ReadAsStringAsync());
