@@ -35,10 +35,10 @@ async function lerExposicaoNoServidor(page: Page, simbolo: string): Promise<Expo
 
 const formatadorDeReais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-async function conferirPainelDeExposicao(page: Page, simbolo: string, exposicao: number, restante: number) {
+async function conferirPainelDeExposicao(page: Page, simbolo: string, exposicao: number, restanteAteOLimite: number) {
   const linhaDoSimbolo = page.getByTestId('exposicao-' + simbolo);
   await expect(linhaDoSimbolo.getByTestId('exposicao-atual')).toHaveText(formatadorDeReais.format(exposicao));
-  await expect(linhaDoSimbolo.getByTestId('exposicao-restante')).toHaveText(formatadorDeReais.format(restante));
+  await expect(linhaDoSimbolo.getByTestId('exposicao-restante')).toHaveText(formatadorDeReais.format(restanteAteOLimite));
 }
 
 function celulaDaResposta(page: Page, rotuloDaCelula: string) {

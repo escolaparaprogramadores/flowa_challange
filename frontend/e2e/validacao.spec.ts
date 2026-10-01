@@ -13,9 +13,9 @@ function contarEnviosDeOrdem(page: Page) {
   return enviosDeOrdem;
 }
 
-async function preencherBoleta(page: Page, quantidade: string, preco: string) {
-  await page.getByLabel(/^Quantidade de/).fill(quantidade);
-  await page.getByLabel('Preço por ação (R$)').fill(preco);
+async function preencherBoleta(page: Page, quantidadeDigitada: string, precoDigitado: string) {
+  await page.getByLabel(/^Quantidade de/).fill(quantidadeDigitada);
+  await page.getByLabel('Preço por ação (R$)').fill(precoDigitado);
 }
 
 function boletaDaPagina(page: Page) {

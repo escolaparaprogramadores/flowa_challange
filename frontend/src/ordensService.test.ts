@@ -3,8 +3,8 @@ import { PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS, enviarOrdem, lerExposicoes, type 
 
 const ordemDeCompra: OrdemParaEnviar = { simbolo: 'PETR4', lado: 'Compra', quantidade: 100, precoEmCentavos: 1_050 };
 
-function responderComJson(status: number, corpoDaResposta: unknown) {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(corpoDaResposta), { status })));
+function responderComJson(statusHttpDaResposta: number, corpoDaResposta: unknown) {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(corpoDaResposta), { status: statusHttpDaResposta })));
 }
 
 afterEach(() => {
@@ -71,7 +71,7 @@ describe('enviarOrdem', () => {
   it('RF-23: servidor que não responde é esperado até 6 s, e não menos, e vira falha de comunicação', async () => {
     vi.useFakeTimers();
     const fetchQueNuncaResponde = (...[, opcoesDaChamada]: [string, RequestInit]) =>
-      new Promise<Response>((...[, recusarChamada]: [unknown, (motivo: unknown) => void]) => {
+      new Promise<Response>((...[, recusarChamada]: [unknown, (motivoDaRecusa: unknown) => void]) => {
         opcoesDaChamada.signal?.addEventListener('abort', () => recusarChamada(new DOMException('abortada', 'AbortError')));
       });
     vi.stubGlobal('fetch', vi.fn(fetchQueNuncaResponde));
