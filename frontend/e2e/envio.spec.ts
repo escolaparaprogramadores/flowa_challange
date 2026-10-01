@@ -105,3 +105,33 @@ test('CA-16 e CA-17: ordem que estoura o limite aparece rejeitada com o motivo e
   }
   expect(houveRejeicao).toBe(true);
 });
+
+test('RF-24: enquanto a ordem viaja, o envio fica desabilitado e mostra "Enviando…"', async ({ page }) => {
+  // Segura a requisição real por um instante, sem trocar a resposta do servidor.
+  await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, async (requisicaoSegurada) => {
+    await new Promise((liberar) => setTimeout(liberar, 800));
+    await requisicaoSegurada.continue();
+  });
+  await page.getByLabel(/^Quantidade de/).fill('10');
+  await page.getByLabel('Preço por ação (R$)').fill('10,00');
+  await page.getByRole('button', { name: 'Enviar ordem de compra' }).click();
+  const botaoDuranteOEnvio = page.getByRole('button', { name: 'Enviando…' });
+  await expect(botaoDuranteOEnvio).toBeDisabled();
+  await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await expect(page.getByRole('button', { name: 'Enviar ordem de compra' })).toBeEnabled();
+});
+
+test('RNF-08: a exposição é lida ao abrir e depois de cada envio, sem leitura contínua', async ({ page }) => {
+  const leiturasDaExposicao: string[] = [];
+  page.on('request', (requisicaoDaPagina) => {
+    if (new URL(requisicaoDaPagina.url()).pathname === ROTA_DAS_EXPOSICOES) leiturasDaExposicao.push(requisicaoDaPagina.url());
+  });
+  await page.reload();
+  await expect(page.getByTestId('exposicao-PETR4')).toBeVisible();
+  await page.waitForTimeout(3_000);
+  expect(leiturasDaExposicao).toHaveLength(1);
+  await enviarOrdemPelaBoleta(page, { simbolo: 'VALE3', lado: 'Compra', quantidade: '10', preco: '10,00' });
+  await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await page.waitForTimeout(3_000);
+  expect(leiturasDaExposicao).toHaveLength(2);
+});

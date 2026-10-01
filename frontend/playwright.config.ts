@@ -6,6 +6,8 @@ const portaDoGenerator = 8080 + Number(process.env.E2E_PORTA_DESLOCO ?? 0);
 
 export default defineConfig({
   testDir: './e2e',
+  // O cenário com o OrderAccumulator desligado tem config própria (playwright.sem-accumulator.config.ts).
+  testIgnore: ['**/sem-accumulator.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,
