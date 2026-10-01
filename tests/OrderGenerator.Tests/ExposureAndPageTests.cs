@@ -3,6 +3,8 @@ using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace OrderGenerator.Tests;
 
@@ -75,6 +77,34 @@ public sealed class ExposureProxyTests
         using var client = factory.CreateClient();
 
         await AssertExposureError(await client.GetAsync("/api/exposures"));
+    }
+
+    [Fact]
+    public async Task Erro_nao_previsto_vira_500_com_o_corpo_do_contrato_sem_detalhe_interno()
+    {
+        await using var factory = TestHost.Generator(TestHost.FreePort()).WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services => services
+                .AddHttpClient(ApiEndpoints.AccumulatorClient)
+                .ConfigurePrimaryHttpMessageHandler(() => new ExplodingHandler())));
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/exposures");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        var json = await OrderApiTests.ReadJson(response);
+        Assert.Equal("error", json.GetProperty("status").GetString());
+        Assert.Equal("Erro inesperado ao processar a ordem.", json.GetProperty("message").GetString());
+        Assert.DoesNotContain(ExplodingHandler.Detail, body);
+        Assert.DoesNotContain("   at ", body);
+    }
+
+    private sealed class ExplodingHandler : HttpMessageHandler
+    {
+        public const string Detail = "detalhe-interno-que-nao-pode-vazar";
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException(Detail);
     }
 
     private static async Task AssertExposureError(HttpResponseMessage response)

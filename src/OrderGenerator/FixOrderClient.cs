@@ -55,11 +55,11 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
             if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order), sessionId))
                 return new OrderResult(OrderOutcome.NoSession, clOrdId);
 
-            var finished = await Task.WhenAny(waiter.Task, Task.Delay(ResponseTimeout));
-            if (finished != waiter.Task)
-                return new OrderResult(OrderOutcome.Timeout, clOrdId);
-
-            return ToResult(clOrdId, await waiter.Task);
+            return ToResult(clOrdId, await waiter.Task.WaitAsync(ResponseTimeout));
+        }
+        catch (TimeoutException)
+        {
+            return new OrderResult(OrderOutcome.Timeout, clOrdId);
         }
         finally
         {

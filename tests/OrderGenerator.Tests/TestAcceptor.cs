@@ -28,8 +28,26 @@ public sealed class TestAcceptor : IApplication, IDisposable
 
     public ConcurrentQueue<Message> ReceivedOrders { get; } = new();
 
+    // Cada ExecutionReport mandado de volta, pelo ClOrdID que ele carrega.
+    public ConcurrentDictionary<string, Message> SentReports { get; } = new();
+
     // Devolve a resposta para a ordem recebida; null deixa a ordem sem resposta (acceptor mudo).
     public Func<Message, Message?> Responder { get; set; } = order => null;
+
+    // Quanto esperar antes de mandar a resposta, por ordem.
+    public Func<Message, TimeSpan> ReplyDelay { get; set; } = order => TimeSpan.Zero;
+
+    // Relatório extra mandado antes da resposta, com ClOrdID que não é o da ordem.
+    public Func<Message, Message?> StrayReport { get; set; } = order => null;
+
+    public void Reset()
+    {
+        Responder = Accept;
+        ReplyDelay = order => TimeSpan.Zero;
+        StrayReport = order => null;
+        ReceivedOrders.Clear();
+        SentReports.Clear();
+    }
 
     public void Start()
     {
@@ -76,28 +94,25 @@ public sealed class TestAcceptor : IApplication, IDisposable
         }
     }
 
-    public Message Accept(Message order)
-    {
-        var id = Interlocked.Increment(ref _sequence);
-        var report = new QuickFix.FIX44.ExecutionReport(
-            new OrderID($"ORD-{id}"), new ExecID($"EXE-{id}"),
-            new ExecType(ExecType.NEW), new OrdStatus(OrdStatus.NEW),
-            new Symbol(order.GetString(Tags.Symbol)), new Side(order.GetChar(Tags.Side)),
-            new LeavesQty(order.GetDecimal(Tags.OrderQty)), new CumQty(0), new AvgPx(0));
-        report.Set(new ClOrdID(order.GetString(Tags.ClOrdID)));
-        return report;
-    }
+    public Message Accept(Message order) =>
+        Report(order, ExecType.NEW, OrdStatus.NEW, order.GetDecimal(Tags.OrderQty));
 
     public Message Reject(Message order, string text)
     {
+        var report = Report(order, ExecType.REJECTED, OrdStatus.REJECTED, 0);
+        report.SetField(new Text(text));
+        return report;
+    }
+
+    public Message Report(Message order, char execType, char ordStatus, decimal leavesQty, string? clOrdId = null)
+    {
         var id = Interlocked.Increment(ref _sequence);
         var report = new QuickFix.FIX44.ExecutionReport(
             new OrderID($"ORD-{id}"), new ExecID($"EXE-{id}"),
-            new ExecType(ExecType.REJECTED), new OrdStatus(OrdStatus.REJECTED),
+            new ExecType(execType), new OrdStatus(ordStatus),
             new Symbol(order.GetString(Tags.Symbol)), new Side(order.GetChar(Tags.Side)),
-            new LeavesQty(0), new CumQty(0), new AvgPx(0));
-        report.Set(new ClOrdID(order.GetString(Tags.ClOrdID)));
-        report.Set(new Text(text));
+            new LeavesQty(leavesQty), new CumQty(0), new AvgPx(0));
+        report.Set(new ClOrdID(clOrdId ?? order.GetString(Tags.ClOrdID)));
         return report;
     }
 
@@ -107,9 +122,26 @@ public sealed class TestAcceptor : IApplication, IDisposable
             return;
 
         ReceivedOrders.Enqueue(message);
+        var stray = StrayReport(message);
+        if (stray is not null)
+            Send(stray, sessionID);
+
         var reply = Responder(message);
-        if (reply is not null)
-            Session.SendToTarget(reply, sessionID);
+        if (reply is null)
+            return;
+
+        var delay = ReplyDelay(message);
+        if (delay == TimeSpan.Zero)
+            Send(reply, sessionID);
+        else
+            // Fora da thread da sessão, para as outras ordens seguirem chegando enquanto esta espera.
+            _ = Task.Delay(delay).ContinueWith(_ => Send(reply, sessionID), TaskScheduler.Default);
+    }
+
+    private void Send(Message report, SessionID sessionID)
+    {
+        SentReports[report.GetString(Tags.ClOrdID)] = report;
+        Session.SendToTarget(report, sessionID);
     }
 
     public void OnLogon(SessionID sessionID) => _logon.TrySetResult();

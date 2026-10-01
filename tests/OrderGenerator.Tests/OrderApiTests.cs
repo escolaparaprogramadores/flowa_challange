@@ -39,8 +39,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     public OrderApiTests(LoggedOnGenerator generator)
     {
         _generator = generator;
-        _generator.Acceptor.Responder = _generator.Acceptor.Accept;
-        _generator.Acceptor.ReceivedOrders.Clear();
+        _generator.Acceptor.Reset();
     }
 
     public static TheoryData<string, string, string> InvalidFields => new()
@@ -108,7 +107,10 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     [InlineData("sell", '2')]
     public async Task Compra_e_venda_saem_como_NewOrderSingle_e_voltam_aceitas(string side, char fixSide)
     {
+        // TransactTime vai em UTC com milissegundos; a janela aceita esse arredondamento.
+        var before = DateTime.UtcNow.AddMilliseconds(-1);
         var response = await PostRaw($$"""{"symbol":"VALE3","side":"{{side}}","quantity":250,"price":61.37}""");
+        var after = DateTime.UtcNow;
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var sent = Assert.Single(_generator.Acceptor.ReceivedOrders);
@@ -118,14 +120,16 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         Assert.Equal(250m, sent.GetDecimal(Tags.OrderQty));
         Assert.Equal(61.37m, sent.GetDecimal(Tags.Price));
         Assert.Equal(OrdType.LIMIT, sent.GetChar(Tags.OrdType));
-        Assert.True(sent.IsSetField(Tags.TransactTime));
+        Assert.InRange(sent.GetDateTime(Tags.TransactTime), before, after);
 
         var json = await ReadJson(response);
+        var clOrdId = sent.GetString(Tags.ClOrdID);
+        var report = _generator.Acceptor.SentReports[clOrdId];
         Assert.Equal("accepted", json.GetProperty("status").GetString());
-        Assert.Equal(sent.GetString(Tags.ClOrdID), json.GetProperty("clOrdId").GetString());
-        Assert.Matches("^[0-9a-f]{32}$", json.GetProperty("clOrdId").GetString());
-        Assert.StartsWith("ORD-", json.GetProperty("orderId").GetString());
-        Assert.StartsWith("EXE-", json.GetProperty("execId").GetString());
+        Assert.Equal(clOrdId, json.GetProperty("clOrdId").GetString());
+        Assert.Matches("^[0-9a-f]{32}$", clOrdId);
+        Assert.Equal(report.GetString(Tags.OrderID), json.GetProperty("orderId").GetString());
+        Assert.Equal(report.GetString(Tags.ExecID), json.GetProperty("execId").GetString());
         Assert.Equal("VALE3", json.GetProperty("symbol").GetString());
         Assert.Equal(side, json.GetProperty("side").GetString());
         Assert.Equal(250, json.GetProperty("quantity").GetInt32());
@@ -141,11 +145,17 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     {
         var response = await PostRaw($$"""{"symbol":"VIIA4","side":"sell","quantity":{{quantity}},"price":{{price}}}""");
 
+        var expectedQuantity = int.Parse(quantity.Trim('"'));
+        var expectedPrice = decimal.Parse(price.Trim('"'), System.Globalization.CultureInfo.InvariantCulture);
+
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var sent = Assert.Single(_generator.Acceptor.ReceivedOrders);
-        Assert.Equal(decimal.Parse(quantity.Trim('"')), sent.GetDecimal(Tags.OrderQty));
-        Assert.Equal(decimal.Parse(price.Trim('"'), System.Globalization.CultureInfo.InvariantCulture), sent.GetDecimal(Tags.Price));
-        Assert.Equal("accepted", (await ReadJson(response)).GetProperty("status").GetString());
+        Assert.Equal(expectedQuantity, sent.GetDecimal(Tags.OrderQty));
+        Assert.Equal(expectedPrice, sent.GetDecimal(Tags.Price));
+        var json = await ReadJson(response);
+        Assert.Equal("accepted", json.GetProperty("status").GetString());
+        Assert.Equal(expectedQuantity, json.GetProperty("quantity").GetInt32());
+        Assert.Equal(expectedPrice, json.GetProperty("price").GetDecimal());
     }
 
     [Fact]
@@ -158,13 +168,106 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var json = await ReadJson(response);
+        var clOrdId = Assert.Single(_generator.Acceptor.ReceivedOrders).GetString(Tags.ClOrdID);
+        var report = _generator.Acceptor.SentReports[clOrdId];
         Assert.Equal("rejected", json.GetProperty("status").GetString());
         Assert.Equal(motivo, json.GetProperty("message").GetString());
+        Assert.Equal(clOrdId, json.GetProperty("clOrdId").GetString());
+        Assert.Equal(report.GetString(Tags.OrderID), json.GetProperty("orderId").GetString());
+        Assert.Equal(report.GetString(Tags.ExecID), json.GetProperty("execId").GetString());
         Assert.Equal("PETR4", json.GetProperty("symbol").GetString());
         Assert.Equal("buy", json.GetProperty("side").GetString());
         Assert.Equal(99999, json.GetProperty("quantity").GetInt32());
         Assert.Equal(999.99m, json.GetProperty("price").GetDecimal());
-        Assert.Single(_generator.Acceptor.ReceivedOrders);
+    }
+
+    [Fact]
+    public async Task ExecutionReport_com_ExecType_fora_do_contrato_responde_500()
+    {
+        // 150=2 (Fill) não está no contrato v1, que só prevê 0 (New) e 8 (Rejected).
+        _generator.Acceptor.Responder = order => _generator.Acceptor.Report(order, ExecType.FILL, OrdStatus.FILLED, 0);
+
+        var response = await PostRaw("""{"symbol":"PETR4","side":"buy","quantity":10,"price":20.00}""");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        var json = await ReadJson(response);
+        Assert.Equal("error", json.GetProperty("status").GetString());
+        Assert.Equal("Erro inesperado ao processar a ordem.", json.GetProperty("message").GetString());
+    }
+
+    [Fact]
+    public async Task Relatorio_de_outro_ClOrdID_nao_responde_pela_ordem()
+    {
+        _generator.Acceptor.StrayReport = order =>
+            _generator.Acceptor.Report(order, ExecType.REJECTED, OrdStatus.REJECTED, 0, clOrdId: "nao-e-desta-ordem");
+
+        var response = await PostRaw("""{"symbol":"VIIA4","side":"buy","quantity":5,"price":3.21}""");
+
+        var json = await ReadJson(response);
+        var clOrdId = Assert.Single(_generator.Acceptor.ReceivedOrders).GetString(Tags.ClOrdID);
+        Assert.Equal("accepted", json.GetProperty("status").GetString());
+        Assert.Equal(_generator.Acceptor.SentReports[clOrdId].GetString(Tags.OrderID), json.GetProperty("orderId").GetString());
+        Assert.NotEqual(_generator.Acceptor.SentReports["nao-e-desta-ordem"].GetString(Tags.OrderID), json.GetProperty("orderId").GetString());
+    }
+
+    [Fact]
+    public async Task Ordens_simultaneas_recebem_cada_uma_a_sua_resposta()
+    {
+        // A de PETR4 é respondida depois da de VALE3: as respostas chegam fora da ordem de envio.
+        const string motivo = "Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.";
+        _generator.Acceptor.Responder = order => order.GetString(Tags.Symbol) == "VALE3"
+            ? _generator.Acceptor.Reject(order, motivo)
+            : _generator.Acceptor.Accept(order);
+        _generator.Acceptor.ReplyDelay = order =>
+            order.GetString(Tags.Symbol) == "PETR4" ? TimeSpan.FromMilliseconds(500) : TimeSpan.Zero;
+
+        var petr4 = PostRaw("""{"symbol":"PETR4","side":"buy","quantity":10,"price":30.00}""");
+        var vale3 = PostRaw("""{"symbol":"VALE3","side":"sell","quantity":20,"price":60.00}""");
+        await Task.WhenAll(petr4, vale3);
+
+        var petr4Json = await ReadJson(await petr4);
+        var vale3Json = await ReadJson(await vale3);
+        Assert.Equal("accepted", petr4Json.GetProperty("status").GetString());
+        Assert.Equal("PETR4", petr4Json.GetProperty("symbol").GetString());
+        Assert.Equal("rejected", vale3Json.GetProperty("status").GetString());
+        Assert.Equal(motivo, vale3Json.GetProperty("message").GetString());
+        AssertAnswersItsOwnReport(petr4Json);
+        AssertAnswersItsOwnReport(vale3Json);
+    }
+
+    [Fact]
+    public async Task Resposta_que_chega_depois_dos_5_segundos_e_descartada()
+    {
+        _generator.Acceptor.ReplyDelay = order => TimeSpan.FromSeconds(6);
+
+        var late = await PostRaw("""{"symbol":"PETR4","side":"buy","quantity":10,"price":30.00}""");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, late.StatusCode);
+        var lateClOrdId = Assert.Single(_generator.Acceptor.ReceivedOrders).GetString(Tags.ClOrdID);
+        await WaitUntil(() => _generator.Acceptor.SentReports.ContainsKey(lateClOrdId));
+
+        _generator.Acceptor.ReplyDelay = order => TimeSpan.Zero;
+        var next = await ReadJson(await PostRaw("""{"symbol":"VALE3","side":"buy","quantity":10,"price":30.00}"""));
+
+        Assert.Equal("accepted", next.GetProperty("status").GetString());
+        AssertAnswersItsOwnReport(next);
+        Assert.Equal(0, _generator.Factory.Services.GetRequiredService<FixOrderClient>().PendingCount);
+    }
+
+    private void AssertAnswersItsOwnReport(JsonElement json)
+    {
+        var report = _generator.Acceptor.SentReports[json.GetProperty("clOrdId").GetString()!];
+        Assert.Equal(report.GetString(Tags.OrderID), json.GetProperty("orderId").GetString());
+        Assert.Equal(report.GetString(Tags.ExecID), json.GetProperty("execId").GetString());
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var clock = Stopwatch.StartNew();
+        while (!condition())
+        {
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10), "a condição esperada não aconteceu em 10 s");
+            await Task.Delay(50);
+        }
     }
 
     private Task<HttpResponseMessage> PostRaw(string body) =>
