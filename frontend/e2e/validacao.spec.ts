@@ -18,6 +18,10 @@ async function preencherBoleta(page: Page, quantidade: string, preco: string) {
   await page.getByLabel('Preço por ação (R$)').fill(preco);
 }
 
+function boletaDaPagina(page: Page) {
+  return page.getByRole('form', { name: 'Boleta de ordem' });
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
@@ -37,7 +41,7 @@ test('CA-2: o lado só oferece Compra e Venda', async ({ page }) => {
 
 const quantidadesRecusadas: Array<[string, string]> = [
   ['0', 'A quantidade deve ser maior que zero.'],
-  ['-5', 'A quantidade deve ser maior que zero.'],
+  ['-1', 'A quantidade deve ser maior que zero.'],
   ['1,5', 'A quantidade deve ser um número inteiro.'],
   ['abc', 'A quantidade deve ser um número inteiro.'],
   ['100.000', 'A quantidade deve ser menor que 100.000.'],
@@ -48,8 +52,12 @@ for (const [quantidade, mensagemEsperada] of quantidadesRecusadas) {
     const enviosDeOrdem = contarEnviosDeOrdem(page);
     await preencherBoleta(page, quantidade, '10,00');
     await page.getByRole('button', { name: /^Enviar ordem/ }).click();
-    await expect(page.locator('#erro-quantidade')).toHaveText(mensagemEsperada);
+    const alertaDaBoleta = boletaDaPagina(page).getByRole('alert');
+    await expect(alertaDaBoleta).toHaveCount(1);
+    await expect(alertaDaBoleta).toHaveText(mensagemEsperada);
     await expect(page.getByLabel(/^Quantidade de/)).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByLabel(/^Quantidade de/)).toHaveAttribute('aria-describedby', 'erro-quantidade');
+    await expect(alertaDaBoleta).toHaveAttribute('id', 'erro-quantidade');
     expect(enviosDeOrdem).toEqual([]);
   });
 }
@@ -67,20 +75,47 @@ for (const [preco, mensagemEsperada] of precosRecusados) {
     const enviosDeOrdem = contarEnviosDeOrdem(page);
     await preencherBoleta(page, '10', preco);
     await page.getByRole('button', { name: /^Enviar ordem/ }).click();
-    await expect(page.locator('#erro-preco')).toHaveText(mensagemEsperada);
+    const alertaDaBoleta = boletaDaPagina(page).getByRole('alert');
+    await expect(alertaDaBoleta).toHaveCount(1);
+    await expect(alertaDaBoleta).toHaveText(mensagemEsperada);
     await expect(page.getByLabel('Preço por ação (R$)')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByLabel('Preço por ação (R$)')).toHaveAttribute('aria-describedby', 'erro-preco');
+    await expect(alertaDaBoleta).toHaveAttribute('id', 'erro-preco');
     expect(enviosDeOrdem).toEqual([]);
   });
 }
 
-test('CA-3/CA-4: limites válidos (1 e 99.999; 0,01 e 999,99) não mostram erro', async ({ page }) => {
+test('RF-14: quantidade e preço vazios são recusados na tela, cada um com sua mensagem, sem envio', async ({ page }) => {
+  const enviosDeOrdem = contarEnviosDeOrdem(page);
+  await preencherBoleta(page, '', '');
+  await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+  await expect(boletaDaPagina(page).getByRole('alert')).toHaveText(['Informe a quantidade.', 'Informe o preço.']);
+  expect(enviosDeOrdem).toEqual([]);
+});
+
+test('CA-3/CA-4: limites válidos (1 e 99.999; 0,01 e 999,99) viram valor aceito no total estimado', async ({ page }) => {
   for (const [quantidade, preco, totalEsperado] of [
-    ['1', '0,01', 'R$ 0,01'],
-    ['99.999', '999,99', 'R$ 99.998.000,01'],
+    ['1', '0,01', 'R$ 0,01'],
+    ['99.999', '999,99', 'R$ 99.998.000,01'],
   ]) {
     await preencherBoleta(page, quantidade, preco);
     await expect(page.getByTestId('total-estimado')).toHaveText(totalEsperado);
-    await expect(page.locator('#erro-quantidade')).toHaveCount(0);
-    await expect(page.locator('#erro-preco')).toHaveCount(0);
   }
 });
+
+const passosDaQuantidade: Array<{ partida: string; botao: string; esperado: string }> = [
+  { partida: '100', botao: 'Aumentar quantidade', esperado: '101' },
+  { partida: '100', botao: 'Diminuir quantidade', esperado: '99' },
+  { partida: '1', botao: 'Diminuir quantidade', esperado: '1' },
+  { partida: '99.999', botao: 'Aumentar quantidade', esperado: '99999' },
+  { partida: '100.000', botao: 'Diminuir quantidade', esperado: '99999' },
+  { partida: 'abc', botao: 'Aumentar quantidade', esperado: '1' },
+];
+
+for (const { partida, botao, esperado } of passosDaQuantidade) {
+  test(`RF-16: com "${partida}" digitado, "${botao}" leva a ${esperado}, sem sair da faixa`, async ({ page }) => {
+    await page.getByLabel(/^Quantidade de/).fill(partida);
+    await page.getByRole('button', { name: botao }).click();
+    await expect(page.getByLabel(/^Quantidade de/)).toHaveValue(esperado);
+  });
+}

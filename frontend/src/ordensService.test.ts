@@ -36,11 +36,11 @@ describe('enviarOrdem', () => {
     });
   });
 
-  it('RF-23: 503 do servidor vira falha de comunicação com a mensagem dele', async () => {
+  it('RF-23: 503 do servidor vira "ordem não confirmada", sem o nome do serviço interno', async () => {
     responderComJson(503, { status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.' });
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
-      mensagemDoServidor: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.',
+      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
     });
   });
 
@@ -48,7 +48,7 @@ describe('enviarOrdem', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Bad Gateway</html>', { status: 502 })));
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
-      mensagemDoServidor: 'Não foi possível falar com o servidor. Tente de novo em instantes.',
+      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
     });
   });
 
@@ -66,7 +66,7 @@ describe('enviarOrdem', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(await respostaPendente).toEqual({
       situacao: 'falha-de-comunicacao',
-      mensagemDoServidor: 'Não foi possível falar com o servidor. Tente de novo em instantes.',
+      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
     });
     expect(PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS).toBe(6_000);
   });
@@ -86,7 +86,7 @@ describe('enviarOrdem', () => {
     await vi.advanceTimersByTimeAsync(PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS);
     expect(await respostaPendente).toEqual({
       situacao: 'falha-de-comunicacao',
-      mensagemDoServidor: 'Não foi possível falar com o servidor. Tente de novo em instantes.',
+      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
     });
   });
 });
@@ -97,8 +97,8 @@ describe('lerExposicoes', () => {
     expect(await lerExposicoes()).toEqual([{ simbolo: 'PETR4', exposicao: -500, restanteAteOLimite: 99_999_500 }]);
   });
 
-  it('RF-32: 503 do servidor vira erro com a mensagem dele', async () => {
+  it('RF-32: 503 do servidor vira erro claro, sem o nome do serviço interno', async () => {
     responderComJson(503, { status: 'communication_error', message: 'Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.' });
-    await expect(lerExposicoes()).rejects.toThrow('Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.');
+    await expect(lerExposicoes()).rejects.toThrow('Não foi possível ler a exposição agora. Tente de novo em instantes.');
   });
 });

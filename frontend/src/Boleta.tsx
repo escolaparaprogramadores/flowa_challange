@@ -3,6 +3,7 @@ import {
   QUANTIDADE_MAXIMA_EXCLUSIVA,
   SIMBOLOS_DA_BOLETA,
   formatarReais,
+  lerQuantidadeInteiraDigitada,
   validarPreco,
   validarQuantidade,
   type LadoDaOrdem,
@@ -34,7 +35,7 @@ export function Boleta({ enviando, aoEnviarOrdem }: PropsDaBoleta) {
       : undefined;
 
   function ajustarQuantidadeEm(passo: number) {
-    const quantidadeAtual = quantidadeAceita ?? 0;
+    const quantidadeAtual = lerQuantidadeInteiraDigitada(quantidadeDigitada) ?? 0;
     const proximaQuantidade = Math.min(Math.max(quantidadeAtual + passo, 1), QUANTIDADE_MAXIMA_EXCLUSIVA - 1);
     setQuantidadeDigitada(String(proximaQuantidade));
     setErrosDaBoleta((errosAnteriores) => ({ ...errosAnteriores, erroDaQuantidade: undefined }));

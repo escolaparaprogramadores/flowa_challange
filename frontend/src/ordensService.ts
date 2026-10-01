@@ -8,8 +8,9 @@ export const ROTA_DAS_EXPOSICOES = '/api/exposures';
 // Este prazo é a rede de segurança para a tela nunca ficar presa se o próprio Generator calar.
 export const PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS = 6_000;
 
-const MENSAGEM_DE_SERVIDOR_SEM_RESPOSTA = 'Não foi possível falar com o servidor. Tente de novo em instantes.';
-const MENSAGEM_DE_EXPOSICAO_INDISPONIVEL = 'Não foi possível ler a exposição. Tente de novo em instantes.';
+// Sem resposta confirmada, a tela não sabe se a ordem chegou: diz só o que é certo, sem nome de serviço interno.
+export const MENSAGEM_DE_ORDEM_NAO_CONFIRMADA = 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.';
+export const MENSAGEM_DE_EXPOSICAO_INDISPONIVEL = 'Não foi possível ler a exposição agora. Tente de novo em instantes.';
 
 export type OrdemParaEnviar = {
   simbolo: SimboloDaBoleta;
@@ -69,7 +70,7 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
       }),
     });
   } catch {
-    return { situacao: 'falha-de-comunicacao', mensagemDoServidor: MENSAGEM_DE_SERVIDOR_SEM_RESPOSTA };
+    return { situacao: 'falha-de-comunicacao', mensagemDoServidor: MENSAGEM_DE_ORDEM_NAO_CONFIRMADA };
   }
 
   const { respostaHttp, corpoDaResposta } = respostaDaCriacao;
@@ -92,7 +93,7 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
       errosDeCampo: (corpoDaResposta.errors ?? []).map((erroDeCampo) => erroDeCampo.message),
     };
   }
-  return { situacao: 'falha-de-comunicacao', mensagemDoServidor: corpoDaResposta?.message ?? MENSAGEM_DE_SERVIDOR_SEM_RESPOSTA };
+  return { situacao: 'falha-de-comunicacao', mensagemDoServidor: MENSAGEM_DE_ORDEM_NAO_CONFIRMADA };
 }
 
 export async function lerExposicoes(): Promise<ExposicaoDoSimbolo[]> {
@@ -100,7 +101,7 @@ export async function lerExposicoes(): Promise<ExposicaoDoSimbolo[]> {
     throw new Error(MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
   });
   if (!respostaHttp.ok || !corpoDaResposta?.exposures) {
-    throw new Error(corpoDaResposta?.message ?? MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
+    throw new Error(MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
   }
   return corpoDaResposta.exposures.map((exposicaoNoServidor) => ({
     simbolo: exposicaoNoServidor.symbol,

@@ -29,14 +29,21 @@ export type ValidacaoDaQuantidade =
   | { quantidadeAceita: number; mensagemDeErro?: undefined }
   | { quantidadeAceita?: undefined; mensagemDeErro: string };
 
+// Lê a quantidade inteira digitada sem olhar a faixa; o passo de − e + parte dela.
+export function lerQuantidadeInteiraDigitada(quantidadeDigitada: string): number | undefined {
+  const leituraDaQuantidade = lerNumeroBrasileiro(quantidadeDigitada);
+  if (!leituraDaQuantidade.lido || leituraDaQuantidade.casasDecimais !== '') return undefined;
+  return Number(leituraDaQuantidade.parteInteira) * (leituraDaQuantidade.negativo ? -1 : 1);
+}
+
 export function validarQuantidade(quantidadeDigitada: string): ValidacaoDaQuantidade {
-  const leitura = lerNumeroBrasileiro(quantidadeDigitada);
-  if (!leitura.lido) {
-    if (leitura.motivoDaRecusa === 'vazio') return { mensagemDeErro: 'Informe a quantidade.' };
+  const leituraDaQuantidade = lerNumeroBrasileiro(quantidadeDigitada);
+  if (!leituraDaQuantidade.lido) {
+    if (leituraDaQuantidade.motivoDaRecusa === 'vazio') return { mensagemDeErro: 'Informe a quantidade.' };
     return { mensagemDeErro: 'A quantidade deve ser um número inteiro.' };
   }
-  if (leitura.casasDecimais !== '') return { mensagemDeErro: 'A quantidade deve ser um número inteiro.' };
-  const quantidade = Number(leitura.parteInteira) * (leitura.negativo ? -1 : 1);
+  if (leituraDaQuantidade.casasDecimais !== '') return { mensagemDeErro: 'A quantidade deve ser um número inteiro.' };
+  const quantidade = Number(leituraDaQuantidade.parteInteira) * (leituraDaQuantidade.negativo ? -1 : 1);
   if (quantidade <= 0) return { mensagemDeErro: 'A quantidade deve ser maior que zero.' };
   if (quantidade >= QUANTIDADE_MAXIMA_EXCLUSIVA) return { mensagemDeErro: 'A quantidade deve ser menor que 100.000.' };
   return { quantidadeAceita: quantidade };
@@ -49,16 +56,16 @@ export type ValidacaoDoPreco =
 // O preço vira centavos inteiros para "múltiplo de 0,01" não depender de
 // arredondamento de ponto flutuante.
 export function validarPreco(precoDigitado: string): ValidacaoDoPreco {
-  const leitura = lerNumeroBrasileiro(precoDigitado);
-  if (!leitura.lido) {
-    if (leitura.motivoDaRecusa === 'vazio') return { mensagemDeErro: 'Informe o preço.' };
-    if (leitura.motivoDaRecusa === 'ponto-decimal') return { mensagemDeErro: 'Use vírgula para os centavos (ex.: 10,50).' };
+  const leituraDoPreco = lerNumeroBrasileiro(precoDigitado);
+  if (!leituraDoPreco.lido) {
+    if (leituraDoPreco.motivoDaRecusa === 'vazio') return { mensagemDeErro: 'Informe o preço.' };
+    if (leituraDoPreco.motivoDaRecusa === 'ponto-decimal') return { mensagemDeErro: 'Use vírgula para os centavos (ex.: 10,50).' };
     return { mensagemDeErro: 'O preço deve ser um número.' };
   }
-  const centavosSemZerosADireita = leitura.casasDecimais.replace(/0+$/, '');
+  const centavosSemZerosADireita = leituraDoPreco.casasDecimais.replace(/0+$/, '');
   if (centavosSemZerosADireita.length > 2) return { mensagemDeErro: 'O preço deve ser múltiplo de 0,01.' };
   const precoEmCentavos =
-    (Number(leitura.parteInteira) * 100 + Number(centavosSemZerosADireita.padEnd(2, '0'))) * (leitura.negativo ? -1 : 1);
+    (Number(leituraDoPreco.parteInteira) * 100 + Number(centavosSemZerosADireita.padEnd(2, '0'))) * (leituraDoPreco.negativo ? -1 : 1);
   if (precoEmCentavos <= 0) return { mensagemDeErro: 'O preço deve ser maior que zero.' };
   if (precoEmCentavos >= PRECO_MAXIMO_EXCLUSIVO_EM_CENTAVOS) return { mensagemDeErro: 'O preço deve ser menor que 1.000,00.' };
   return { precoAceitoEmCentavos: precoEmCentavos };

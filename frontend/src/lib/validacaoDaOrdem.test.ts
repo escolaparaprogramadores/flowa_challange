@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatarQuantidade, formatarReais, validarPreco, validarQuantidade } from './validacaoDaOrdem';
+import { formatarQuantidade, formatarReais, lerQuantidadeInteiraDigitada, validarPreco, validarQuantidade } from './validacaoDaOrdem';
 
 describe('validarQuantidade', () => {
   it.each([
@@ -57,5 +57,19 @@ describe('formatação para a tela', () => {
 
   it('formata quantidade com ponto de milhar', () => {
     expect(formatarQuantidade(99_999)).toBe('99.999');
+  });
+});
+
+describe('lerQuantidadeInteiraDigitada', () => {
+  it.each([
+    ['100.000', 100_000],
+    ['250', 250],
+    ['-3', -3],
+  ])('lê %s mesmo fora da faixa da ordem', (quantidadeDigitada, quantidadeEsperada) => {
+    expect(lerQuantidadeInteiraDigitada(quantidadeDigitada)).toBe(quantidadeEsperada);
+  });
+
+  it.each(['', 'abc', '1,5'])('não lê "%s", que não é número inteiro', (quantidadeDigitada) => {
+    expect(lerQuantidadeInteiraDigitada(quantidadeDigitada)).toBeUndefined();
   });
 });

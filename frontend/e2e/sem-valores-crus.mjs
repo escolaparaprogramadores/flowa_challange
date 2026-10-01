@@ -1,4 +1,4 @@
-// CA-23: cor, fonte e raio só podem ser escritos no bloco :root do tema; o resto usa var(--...).
+// CA-23: cor, fonte, raio, espaço e tamanho de letra só podem ser escritos no :root do tema; fora dele, var(--...).
 // Antes de varrer src/, a guarda prova que recusa cada forma crua conhecida (autoteste).
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,43 +7,45 @@ import { fileURLToPath } from 'node:url';
 const PASTA_DA_TELA = fileURLToPath(new URL('../src/', import.meta.url));
 const PROPRIEDADES_DE_COR = /^(color|background(-color)?|border(-(top|right|bottom|left))?(-color)?|outline(-color)?|fill|stroke|(box|text)-shadow|caret-color|accent-color|text-decoration-color)$/;
 const PALAVRAS_SEM_COR = new Set(['transparent', 'currentcolor', 'inherit', 'initial', 'unset', 'none', 'solid', 'dashed', 'dotted', 'double', 'inset']);
+const PROPRIEDADES_DE_ESPACO_E_LETRA = /^(padding|margin|gap|row-gap|column-gap|font-size|letter-spacing|grid-template-columns)(-(top|right|bottom|left))?$/;
 const JSX_COM_VALOR_CRU = /\b(color|background(Color)?|borderColor|fontFamily|font|borderRadius|boxShadow)\s*:/;
 
-function valorSemVariaveis(valor) {
-  return valor.replace(/var\(--[\w-]+\)/g, '').trim();
+function valorSemVariaveis(valorDaDeclaracao) {
+  return valorDaDeclaracao.replace(/var\(--[\w-]+\)/g, '').trim();
 }
 
-// Devolve o motivo quando a declaração CSS "propriedade: valor" traz cor, fonte ou raio escritos direto.
-function motivoDoValorCruNoCss(propriedade, valor) {
-  const resto = valorSemVariaveis(valor);
-  if (/#[0-9a-f]{3,8}\b|\b(rgb|hsl|hwb|lab|lch|oklab|oklch)a?\(/i.test(resto)) return 'cor escrita direto';
+// Devolve o motivo quando a declaração CSS "propriedade: valor" traz cor, fonte, raio, espaço ou letra escritos direto.
+function motivoDoValorCruNoCss(propriedade, valorDaDeclaracao) {
+  const valorSemTokens = valorSemVariaveis(valorDaDeclaracao);
+  if (/#[0-9a-f]{3,8}\b|\b(rgb|hsl|hwb|lab|lch|oklab|oklch)a?\(/i.test(valorSemTokens)) return 'cor escrita direto';
   if (PROPRIEDADES_DE_COR.test(propriedade)) {
-    const palavraDeCor = (resto.match(/[a-z]+/gi) ?? []).find((palavra) => !PALAVRAS_SEM_COR.has(palavra.toLowerCase()) && !/^(px|em|rem|s|ms|deg)$/i.test(palavra));
+    const palavraDeCor = (valorSemTokens.match(/[a-z]+/gi) ?? []).find((palavra) => !PALAVRAS_SEM_COR.has(palavra.toLowerCase()) && !/^(px|em|rem|s|ms|deg)$/i.test(palavra));
     if (palavraDeCor) return `cor por nome (${palavraDeCor})`;
   }
-  if ((propriedade === 'font-family' || propriedade === 'font') && resto !== '' && resto !== 'inherit') return 'fonte escrita direto';
-  if (/^border(-(top|bottom)-(left|right))?-radius$/.test(propriedade) && resto !== '' && resto !== '0') return 'raio escrito direto';
+  if ((propriedade === 'font-family' || propriedade === 'font') && valorSemTokens !== '' && valorSemTokens !== 'inherit') return 'fonte escrita direto';
+  if (/^border(-(top|bottom)-(left|right))?-radius$/.test(propriedade) && valorSemTokens !== '' && valorSemTokens !== '0') return 'raio escrito direto';
+  if (PROPRIEDADES_DE_ESPACO_E_LETRA.test(propriedade) && /\b(?!1px\b)\d+(\.\d+)?px\b/.test(valorSemTokens)) return 'espaço ou tamanho de letra escrito direto';
   return undefined;
 }
 
-function acharValoresCrus(nomeDoArquivo, conteudo) {
+function acharValoresCrus(nomeDoArquivo, conteudoDoArquivo) {
   const achados = [];
   if (/\.tsx?$/.test(nomeDoArquivo)) {
-    conteudo.split(/\r?\n/).forEach((linha, indice) => {
-      if (JSX_COM_VALOR_CRU.test(linha)) achados.push(`${nomeDoArquivo}:${indice + 1}: estilo com cor, fonte ou raio no componente`);
-      if (/#[0-9a-f]{3,8}\b|\brgba?\(/i.test(linha)) achados.push(`${nomeDoArquivo}:${indice + 1}: cor escrita direto no componente`);
+    conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indice) => {
+      if (JSX_COM_VALOR_CRU.test(linhaDoArquivo)) achados.push(`${nomeDoArquivo}:${indice + 1}: estilo com cor, fonte ou raio no componente`);
+      if (/#[0-9a-f]{3,8}\b|\brgba?\(/i.test(linhaDoArquivo)) achados.push(`${nomeDoArquivo}:${indice + 1}: cor escrita direto no componente`);
     });
     return achados;
   }
   let dentroDoRoot = false;
-  conteudo.split(/\r?\n/).forEach((linha, indice) => {
-    if (/^:root\s*\{/.test(linha)) dentroDoRoot = true;
-    for (const [, propriedade, valor] of linha.matchAll(/([a-z-]+)\s*:\s*([^;{}]+)/gi)) {
+  conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indice) => {
+    if (/^:root\s*\{/.test(linhaDoArquivo)) dentroDoRoot = true;
+    for (const [, propriedade, valorDaDeclaracao] of linhaDoArquivo.matchAll(/([a-z-]+)\s*:\s*([^;{}]+)/gi)) {
       if (dentroDoRoot && propriedade.startsWith('--')) continue;
-      const motivo = motivoDoValorCruNoCss(propriedade.toLowerCase(), valor);
-      if (motivo) achados.push(`${nomeDoArquivo}:${indice + 1}: ${motivo}: ${linha.trim()}`);
+      const motivo = motivoDoValorCruNoCss(propriedade.toLowerCase(), valorDaDeclaracao);
+      if (motivo) achados.push(`${nomeDoArquivo}:${indice + 1}: ${motivo}: ${linhaDoArquivo.trim()}`);
     }
-    if (dentroDoRoot && /^\}/.test(linha)) dentroDoRoot = false;
+    if (dentroDoRoot && /^\}/.test(linhaDoArquivo)) dentroDoRoot = false;
   });
   return achados;
 }
@@ -58,6 +60,9 @@ const AMOSTRAS_QUE_DEVEM_SER_RECUSADAS = [
   ['amostra.css', '.x { font-family: Arial; }'],
   ['amostra.css', '.x { font: 600 16px Sora; }'],
   ['amostra.css', '.x { border-radius: 12px; }'],
+  ['amostra.css', '.x { padding: 18px var(--espaco-5); }'],
+  ['amostra.css', '.x { font-size: 15px; }'],
+  ['amostra.css', '.grade { grid-template-columns: 260px minmax(0, 1fr); }'],
   ['amostra.tsx', 'export const Cartao = () => <div style={{ borderRadius: 4 }} />;'],
   ['amostra.tsx', "export const Aviso = () => <p style={{ color: 'red' }} />;"],
 ];
@@ -67,8 +72,8 @@ const AMOSTRAS_QUE_DEVEM_PASSAR = [
 ];
 
 const falhasDoAutoteste = [
-  ...AMOSTRAS_QUE_DEVEM_SER_RECUSADAS.filter(([nome, conteudo]) => acharValoresCrus(nome, conteudo).length === 0).map(([, conteudo]) => `não recusou: ${conteudo}`),
-  ...AMOSTRAS_QUE_DEVEM_PASSAR.filter(([nome, conteudo]) => acharValoresCrus(nome, conteudo).length > 0).map(([, conteudo]) => `recusou por engano: ${conteudo}`),
+  ...AMOSTRAS_QUE_DEVEM_SER_RECUSADAS.filter(([nomeDaAmostra, conteudoDaAmostra]) => acharValoresCrus(nomeDaAmostra, conteudoDaAmostra).length === 0).map(([, conteudoDaAmostra]) => `não recusou: ${conteudoDaAmostra}`),
+  ...AMOSTRAS_QUE_DEVEM_PASSAR.filter(([nomeDaAmostra, conteudoDaAmostra]) => acharValoresCrus(nomeDaAmostra, conteudoDaAmostra).length > 0).map(([, conteudoDaAmostra]) => `recusou por engano: ${conteudoDaAmostra}`),
 ];
 if (falhasDoAutoteste.length > 0) {
   console.error(`Autoteste da guarda falhou:\n${falhasDoAutoteste.join('\n')}`);
@@ -76,8 +81,8 @@ if (falhasDoAutoteste.length > 0) {
 }
 
 function listarArquivosDaTela(pasta) {
-  return readdirSync(pasta, { withFileTypes: true }).flatMap((entrada) =>
-    entrada.isDirectory() ? listarArquivosDaTela(join(pasta, entrada.name)) : [join(pasta, entrada.name)],
+  return readdirSync(pasta, { withFileTypes: true }).flatMap((entradaDaPasta) =>
+    entradaDaPasta.isDirectory() ? listarArquivosDaTela(join(pasta, entradaDaPasta.name)) : [join(pasta, entradaDaPasta.name)],
   );
 }
 
@@ -90,4 +95,4 @@ if (achadosNaTela.length > 0) {
   process.exit(1);
 }
 console.log(`Autoteste: ${AMOSTRAS_QUE_DEVEM_SER_RECUSADAS.length} amostras cruas recusadas e ${AMOSTRAS_QUE_DEVEM_PASSAR.length} limpas aceitas.`);
-console.log('Nenhuma cor, fonte ou raio escrito direto fora do :root do tema.');
+console.log('Nenhuma cor, fonte, raio, espaço ou tamanho de letra escrito direto fora do :root do tema.');

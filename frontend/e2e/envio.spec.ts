@@ -5,7 +5,9 @@ import { ROTA_DAS_EXPOSICOES, ROTA_DE_CRIACAO_DE_ORDEM } from '../src/ordensServ
 // Os valores de exposição são lidos antes e depois de cada ordem, então o teste
 // não depende do banco estar vazio.
 
-const LIMITE = 100_000_000;
+const LIMITE_DE_EXPOSICAO_POR_SIMBOLO = 100_000_000;
+const COR_DO_STATUS_ACEITO = 'rgb(111, 235, 192)';
+const COR_DO_STATUS_REJEITADO = 'rgb(255, 164, 151)';
 
 type OrdemDoTeste = { simbolo: string; lado: 'Compra' | 'Venda'; quantidade: string; preco: string };
 
@@ -61,6 +63,7 @@ test.beforeEach(async ({ page }) => {
 test('CA-14: compra válida é enviada e a tela mostra a resposta aceita', async ({ page }) => {
   await enviarOrdemPelaBoleta(page, { simbolo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: '10,00' });
   await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await expect(page.getByTestId('status-da-ordem')).toHaveCSS('color', COR_DO_STATUS_ACEITO);
   await expect(page.getByTestId('mensagem-da-ordem')).toHaveText('Ordem aceita.');
   await conferirDadosDaResposta(page, { ativo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: formatadorDeReais.format(10) });
 });
@@ -81,22 +84,30 @@ test('CA-17: o painel mostra os três ativos e muda depois de uma ordem aceita',
   await enviarOrdemPelaBoleta(page, { simbolo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: '10,00' });
   await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
   const exposicaoEsperada = exposicaoAntes.exposure + 10_000;
-  await conferirPainelDeExposicao(page, 'PETR4', exposicaoEsperada, LIMITE - Math.abs(exposicaoEsperada));
+  await conferirPainelDeExposicao(page, 'PETR4', exposicaoEsperada, LIMITE_DE_EXPOSICAO_POR_SIMBOLO - Math.abs(exposicaoEsperada));
 });
 
 test('CA-16 e CA-17: ordem que estoura o limite aparece rejeitada com o motivo e não muda a exposição', async ({ page }) => {
   // Leva VIIA4 até perto do limite com ordens válidas e grandes; a primeira que
   // não couber mais é a rejeição que o cenário quer ver.
+  const leiturasDaExposicao: string[] = [];
+  page.on('request', (requisicaoDaPagina) => {
+    if (new URL(requisicaoDaPagina.url()).pathname === ROTA_DAS_EXPOSICOES) leiturasDaExposicao.push(requisicaoDaPagina.url());
+  });
   let houveRejeicao = false;
   for (let tentativa = 0; tentativa < 6 && !houveRejeicao; tentativa++) {
     const exposicaoAntes = await lerExposicaoNoServidor(page, 'VIIA4');
+    const leiturasAntesDoEnvio = leiturasDaExposicao.length;
     await enviarOrdemPelaBoleta(page, { simbolo: 'VIIA4', lado: 'Compra', quantidade: '99.999', preco: '999,99' });
     const situacaoNaTela = await page.getByTestId('status-da-ordem').textContent();
     if (situacaoNaTela === 'Rejeitada') {
       houveRejeicao = true;
+      await expect(page.getByTestId('status-da-ordem')).toHaveCSS('color', COR_DO_STATUS_REJEITADO);
       await expect(page.getByTestId('mensagem-da-ordem')).toHaveText(
         'Ordem rejeitada: a exposição de VIIA4 passaria do limite de 100.000.000,00.',
       );
+      // RF-31: depois da rejeição a tela relê a exposição (uma leitura nova) e o valor lido não mudou.
+      await expect.poll(() => leiturasDaExposicao.length).toBe(leiturasAntesDoEnvio + 1);
       await conferirPainelDeExposicao(page, 'VIIA4', exposicaoAntes.exposure, exposicaoAntes.remaining);
       expect(await lerExposicaoNoServidor(page, 'VIIA4')).toEqual(exposicaoAntes);
     } else {
@@ -156,7 +167,7 @@ test('regressão: uma leitura antiga e lenta da exposição não apaga a leitura
   await expect(paginaComLeituraLenta.getByTestId('status-da-ordem')).toHaveText('Aceita');
   await paginaComLeituraLenta.waitForTimeout(3_500);
   const exposicaoEsperada = exposicaoAntes.exposure + 10_000;
-  await conferirPainelDeExposicao(paginaComLeituraLenta, 'PETR4', exposicaoEsperada, LIMITE - Math.abs(exposicaoEsperada));
+  await conferirPainelDeExposicao(paginaComLeituraLenta, 'PETR4', exposicaoEsperada, LIMITE_DE_EXPOSICAO_POR_SIMBOLO - Math.abs(exposicaoEsperada));
 });
 
 test('RNF-02: cada número da tela usa algarismos tabulares', async ({ page }) => {
@@ -180,4 +191,26 @@ test('RNF-02: cada número da tela usa algarismos tabulares', async ({ page }) =
     await expect(numeroDaTela).toHaveCount(1);
     await expect(numeroDaTela).toHaveCSS('font-variant-numeric', 'tabular-nums');
   }
+});
+
+test('RF-25: o 400 de validação do servidor aparece no painel como "Não enviada", com a mensagem de cada campo', async ({ page }) => {
+  // O 400 só nasce de uma ordem que a tela já recusaria; a resposta abaixo é o corpo do contrato §1, linha "Campo inválido".
+  await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, (criacaoDaOrdem) =>
+    criacaoDaOrdem.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'validation_error',
+        message: 'A ordem tem campos inválidos.',
+        errors: [{ field: 'price', message: 'O preço deve ser múltiplo de 0,01.' }],
+      }),
+    }),
+  );
+  await page.getByLabel(/^Quantidade de/).fill('10');
+  await page.getByLabel('Preço por ação (R$)').fill('10,00');
+  await page.getByRole('button', { name: 'Enviar ordem de compra' }).click();
+  await expect(page.getByTestId('status-da-ordem')).toHaveText('Não enviada');
+  await expect(page.getByTestId('status-da-ordem')).toHaveCSS('color', COR_DO_STATUS_REJEITADO);
+  await expect(page.getByTestId('mensagem-da-ordem')).toHaveText('A ordem tem campos inválidos.');
+  await expect(page.getByTestId('erros-de-campo-da-ordem').getByRole('listitem')).toHaveText(['O preço deve ser múltiplo de 0,01.']);
 });

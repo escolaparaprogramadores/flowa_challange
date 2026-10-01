@@ -141,7 +141,7 @@ function DetalheDaResposta({ respostaDaOrdem }: { respostaDaOrdem: RespostaDaOrd
       <span className={`status ${classeCssDaSituacao}`} data-testid="status-da-ordem">{ROTULO_DA_SITUACAO_DA_ORDEM[respostaDaOrdem.situacao]}</span>
       <p className="resposta-motivo" data-testid="mensagem-da-ordem">{respostaDaOrdem.mensagemDoServidor}</p>
       {respostaDaOrdem.situacao === 'invalida' && respostaDaOrdem.errosDeCampo.length > 0 && (
-        <ul className="resposta-motivo">
+        <ul className="resposta-motivo" data-testid="erros-de-campo-da-ordem">
           {respostaDaOrdem.errosDeCampo.map((mensagemDoErroDeCampo) => (
             <li key={mensagemDoErroDeCampo}>{mensagemDoErroDeCampo}</li>
           ))}
