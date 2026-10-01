@@ -1,0 +1,92 @@
+using Dapper;
+using Flowa.Shared;
+using OrderAccumulator.Exposure;
+using Xunit.Abstractions;
+
+namespace OrderAccumulator.Tests;
+
+// CA-12: o paralelismo é na camada de dados. Cada ordem abre a própria conexão e transação.
+[Collection(PostgresCollection.Name)]
+public sealed class ConcurrencyTests(PostgresFixture postgres, ITestOutputHelper testOutput)
+{
+    private const int SimultaneousOrders = 200;
+
+    private const string CountTransactionsWaitingOnExposureRowSql = """
+        SELECT count(*)
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query LIKE '%UPDATE exposures%'
+        """;
+
+    // Quantidades de 5.000 a 99.999 a 20,00: cerca de 1 milhão por ordem, perto de 2× o limite
+    // no total, então parte tem de ser rejeitada. Rodadas ímpares compram, pares vendem.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task Simultaneous_orders_on_one_symbol_never_push_the_exposure_past_the_limit(int round)
+    {
+        await postgres.ResetOrdersAndExposuresAsync();
+        var orderSide = round % 2 == 1 ? OrderSideCodes.BuyOrderSideFixCode : OrderSideCodes.SellOrderSideFixCode;
+        var quantityGenerator = new Random(round);
+        var simultaneousOrders = Enumerable.Range(0, SimultaneousOrders)
+            .Select(_ => TestOrders.NewIncomingOrder("PETR4", orderSide, quantityGenerator.Next(5_000, 100_000), 20.00m))
+            .ToList();
+
+        // Uma transação à parte segura a linha de PETR4. Assim as 200 transações das ordens chegam
+        // todas ao UPDATE condicional e ficam esperando juntas, dentro do PostgreSQL.
+        await using var rowHolderConnection = await postgres.DataSource.OpenConnectionAsync();
+        await using var rowHolderTransaction = await rowHolderConnection.BeginTransactionAsync();
+        await rowHolderConnection.ExecuteAsync(
+            "SELECT exposure FROM exposures WHERE symbol = 'PETR4' FOR UPDATE", transaction: rowHolderTransaction);
+
+        var simultaneousOrderTasks = simultaneousOrders
+            .Select(incomingOrder => Task.Run(() => postgres.OrderProcessor.ProcessIncomingOrderAsync(incomingOrder)))
+            .ToList();
+        var transactionsWaitingTogether = await WaitForTransactionsWaitingOnExposureRowAsync(SimultaneousOrders);
+
+        await rowHolderTransaction.CommitAsync();
+        var orderAnswers = await Task.WhenAll(simultaneousOrderTasks);
+
+        var finalExposure = await postgres.ReadExposureOfSymbolAsync("PETR4");
+        var acceptedAnswers = orderAnswers.Where(orderAnswer => orderAnswer.Accepted).ToList();
+        var rejectedAnswers = orderAnswers.Where(orderAnswer => !orderAnswer.Accepted).ToList();
+        testOutput.WriteLine(
+            $"rodada {round}: {transactionsWaitingTogether} transações esperando a linha ao mesmo tempo, " +
+            $"{acceptedAnswers.Count} aceitas, {rejectedAnswers.Count} rejeitadas, exposição final {finalExposure}");
+
+        Assert.Equal(SimultaneousOrders, transactionsWaitingTogether);
+        Assert.True(Math.Abs(finalExposure) <= ExposureLimit.PerSymbol, $"exposição {finalExposure} passou do limite");
+        Assert.Equal(acceptedAnswers.Sum(TestOrders.ExposureDeltaOf), finalExposure);
+        Assert.Equal(finalExposure, await postgres.SumAcceptedOrdersExposureAsync("PETR4"));
+        Assert.Equal(SimultaneousOrders, await postgres.CountStoredOrdersAsync());
+        Assert.NotEmpty(rejectedAnswers);
+        Assert.All(rejectedAnswers, rejectedAnswer =>
+            Assert.Equal(ExposureLimit.RejectionText("PETR4"), rejectedAnswer.RejectReason));
+
+        // A exposição só anda num sentido nesta rodada; então toda rejeitada era maior do que a
+        // folga que sobrou no fim. Isso mostra que as aceitas encostaram no limite.
+        Assert.All(rejectedAnswers, rejectedAnswer =>
+            Assert.True(Math.Abs(TestOrders.ExposureDeltaOf(rejectedAnswer)) > ExposureLimit.Remaining(finalExposure)));
+    }
+
+    // Espera até todas as transações estarem paradas no lock da linha, ou 30 s.
+    private async Task<long> WaitForTransactionsWaitingOnExposureRowAsync(int expectedWaitingTransactions)
+    {
+        await using var monitorConnection = await postgres.DataSource.OpenConnectionAsync();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        long waitingTransactions;
+        do
+        {
+            waitingTransactions = await monitorConnection.ExecuteScalarAsync<long>(CountTransactionsWaitingOnExposureRowSql);
+            if (waitingTransactions >= expectedWaitingTransactions)
+                return waitingTransactions;
+            await Task.Delay(50);
+        } while (DateTime.UtcNow < deadline);
+
+        return waitingTransactions;
+    }
+}
