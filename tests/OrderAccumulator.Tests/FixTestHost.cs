@@ -150,13 +150,14 @@ public sealed class TestInitiator : IApplication, IDisposable
         return executionReport;
     }
 
-    // Manda a ordem e confere que nenhum ExecutionReport volta dentro do prazo.
+    // Manda a ordem e confere que nada volta dentro do prazo: nem ExecutionReport, nem BusinessMessageReject.
     public async Task ExpectNoAnswerAsync(NewOrderSingle order, TimeSpan noAnswerWindow)
     {
         Assert.True(Session.SendToTarget(order, sessionId!));
         // Leitura cancelável: um ReadAsync pendurado depois do prazo engoliria o próximo relatório.
         using var timeout = new CancellationTokenSource(noAnswerWindow);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executionReports.Reader.ReadAsync(timeout.Token).AsTask());
+        Assert.False(businessRejects.Reader.TryRead(out _), "Veio um BusinessMessageReject onde não devia vir resposta nenhuma.");
     }
 
     // Manda uma mensagem que a aplicação do acceptor não aceita e devolve a recusa (35=j) que voltou.
