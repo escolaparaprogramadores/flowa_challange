@@ -12,7 +12,7 @@ var orderGeneratorBuilder = WebApplication.CreateBuilder(new WebApplicationOptio
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
 });
-ContractHttpPort.UseDefaultWhenNotInformed(orderGeneratorBuilder);
+ContractHttpPort.UseDefaultOrderGeneratorHttpPortWhenMissing(orderGeneratorBuilder);
 
 orderGeneratorBuilder.Services.AddSingleton<FixOrderClient>();
 orderGeneratorBuilder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FixOrderClient>());
@@ -44,12 +44,12 @@ public partial class Program;
 // Contrato §4: a porta HTTP vem de ASPNETCORE_HTTP_PORTS; 8080 só quando ninguém informou porta nem URL.
 public static class ContractHttpPort
 {
-    public const string DefaultHttpPort = "8080";
+    public const string DefaultOrderGeneratorHttpPort = "8080";
 
-    public static void UseDefaultWhenNotInformed(WebApplicationBuilder orderGeneratorBuilder)
+    public static void UseDefaultOrderGeneratorHttpPortWhenMissing(WebApplicationBuilder orderGeneratorBuilder)
     {
         if (string.IsNullOrEmpty(orderGeneratorBuilder.Configuration["HTTP_PORTS"])
             && string.IsNullOrEmpty(orderGeneratorBuilder.Configuration["URLS"]))
-            orderGeneratorBuilder.WebHost.UseSetting(WebHostDefaults.HttpPortsKey, DefaultHttpPort);
+            orderGeneratorBuilder.WebHost.UseSetting(WebHostDefaults.HttpPortsKey, DefaultOrderGeneratorHttpPort);
     }
 }

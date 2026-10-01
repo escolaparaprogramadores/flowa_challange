@@ -11,7 +11,7 @@ namespace OrderGenerator.Tests;
 // D-10: o OrderGenerator só repassa a exposição do OrderAccumulator.
 public sealed class ExposureProxyTests
 {
-    private const string ExposureMessage = "Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.";
+    private const string ExposureCommunicationMessage = "Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.";
 
     private const string AccumulatorExposuresJson = """
         {"limit":100000000.00,"exposures":[{"symbol":"PETR4","exposure":1000.00,"remaining":99999000.00},{"symbol":"VALE3","exposure":-500.00,"remaining":99999500.00},{"symbol":"VIIA4","exposure":0.00,"remaining":100000000.00}]}
@@ -25,7 +25,7 @@ public sealed class ExposureProxyTests
             exposuresHttpContext.Response.ContentType = "application/json";
             await exposuresHttpContext.Response.WriteAsync(AccumulatorExposuresJson);
         });
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), fakeAccumulator.Url);
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var exposuresResponse = await orderGeneratorClient.GetAsync("/api/exposures");
@@ -38,7 +38,7 @@ public sealed class ExposureProxyTests
     [Fact]
     public async Task Accumulator_fora_do_ar_responde_503_em_portugues()
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), $"http://127.0.0.1:{TestHost.FreePort()}");
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}");
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var responseClock = Stopwatch.StartNew();
@@ -54,7 +54,7 @@ public sealed class ExposureProxyTests
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async exposuresHttpContext =>
             await Task.Delay(TimeSpan.FromSeconds(8), exposuresHttpContext.RequestAborted));
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), fakeAccumulator.Url);
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var responseClock = Stopwatch.StartNew();
@@ -73,7 +73,7 @@ public sealed class ExposureProxyTests
             exposuresHttpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
             return Task.CompletedTask;
         });
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), fakeAccumulator.Url);
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         await AssertExposureError(await orderGeneratorClient.GetAsync("/api/exposures"));
@@ -82,42 +82,42 @@ public sealed class ExposureProxyTests
     [Fact]
     public async Task Erro_nao_previsto_vira_500_com_o_corpo_do_contrato_sem_detalhe_interno()
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort()).WithWebHostBuilder(webHostBuilder =>
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(webHostBuilder =>
             webHostBuilder.ConfigureTestServices(testServices => testServices
                 .AddHttpClient(ApiEndpoints.AccumulatorHttpClientName)
-                .ConfigurePrimaryHttpMessageHandler(() => new ExplodingHandler())));
+                .ConfigurePrimaryHttpMessageHandler(() => new ExplodingAccumulatorHandler())));
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var errorHttpResponse = await orderGeneratorClient.GetAsync("/api/exposures");
         var errorBody = await errorHttpResponse.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.InternalServerError, errorHttpResponse.StatusCode);
-        var errorResponse = await OrderApiTests.ReadJson(errorHttpResponse);
+        var errorResponse = await OrderApiTests.ReadOrderGeneratorResponseJson(errorHttpResponse);
         Assert.Equal("error", errorResponse.GetProperty("status").GetString());
         Assert.Equal("Erro inesperado ao processar a ordem.", errorResponse.GetProperty("message").GetString());
-        Assert.DoesNotContain(ExplodingHandler.Detail, errorBody);
+        Assert.DoesNotContain(ExplodingAccumulatorHandler.InternalErrorDetail, errorBody);
         Assert.DoesNotContain("   at ", errorBody);
     }
 
-    private sealed class ExplodingHandler : HttpMessageHandler
+    private sealed class ExplodingAccumulatorHandler : HttpMessageHandler
     {
-        public const string Detail = "detalhe-interno-que-nao-pode-vazar";
+        public const string InternalErrorDetail = "detalhe-interno-que-nao-pode-vazar";
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException(Detail);
+            throw new InvalidOperationException(InternalErrorDetail);
     }
 
     private static async Task AssertExposureError(HttpResponseMessage exposuresResponse)
     {
         Assert.Equal(HttpStatusCode.ServiceUnavailable, exposuresResponse.StatusCode);
-        var communicationErrorResponse = await OrderApiTests.ReadJson(exposuresResponse);
+        var communicationErrorResponse = await OrderApiTests.ReadOrderGeneratorResponseJson(exposuresResponse);
         Assert.Equal("communication_error", communicationErrorResponse.GetProperty("status").GetString());
-        Assert.Equal(ExposureMessage, communicationErrorResponse.GetProperty("message").GetString());
+        Assert.Equal(ExposureCommunicationMessage, communicationErrorResponse.GetProperty("message").GetString());
     }
 
     private static async Task<FakeAccumulatorServer> StartFakeAccumulator(RequestDelegate exposuresHandler)
     {
-        var fakeAccumulatorUrl = $"http://127.0.0.1:{TestHost.FreePort()}";
+        var fakeAccumulatorUrl = $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}";
         var fakeAccumulatorBuilder = WebApplication.CreateSlimBuilder();
         fakeAccumulatorBuilder.WebHost.UseUrls(fakeAccumulatorUrl);
         var fakeAccumulatorApp = fakeAccumulatorBuilder.Build();
@@ -126,19 +126,19 @@ public sealed class ExposureProxyTests
         return new FakeAccumulatorServer(fakeAccumulatorApp, fakeAccumulatorUrl);
     }
 
-    private sealed record FakeAccumulatorServer(WebApplication App, string Url) : IAsyncDisposable
+    private sealed record FakeAccumulatorServer(WebApplication FakeAccumulatorApp, string FakeAccumulatorUrl) : IAsyncDisposable
     {
-        public ValueTask DisposeAsync() => App.DisposeAsync();
+        public ValueTask DisposeAsync() => FakeAccumulatorApp.DisposeAsync();
     }
 }
 
 // Contrato §5: a página sai de wwwroot, com index.html como padrão; /api nunca cai nela.
 public sealed class PageTests : IDisposable
 {
-    private const string IndexHtml = "<!doctype html><title>boleta-de-teste</title>";
+    private const string BoletaTestIndexHtml = "<!doctype html><title>boleta-de-teste</title>";
     private readonly string _temporaryWebRoot = Directory.CreateTempSubdirectory("flowa-wwwroot-").FullName;
 
-    public PageTests() => File.WriteAllText(Path.Combine(_temporaryWebRoot, "index.html"), IndexHtml);
+    public PageTests() => File.WriteAllText(Path.Combine(_temporaryWebRoot, "index.html"), BoletaTestIndexHtml);
 
     [Theory]
     [InlineData("/")]
@@ -146,14 +146,14 @@ public sealed class PageTests : IDisposable
     [InlineData("/painel/exposicao")]
     public async Task Raiz_e_rotas_da_tela_devolvem_o_index_html(string pagePath)
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), webRoot: _temporaryWebRoot);
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), webRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var pageResponse = await orderGeneratorClient.GetAsync(pagePath);
 
         Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
         Assert.Equal("text/html", pageResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(IndexHtml, await pageResponse.Content.ReadAsStringAsync());
+        Assert.Equal(BoletaTestIndexHtml, await pageResponse.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -166,12 +166,12 @@ public sealed class PageTests : IDisposable
         if (indexCreatedByThisTest)
         {
             Directory.CreateDirectory(binaryWebRoot);
-            File.WriteAllText(binaryIndexHtml, IndexHtml);
+            File.WriteAllText(binaryIndexHtml, BoletaTestIndexHtml);
         }
 
         try
         {
-            await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort());
+            await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort());
             using var orderGeneratorClient = orderGenerator.CreateClient();
 
             var pageResponse = await orderGeneratorClient.GetAsync("/");
@@ -198,7 +198,7 @@ public sealed class PageTests : IDisposable
     [InlineData("/api/orders/123")]
     public async Task Caminho_de_api_desconhecido_responde_404_e_nao_o_index(string apiPath)
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), webRoot: _temporaryWebRoot);
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), webRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var unknownApiResponse = await orderGeneratorClient.GetAsync(apiPath);
@@ -210,7 +210,7 @@ public sealed class PageTests : IDisposable
     [Fact]
     public async Task Health_responde_Healthy_sem_sessao_FIX()
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), webRoot: _temporaryWebRoot);
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), webRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var healthResponse = await orderGeneratorClient.GetAsync("/health");
@@ -222,18 +222,18 @@ public sealed class PageTests : IDisposable
     [Fact]
     public async Task Version_responde_o_commit_do_HEAD_do_repositorio()
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), webRoot: _temporaryWebRoot);
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), webRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var versionResponse = await orderGeneratorClient.GetAsync("/version");
 
         Assert.Equal(HttpStatusCode.OK, versionResponse.StatusCode);
-        var runningCommit = (await OrderApiTests.ReadJson(versionResponse)).GetProperty("commit").GetString();
-        Assert.Equal(ReadGitHead(), runningCommit);
+        var runningCommit = (await OrderApiTests.ReadOrderGeneratorResponseJson(versionResponse)).GetProperty("commit").GetString();
+        Assert.Equal(ReadRepositoryGitHeadSha(), runningCommit);
     }
 
     // Oráculo de fora do app: o git do repositório onde os testes foram compilados.
-    private static string ReadGitHead()
+    private static string ReadRepositoryGitHeadSha()
     {
         var gitRevParse = Process.Start(new ProcessStartInfo("git", ["-C", AppContext.BaseDirectory, "rev-parse", "HEAD"])
         {
@@ -263,14 +263,14 @@ public sealed class ContractHttpPortTests
             Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null);
 
             Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", "18080");
-            Assert.Equal("18080", HttpPortsChosenAtStartup());
+            Assert.Equal("18080", ReadHttpPortsChosenAtOrderGeneratorStartup());
 
             Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", null);
-            Assert.Equal(ContractHttpPort.DefaultHttpPort, HttpPortsChosenAtStartup());
+            Assert.Equal(ContractHttpPort.DefaultOrderGeneratorHttpPort, ReadHttpPortsChosenAtOrderGeneratorStartup());
 
             // Com ASPNETCORE_URLS informada quem decide é ela: o 8080 padrão não pode entrar por cima.
             Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:18081");
-            Assert.Null(HttpPortsChosenAtStartup());
+            Assert.Null(ReadHttpPortsChosenAtOrderGeneratorStartup());
         }
         finally
         {
@@ -280,10 +280,10 @@ public sealed class ContractHttpPortTests
     }
 
     // Mesma raiz do Program: lê o appsettings.json que vai junto do binário.
-    private static string? HttpPortsChosenAtStartup()
+    private static string? ReadHttpPortsChosenAtOrderGeneratorStartup()
     {
         var startupBuilder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory });
-        ContractHttpPort.UseDefaultWhenNotInformed(startupBuilder);
+        ContractHttpPort.UseDefaultOrderGeneratorHttpPortWhenMissing(startupBuilder);
         return startupBuilder.WebHost.GetSetting(WebHostDefaults.HttpPortsKey);
     }
 }

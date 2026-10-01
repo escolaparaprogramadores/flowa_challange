@@ -10,38 +10,38 @@ using QuickFix.Fields;
 namespace OrderGenerator.Tests;
 
 // OrderGenerator já logado num acceptor de teste que aceita tudo, para as ordens poderem sair.
-public sealed class LoggedOnGenerator : IAsyncLifetime
+public sealed class LoggedOnOrderGenerator : IAsyncLifetime
 {
-    public TestAcceptor Acceptor { get; } = new(TestHost.FreePort());
-    public WebApplicationFactory<Program> Factory { get; private set; } = null!;
-    public HttpClient Client { get; private set; } = null!;
+    public FixTestAcceptor FixAcceptor { get; } = new(OrderGeneratorTestHost.FindFreeTcpPort());
+    public WebApplicationFactory<Program> OrderGeneratorFactory { get; private set; } = null!;
+    public HttpClient OrderGeneratorClient { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
-        Acceptor.Start();
-        Factory = TestHost.CreateOrderGeneratorFactory(Acceptor.Port);
-        Client = Factory.CreateClient();
-        await Acceptor.WaitForLogonAsync();
+        FixAcceptor.StartFixTestAcceptor();
+        OrderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(FixAcceptor.AcceptorPort);
+        OrderGeneratorClient = OrderGeneratorFactory.CreateClient();
+        await FixAcceptor.WaitForFixSessionLogonAsync();
     }
 
     public async Task DisposeAsync()
     {
-        Client.Dispose();
-        await Factory.DisposeAsync();
-        Acceptor.Dispose();
+        OrderGeneratorClient.Dispose();
+        await OrderGeneratorFactory.DisposeAsync();
+        FixAcceptor.Dispose();
     }
 }
 
-public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
+public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
 {
     private const string SentinelOrderJson = """{"symbol":"PETR4","side":"sell","quantity":7,"price":7.77}""";
 
-    private readonly LoggedOnGenerator _generator;
+    private readonly LoggedOnOrderGenerator _loggedOnOrderGenerator;
 
-    public OrderApiTests(LoggedOnGenerator generator)
+    public OrderApiTests(LoggedOnOrderGenerator loggedOnOrderGenerator)
     {
-        _generator = generator;
-        _generator.Acceptor.ResetToAcceptEveryOrder();
+        _loggedOnOrderGenerator = loggedOnOrderGenerator;
+        _loggedOnOrderGenerator.FixAcceptor.ResetToAcceptEveryOrder();
     }
 
     public static TheoryData<string, string, string> InvalidOrders => new()
@@ -75,7 +75,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         var invalidOrderHttpResponse = await PostOrderJson(invalidOrderJson);
 
         Assert.Equal(HttpStatusCode.BadRequest, invalidOrderHttpResponse.StatusCode);
-        var validationErrorResponse = await ReadJson(invalidOrderHttpResponse);
+        var validationErrorResponse = await ReadOrderGeneratorResponseJson(invalidOrderHttpResponse);
         Assert.Equal("validation_error", validationErrorResponse.GetProperty("status").GetString());
         Assert.Equal("A ordem tem campos inválidos.", validationErrorResponse.GetProperty("message").GetString());
         var fieldError = Assert.Single(validationErrorResponse.GetProperty("errors").EnumerateArray());
@@ -90,7 +90,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         var notJsonHttpResponse = await PostOrderJson("isto não é json");
 
         Assert.Equal(HttpStatusCode.BadRequest, notJsonHttpResponse.StatusCode);
-        var fieldErrors = (await ReadJson(notJsonHttpResponse)).GetProperty("errors").EnumerateArray()
+        var fieldErrors = (await ReadOrderGeneratorResponseJson(notJsonHttpResponse)).GetProperty("errors").EnumerateArray()
             .Select(fieldError => (fieldError.GetProperty("field").GetString(), fieldError.GetProperty("message").GetString()))
             .ToList();
         Assert.Equal(
@@ -114,7 +114,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         var emptyOrderHttpResponse = await PostOrderJson(orderJsonWithoutFields);
 
         Assert.Equal(HttpStatusCode.BadRequest, emptyOrderHttpResponse.StatusCode);
-        var fieldErrors = (await ReadJson(emptyOrderHttpResponse)).GetProperty("errors").EnumerateArray()
+        var fieldErrors = (await ReadOrderGeneratorResponseJson(emptyOrderHttpResponse)).GetProperty("errors").EnumerateArray()
             .Select(fieldError => (fieldError.GetProperty("field").GetString(), fieldError.GetProperty("message").GetString()))
             .ToList();
         Assert.Equal(
@@ -139,7 +139,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         var sentBefore = DateTime.UtcNow;
 
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
-        var sentNewOrderSingle = Assert.Single(_generator.Acceptor.ReceivedOrders);
+        var sentNewOrderSingle = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
         Assert.Equal("D", sentNewOrderSingle.Header.GetString(Tags.MsgType));
         Assert.Equal("VALE3", sentNewOrderSingle.GetString(Tags.Symbol));
         Assert.Equal(fixSide, sentNewOrderSingle.GetChar(Tags.Side));
@@ -148,7 +148,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         Assert.Equal(OrdType.LIMIT, sentNewOrderSingle.GetChar(Tags.OrdType));
         Assert.InRange(sentNewOrderSingle.GetDateTime(Tags.TransactTime), sentAfter, sentBefore);
 
-        var orderResponse = await ReadJson(orderHttpResponse);
+        var orderResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
         var clOrdId = sentNewOrderSingle.GetString(Tags.ClOrdID);
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
         Assert.Equal(clOrdId, orderResponse.GetProperty("clOrdId").GetString());
@@ -173,12 +173,12 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         var expectedPrice = decimal.Parse(priceJson.Trim('"'), System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
-        var sentNewOrderSingle = Assert.Single(_generator.Acceptor.ReceivedOrders);
+        var sentNewOrderSingle = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
         Assert.Equal("VIIA4", sentNewOrderSingle.GetString(Tags.Symbol));
         Assert.Equal(Side.SELL, sentNewOrderSingle.GetChar(Tags.Side));
         Assert.Equal(expectedQuantity, sentNewOrderSingle.GetDecimal(Tags.OrderQty));
         Assert.Equal(expectedPrice, sentNewOrderSingle.GetDecimal(Tags.Price));
-        var orderResponse = await ReadJson(orderHttpResponse);
+        var orderResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
         Assert.Equal(expectedQuantity, orderResponse.GetProperty("quantity").GetInt32());
         Assert.Equal(expectedPrice, orderResponse.GetProperty("price").GetDecimal());
@@ -188,13 +188,13 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     public async Task Ordem_rejeitada_devolve_o_texto_da_tag_58()
     {
         const string rejectionText = "Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.";
-        _generator.Acceptor.ExecutionReportResponder = receivedOrder => _generator.Acceptor.BuildRejectedReport(receivedOrder, rejectionText);
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder => _loggedOnOrderGenerator.FixAcceptor.BuildRejectedExecutionReport(receivedOrder, rejectionText);
 
         var orderHttpResponse = await PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":99999,"price":999.99}""");
 
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
-        var rejectedResponse = await ReadJson(orderHttpResponse);
-        var clOrdId = Assert.Single(_generator.Acceptor.ReceivedOrders).GetString(Tags.ClOrdID);
+        var rejectedResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
+        var clOrdId = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
         Assert.Equal("rejected", rejectedResponse.GetProperty("status").GetString());
         Assert.Equal(rejectionText, rejectedResponse.GetProperty("message").GetString());
         Assert.Equal(clOrdId, rejectedResponse.GetProperty("clOrdId").GetString());
@@ -208,13 +208,13 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     [Fact]
     public async Task Ordem_rejeitada_sem_tag_58_devolve_a_mensagem_padrao()
     {
-        _generator.Acceptor.ExecutionReportResponder = receivedOrder =>
-            _generator.Acceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder =>
+            _loggedOnOrderGenerator.FixAcceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
 
         var orderHttpResponse = await PostOrderJson("""{"symbol":"VALE3","side":"sell","quantity":4,"price":12.34}""");
 
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
-        var rejectedResponse = await ReadJson(orderHttpResponse);
+        var rejectedResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
         Assert.Equal("rejected", rejectedResponse.GetProperty("status").GetString());
         Assert.Equal("Ordem rejeitada.", rejectedResponse.GetProperty("message").GetString());
         AssertAnswersItsOwnExecutionReport(rejectedResponse);
@@ -224,13 +224,13 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     public async Task ExecutionReport_com_ExecType_fora_do_contrato_responde_500()
     {
         // 150=2 (Fill) não está no contrato v1, que só prevê 0 (New) e 8 (Rejected).
-        _generator.Acceptor.ExecutionReportResponder = receivedOrder =>
-            _generator.Acceptor.BuildExecutionReport(receivedOrder, ExecType.FILL, OrdStatus.FILLED, 0);
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder =>
+            _loggedOnOrderGenerator.FixAcceptor.BuildExecutionReport(receivedOrder, ExecType.FILL, OrdStatus.FILLED, 0);
 
         var orderHttpResponse = await PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":10,"price":20.00}""");
 
         Assert.Equal(HttpStatusCode.InternalServerError, orderHttpResponse.StatusCode);
-        var errorResponse = await ReadJson(orderHttpResponse);
+        var errorResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
         Assert.Equal("error", errorResponse.GetProperty("status").GetString());
         Assert.Equal("Erro inesperado ao processar a ordem.", errorResponse.GetProperty("message").GetString());
     }
@@ -238,14 +238,14 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     [Fact]
     public async Task Relatorio_de_outro_ClOrdID_nao_responde_pela_ordem()
     {
-        _generator.Acceptor.StrayExecutionReport = receivedOrder =>
-            _generator.Acceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0, clOrdId: "nao-e-desta-ordem");
+        _loggedOnOrderGenerator.FixAcceptor.StrayExecutionReport = receivedOrder =>
+            _loggedOnOrderGenerator.FixAcceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0, clOrdId: "nao-e-desta-ordem");
 
-        var orderResponse = await ReadJson(await PostOrderJson("""{"symbol":"VIIA4","side":"buy","quantity":5,"price":3.21}"""));
+        var orderResponse = await ReadOrderGeneratorResponseJson(await PostOrderJson("""{"symbol":"VIIA4","side":"buy","quantity":5,"price":3.21}"""));
 
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
         AssertAnswersItsOwnExecutionReport(orderResponse);
-        var strayOrderId = _generator.Acceptor.SentExecutionReports["nao-e-desta-ordem"].GetString(Tags.OrderID);
+        var strayOrderId = _loggedOnOrderGenerator.FixAcceptor.SentExecutionReports["nao-e-desta-ordem"].GetString(Tags.OrderID);
         Assert.NotEqual(strayOrderId, orderResponse.GetProperty("orderId").GetString());
     }
 
@@ -254,18 +254,18 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     {
         // A de PETR4 é respondida depois da de VALE3: as respostas chegam fora da ordem de envio.
         const string rejectionText = "Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.";
-        _generator.Acceptor.ExecutionReportResponder = receivedOrder => receivedOrder.GetString(Tags.Symbol) == "VALE3"
-            ? _generator.Acceptor.BuildRejectedReport(receivedOrder, rejectionText)
-            : _generator.Acceptor.BuildAcceptedReport(receivedOrder);
-        _generator.Acceptor.ExecutionReportDelay = receivedOrder =>
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder => receivedOrder.GetString(Tags.Symbol) == "VALE3"
+            ? _loggedOnOrderGenerator.FixAcceptor.BuildRejectedExecutionReport(receivedOrder, rejectionText)
+            : _loggedOnOrderGenerator.FixAcceptor.BuildAcceptedExecutionReport(receivedOrder);
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportDelay = receivedOrder =>
             receivedOrder.GetString(Tags.Symbol) == "PETR4" ? TimeSpan.FromMilliseconds(500) : TimeSpan.Zero;
 
         var petr4Request = PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":10,"price":30.00}""");
         var vale3Request = PostOrderJson("""{"symbol":"VALE3","side":"sell","quantity":20,"price":60.00}""");
         await Task.WhenAll(petr4Request, vale3Request);
 
-        var petr4Response = await ReadJson(await petr4Request);
-        var vale3Response = await ReadJson(await vale3Request);
+        var petr4Response = await ReadOrderGeneratorResponseJson(await petr4Request);
+        var vale3Response = await ReadOrderGeneratorResponseJson(await vale3Request);
         Assert.Equal("accepted", petr4Response.GetProperty("status").GetString());
         Assert.Equal("PETR4", petr4Response.GetProperty("symbol").GetString());
         Assert.Equal("rejected", vale3Response.GetProperty("status").GetString());
@@ -277,19 +277,19 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     [Fact]
     public async Task Resposta_que_chega_depois_dos_5_segundos_e_descartada()
     {
-        _generator.Acceptor.ExecutionReportDelay = receivedOrder => TimeSpan.FromSeconds(6);
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportDelay = receivedOrder => TimeSpan.FromSeconds(6);
 
         var lateOrderHttpResponse = await PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":10,"price":30.00}""");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, lateOrderHttpResponse.StatusCode);
-        var lateClOrdId = Assert.Single(_generator.Acceptor.ReceivedOrders).GetString(Tags.ClOrdID);
-        await TestHost.WaitUntil(() => _generator.Acceptor.SentExecutionReports.ContainsKey(lateClOrdId));
+        var lateClOrdId = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
+        await OrderGeneratorTestHost.WaitUntilTestConditionHolds(() => _loggedOnOrderGenerator.FixAcceptor.SentExecutionReports.ContainsKey(lateClOrdId));
 
-        _generator.Acceptor.ExecutionReportDelay = receivedOrder => TimeSpan.Zero;
-        var nextOrderResponse = await ReadJson(await PostOrderJson("""{"symbol":"VALE3","side":"buy","quantity":10,"price":30.00}"""));
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportDelay = receivedOrder => TimeSpan.Zero;
+        var nextOrderResponse = await ReadOrderGeneratorResponseJson(await PostOrderJson("""{"symbol":"VALE3","side":"buy","quantity":10,"price":30.00}"""));
 
         Assert.Equal("accepted", nextOrderResponse.GetProperty("status").GetString());
         AssertAnswersItsOwnExecutionReport(nextOrderResponse);
-        Assert.Equal(0, _generator.Factory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
+        Assert.Equal(0, _loggedOnOrderGenerator.OrderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
 
     [Fact]
@@ -302,7 +302,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
         string clOrdId;
         try
         {
-            var orderResponse = await ReadJson(await PostOrderJson("""{"symbol":"VALE3","side":"buy","quantity":3,"price":45.10}"""));
+            var orderResponse = await ReadOrderGeneratorResponseJson(await PostOrderJson("""{"symbol":"VALE3","side":"buy","quantity":3,"price":45.10}"""));
             clOrdId = orderResponse.GetProperty("clOrdId").GetString()!;
         }
         finally
@@ -319,23 +319,23 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     // A sessão FIX entrega em ordem: se uma ordem inválida tivesse saído, ela chegaria antes da sentinela.
     private async Task AssertOnlySentinelReachedAcceptor()
     {
-        var sentinelResponse = await ReadJson(await PostOrderJson(SentinelOrderJson));
+        var sentinelResponse = await ReadOrderGeneratorResponseJson(await PostOrderJson(SentinelOrderJson));
         var sentinelClOrdId = sentinelResponse.GetProperty("clOrdId").GetString();
-        var receivedOrder = Assert.Single(_generator.Acceptor.ReceivedOrders);
+        var receivedOrder = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
         Assert.Equal(sentinelClOrdId, receivedOrder.GetString(Tags.ClOrdID));
     }
 
     private void AssertAnswersItsOwnExecutionReport(JsonElement orderResponse)
     {
-        var executionReport = _generator.Acceptor.SentExecutionReports[orderResponse.GetProperty("clOrdId").GetString()!];
+        var executionReport = _loggedOnOrderGenerator.FixAcceptor.SentExecutionReports[orderResponse.GetProperty("clOrdId").GetString()!];
         Assert.Equal(executionReport.GetString(Tags.OrderID), orderResponse.GetProperty("orderId").GetString());
         Assert.Equal(executionReport.GetString(Tags.ExecID), orderResponse.GetProperty("execId").GetString());
     }
 
     private Task<HttpResponseMessage> PostOrderJson(string orderJson) =>
-        _generator.Client.PostAsync("/api/orders", new StringContent(orderJson, Encoding.UTF8, "application/json"));
+        _loggedOnOrderGenerator.OrderGeneratorClient.PostAsync("/api/orders", new StringContent(orderJson, Encoding.UTF8, "application/json"));
 
-    internal static async Task<JsonElement> ReadJson(HttpResponseMessage httpResponse) =>
+    internal static async Task<JsonElement> ReadOrderGeneratorResponseJson(HttpResponseMessage httpResponse) =>
         JsonDocument.Parse(await httpResponse.Content.ReadAsStringAsync()).RootElement;
 }
 
@@ -343,19 +343,19 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
 public sealed class OrderCommunicationTests
 {
     private const string ValidOrderJson = """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.50}""";
-    private const string CommunicationMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
+    private const string OrderCommunicationMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
 
     [Fact]
     public async Task Sem_sessao_FIX_responde_503_na_hora()
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort());
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort());
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
         var responseClock = Stopwatch.StartNew();
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
         responseClock.Stop();
 
-        await AssertCommunicationError(orderHttpResponse);
+        await AssertOrderCommunicationError(orderHttpResponse);
         Assert.True(responseClock.Elapsed < TimeSpan.FromSeconds(1), $"levou {responseClock.Elapsed}");
         Assert.Equal(0, orderGenerator.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
@@ -364,11 +364,11 @@ public sealed class OrderCommunicationTests
     public void Acceptor_de_teste_escuta_so_no_loopback()
     {
         // Escutando em todas as redes, o Windows pede ao dono para liberar o testhost no firewall.
-        using var acceptor = new TestAcceptor(TestHost.FreePort());
-        acceptor.Start();
+        using var acceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        acceptor.StartFixTestAcceptor();
 
         var acceptorListeners = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties()
-            .GetActiveTcpListeners().Where(listenerEndpoint => listenerEndpoint.Port == acceptor.Port).ToList();
+            .GetActiveTcpListeners().Where(listenerEndpoint => listenerEndpoint.Port == acceptor.AcceptorPort).ToList();
 
         var acceptorListener = Assert.Single(acceptorListeners);
         Assert.Equal(IPAddress.Loopback, acceptorListener.Address);
@@ -377,17 +377,17 @@ public sealed class OrderCommunicationTests
     [Fact]
     public async Task Acceptor_mudo_responde_503_em_5_segundos_e_descarta_a_espera()
     {
-        using var acceptor = new TestAcceptor(TestHost.FreePort());
-        acceptor.Start();
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(acceptor.Port);
+        using var acceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        acceptor.StartFixTestAcceptor();
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(acceptor.AcceptorPort);
         using var orderGeneratorClient = orderGenerator.CreateClient();
-        await acceptor.WaitForLogonAsync();
+        await acceptor.WaitForFixSessionLogonAsync();
 
         var responseClock = Stopwatch.StartNew();
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
         responseClock.Stop();
 
-        await AssertCommunicationError(orderHttpResponse);
+        await AssertOrderCommunicationError(orderHttpResponse);
         Assert.Single(acceptor.ReceivedOrders);
         Assert.InRange(responseClock.Elapsed, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6.5));
         Assert.Equal(0, orderGenerator.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
@@ -396,19 +396,19 @@ public sealed class OrderCommunicationTests
     [Fact]
     public async Task Quando_o_acceptor_volta_o_initiator_reloga_e_so_a_ordem_nova_passa()
     {
-        using var acceptor = new TestAcceptor(TestHost.FreePort());
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(acceptor.Port);
+        using var acceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(acceptor.AcceptorPort);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
-        await AssertCommunicationError(await PostValidOrder(orderGeneratorClient));
+        await AssertOrderCommunicationError(await PostValidOrder(orderGeneratorClient));
 
-        acceptor.ExecutionReportResponder = acceptor.BuildAcceptedReport;
-        acceptor.Start();
-        await acceptor.WaitForLogonAsync();
+        acceptor.ExecutionReportResponder = acceptor.BuildAcceptedExecutionReport;
+        acceptor.StartFixTestAcceptor();
+        await acceptor.WaitForFixSessionLogonAsync();
 
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
-        var orderResponse = await OrderApiTests.ReadJson(orderHttpResponse);
+        var orderResponse = await OrderApiTests.ReadOrderGeneratorResponseJson(orderHttpResponse);
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
         // D-34: a ordem recusada sem sessão não ficou na store para sair depois do logon.
         var receivedOrder = Assert.Single(acceptor.ReceivedOrders);
@@ -418,11 +418,11 @@ public sealed class OrderCommunicationTests
     private static Task<HttpResponseMessage> PostValidOrder(HttpClient orderGeneratorClient) =>
         orderGeneratorClient.PostAsync("/api/orders", new StringContent(ValidOrderJson, Encoding.UTF8, "application/json"));
 
-    private static async Task AssertCommunicationError(HttpResponseMessage orderHttpResponse)
+    private static async Task AssertOrderCommunicationError(HttpResponseMessage orderHttpResponse)
     {
         Assert.Equal(HttpStatusCode.ServiceUnavailable, orderHttpResponse.StatusCode);
-        var communicationErrorResponse = await OrderApiTests.ReadJson(orderHttpResponse);
+        var communicationErrorResponse = await OrderApiTests.ReadOrderGeneratorResponseJson(orderHttpResponse);
         Assert.Equal("communication_error", communicationErrorResponse.GetProperty("status").GetString());
-        Assert.Equal(CommunicationMessage, communicationErrorResponse.GetProperty("message").GetString());
+        Assert.Equal(OrderCommunicationMessage, communicationErrorResponse.GetProperty("message").GetString());
     }
 }

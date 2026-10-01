@@ -17,15 +17,15 @@ namespace OrderGenerator.Tests;
 
 // Faz o papel do OrderAccumulator só no que o OrderGenerator enxerga: aceita a sessão FIX,
 // guarda as NewOrderSingle recebidas e responde com o ExecutionReport que o teste escolher.
-public sealed class TestAcceptor : IApplication, IDisposable
+public sealed class FixTestAcceptor : IApplication, IDisposable
 {
-    private ThreadedSocketAcceptor? _acceptor;
-    private TaskCompletionSource _acceptorLogon = NewSignal();
+    private ThreadedSocketAcceptor? _threadedFixAcceptor;
+    private TaskCompletionSource _acceptorLogon = NewFixLogonSignal();
     private int _executionReportNumber;
 
-    public TestAcceptor(int port) => Port = port;
+    public FixTestAcceptor(int port) => AcceptorPort = port;
 
-    public int Port { get; }
+    public int AcceptorPort { get; }
 
     public ConcurrentQueue<Message> ReceivedOrders { get; } = new();
 
@@ -43,21 +43,21 @@ public sealed class TestAcceptor : IApplication, IDisposable
 
     public void ResetToAcceptEveryOrder()
     {
-        ExecutionReportResponder = BuildAcceptedReport;
+        ExecutionReportResponder = BuildAcceptedExecutionReport;
         ExecutionReportDelay = receivedOrder => TimeSpan.Zero;
         StrayExecutionReport = receivedOrder => null;
         ReceivedOrders.Clear();
         SentExecutionReports.Clear();
     }
 
-    public void Start()
+    public void StartFixTestAcceptor()
     {
-        _acceptorLogon = NewSignal();
+        _acceptorLogon = NewFixLogonSignal();
         var acceptorSettings = new SessionSettings(new StringReader($"""
             [DEFAULT]
             ConnectionType=acceptor
             SocketAcceptHost=127.0.0.1
-            SocketAcceptPort={Port}
+            SocketAcceptPort={AcceptorPort}
             StartTime=00:00:00
             EndTime=00:00:00
             UseDataDictionary=Y
@@ -71,19 +71,19 @@ public sealed class TestAcceptor : IApplication, IDisposable
             SenderCompID=ORDERACCUMULATOR
             TargetCompID=ORDERGENERATOR
             """));
-        _acceptor = new ThreadedSocketAcceptor(this, new MemoryStoreFactory(), acceptorSettings, new NullLogFactory(), new DefaultMessageFactory());
-        _acceptor.Start();
+        _threadedFixAcceptor = new ThreadedSocketAcceptor(this, new MemoryStoreFactory(), acceptorSettings, new NullLogFactory(), new DefaultMessageFactory());
+        _threadedFixAcceptor.Start();
     }
 
-    public void Stop()
+    public void StopFixTestAcceptor()
     {
-        _acceptor?.Stop(true);
-        _acceptor?.Dispose();
-        _acceptor = null;
+        _threadedFixAcceptor?.Stop(true);
+        _threadedFixAcceptor?.Dispose();
+        _threadedFixAcceptor = null;
     }
 
     // Espera as duas pontas: o acceptor recebeu o Logon e o initiator já recebeu a resposta dele.
-    public async Task WaitForLogonAsync()
+    public async Task WaitForFixSessionLogonAsync()
     {
         await _acceptorLogon.Task.WaitAsync(TimeSpan.FromSeconds(15));
         var initiatorSessionId = new SessionID("FIX.4.4", "ORDERGENERATOR", "ORDERACCUMULATOR");
@@ -96,10 +96,10 @@ public sealed class TestAcceptor : IApplication, IDisposable
         }
     }
 
-    public Message BuildAcceptedReport(Message receivedOrder) =>
+    public Message BuildAcceptedExecutionReport(Message receivedOrder) =>
         BuildExecutionReport(receivedOrder, ExecType.NEW, OrdStatus.NEW, receivedOrder.GetDecimal(Tags.OrderQty));
 
-    public Message BuildRejectedReport(Message receivedOrder, string rejectionText)
+    public Message BuildRejectedExecutionReport(Message receivedOrder, string rejectionText)
     {
         var rejectedReport = BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
         rejectedReport.SetField(new Text(rejectionText));
@@ -158,15 +158,15 @@ public sealed class TestAcceptor : IApplication, IDisposable
 
     public void ToApp(Message message, SessionID sessionID) { }
 
-    public void Dispose() => Stop();
+    public void Dispose() => StopFixTestAcceptor();
 
-    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private static TaskCompletionSource NewFixLogonSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
-public static class TestHost
+public static class OrderGeneratorTestHost
 {
     // Porta livre na hora do teste; ninguém escuta nela até alguém subir algo.
-    public static int FreePort()
+    public static int FindFreeTcpPort()
     {
         var freePortProbe = new TcpListener(IPAddress.Loopback, 0);
         freePortProbe.Start();
@@ -185,7 +185,7 @@ public static class TestHost
                 webHostBuilder.UseSetting(WebHostDefaults.WebRootKey, webRoot);
         });
 
-    public static async Task WaitUntil(Func<bool> expectedCondition)
+    public static async Task WaitUntilTestConditionHolds(Func<bool> expectedCondition)
     {
         var conditionClock = Stopwatch.StartNew();
         while (!expectedCondition())

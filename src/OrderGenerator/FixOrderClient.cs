@@ -26,13 +26,13 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     public static readonly TimeSpan ExecutionReportTimeout = TimeSpan.FromSeconds(5);
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Message>> _ordersAwaitingExecutionReport = new();
-    private readonly SocketInitiator _initiator;
+    private readonly SocketInitiator _fixSocketInitiator;
     private SessionID? _initiatorSessionId;
 
     public FixOrderClient(IConfiguration configuration)
     {
         var initiatorSettings = LoadInitiatorSessionSettings(configuration);
-        _initiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, new ScreenLogFactory(initiatorSettings), null);
+        _fixSocketInitiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, new ScreenLogFactory(initiatorSettings), null);
     }
 
     internal int OrdersAwaitingExecutionReportCount => _ordersAwaitingExecutionReport.Count;
@@ -138,15 +138,15 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _initiator.Start();
+        _fixSocketInitiator.Start();
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _initiator.Stop();
+        _fixSocketInitiator.Stop();
         return Task.CompletedTask;
     }
 
-    public void Dispose() => _initiator.Dispose();
+    public void Dispose() => _fixSocketInitiator.Dispose();
 }
