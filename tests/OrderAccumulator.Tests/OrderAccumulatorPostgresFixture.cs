@@ -11,7 +11,7 @@ namespace OrderAccumulator.Tests;
 public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
 {
     // max_connections acima do padrão (100) para o teste de concorrência abrir 200 conexões de uma vez.
-    private readonly PostgreSqlContainer postgresContainer = new PostgreSqlBuilder("postgres:17")
+    private readonly PostgreSqlContainer orderAccumulatorPostgresContainer = new PostgreSqlBuilder("postgres:17")
         .WithCommand("-c", "max_connections=300")
         .Build();
 
@@ -22,9 +22,9 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        await postgresContainer.StartAsync();
+        await orderAccumulatorPostgresContainer.StartAsync();
 
-        OrderDatabaseConnectionString = new NpgsqlConnectionStringBuilder(postgresContainer.GetConnectionString())
+        OrderDatabaseConnectionString = new NpgsqlConnectionStringBuilder(orderAccumulatorPostgresContainer.GetConnectionString())
         {
             MaxPoolSize = 250
         }.ConnectionString;
@@ -38,7 +38,7 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await OrderDatabaseDataSource.DisposeAsync();
-        await postgresContainer.DisposeAsync();
+        await orderAccumulatorPostgresContainer.DisposeAsync();
     }
 
     // Cada teste começa do zero: nenhuma ordem e os três símbolos zerados pela própria migração.

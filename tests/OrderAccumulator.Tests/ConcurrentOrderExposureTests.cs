@@ -7,7 +7,7 @@ namespace OrderAccumulator.Tests;
 
 // CA-12: o paralelismo é na camada de dados. Cada ordem abre a própria conexão e transação.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
-public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper testOutput)
+public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper concurrencyTestOutput)
 {
     private const int SimultaneousOrders = 200;
 
@@ -31,30 +31,30 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
     {
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         var orderSide = concurrencyRound % 2 == 1 ? OrderSideCodes.BuyOrderSideFixCode : OrderSideCodes.SellOrderSideFixCode;
-        var quantityGenerator = new Random(concurrencyRound);
+        var orderQuantityGenerator = new Random(concurrencyRound);
         var simultaneousOrders = Enumerable.Range(0, SimultaneousOrders)
-            .Select(_ => TestOrders.NewIncomingOrder("PETR4", orderSide, quantityGenerator.Next(5_000, 100_000), 20.00m))
+            .Select(_ => TestOrders.NewIncomingOrder("PETR4", orderSide, orderQuantityGenerator.Next(5_000, 100_000), 20.00m))
             .ToList();
 
         // Uma transação à parte segura a linha de PETR4. Assim as 200 transações das ordens chegam
         // todas ao UPDATE condicional e ficam esperando juntas, dentro do PostgreSQL.
-        await using var rowHolderConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
-        await using var rowHolderTransaction = await rowHolderConnection.BeginTransactionAsync();
-        await rowHolderConnection.ExecuteAsync(
-            "SELECT exposure FROM exposures WHERE symbol = 'PETR4' FOR UPDATE", transaction: rowHolderTransaction);
+        await using var exposureRowHolderConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
+        await using var exposureRowHolderTransaction = await exposureRowHolderConnection.BeginTransactionAsync();
+        await exposureRowHolderConnection.ExecuteAsync(
+            "SELECT exposure FROM exposures WHERE symbol = 'PETR4' FOR UPDATE", transaction: exposureRowHolderTransaction);
 
         var simultaneousOrderTasks = simultaneousOrders
             .Select(incomingOrder => Task.Run(() => orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(incomingOrder)))
             .ToList();
         var transactionsWaitingTogether = await WaitForTransactionsWaitingOnExposureRowAsync(SimultaneousOrders);
 
-        await rowHolderTransaction.CommitAsync();
+        await exposureRowHolderTransaction.CommitAsync();
         var orderAnswers = await Task.WhenAll(simultaneousOrderTasks);
 
         var finalExposure = await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4");
         var acceptedAnswers = orderAnswers.Where(orderAnswer => orderAnswer.Accepted).ToList();
         var rejectedAnswers = orderAnswers.Where(orderAnswer => !orderAnswer.Accepted).ToList();
-        testOutput.WriteLine(
+        concurrencyTestOutput.WriteLine(
             $"rodada {concurrencyRound}: {transactionsWaitingTogether} transações esperando a linha ao mesmo tempo, " +
             $"{acceptedAnswers.Count} aceitas, {rejectedAnswers.Count} rejeitadas, exposição final {finalExposure}");
 
@@ -76,17 +76,17 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
     // Espera até todas as transações estarem paradas no lock da linha, ou 30 s.
     private async Task<long> WaitForTransactionsWaitingOnExposureRowAsync(int expectedWaitingTransactions)
     {
-        await using var monitorConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
-        var waitDeadline = DateTime.UtcNow.AddSeconds(30);
-        long waitingTransactions;
+        await using var lockWaitMonitorConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
+        var lockWaitDeadline = DateTime.UtcNow.AddSeconds(30);
+        long transactionsWaitingOnExposureRow;
         do
         {
-            waitingTransactions = await monitorConnection.ExecuteScalarAsync<long>(CountTransactionsWaitingOnExposureRowSql);
-            if (waitingTransactions >= expectedWaitingTransactions)
-                return waitingTransactions;
+            transactionsWaitingOnExposureRow = await lockWaitMonitorConnection.ExecuteScalarAsync<long>(CountTransactionsWaitingOnExposureRowSql);
+            if (transactionsWaitingOnExposureRow >= expectedWaitingTransactions)
+                return transactionsWaitingOnExposureRow;
             await Task.Delay(50);
-        } while (DateTime.UtcNow < waitDeadline);
+        } while (DateTime.UtcNow < lockWaitDeadline);
 
-        return waitingTransactions;
+        return transactionsWaitingOnExposureRow;
     }
 }

@@ -93,16 +93,16 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task Same_order_sent_many_times_at_once_is_counted_once()
     {
         var repeatedOrder = TestOrders.NewBuyOrder("VALE3", 1_000, 10.00m);
-        var startSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repeatStartSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var simultaneousRepeatTasks = Enumerable.Range(0, 50)
             .Select(_ => Task.Run(async () =>
             {
-                await startSignal.Task;
+                await repeatStartSignal.Task;
                 return await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(repeatedOrder);
             }))
             .ToList();
 
-        startSignal.SetResult();
+        repeatStartSignal.SetResult();
         var repeatAnswers = await Task.WhenAll(simultaneousRepeatTasks);
 
         Assert.Single(repeatAnswers, repeatAnswer => !repeatAnswer.IsRepeat);
@@ -202,17 +202,17 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Services_registered_for_the_app_process_orders_against_the_database()
     {
-        var appServices = new ServiceCollection()
+        var orderAccumulatorAppServices = new ServiceCollection()
             .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString);
-        await using var appServiceProvider = appServices.BuildServiceProvider();
+        await using var orderAccumulatorServiceProvider = orderAccumulatorAppServices.BuildServiceProvider();
 
-        var registeredOrderProcessor = appServiceProvider.GetRequiredService<IOrderProcessor>();
-        var registeredExposureReader = appServiceProvider.GetRequiredService<IExposureReader>();
+        var registeredOrderProcessor = orderAccumulatorServiceProvider.GetRequiredService<IOrderProcessor>();
+        var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<IExposureReader>();
         var orderAnswer = await registeredOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
 
         Assert.IsType<PostgresOrderProcessor>(registeredOrderProcessor);
         Assert.IsType<PostgresExposureReader>(registeredExposureReader);
-        Assert.Same(registeredOrderProcessor, appServiceProvider.GetRequiredService<IOrderProcessor>());
+        Assert.Same(registeredOrderProcessor, orderAccumulatorServiceProvider.GetRequiredService<IOrderProcessor>());
         Assert.True(orderAnswer.Accepted);
         Assert.Equal(50.00m, (await registeredExposureReader.GetSymbolExposuresAsync())
             .Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
