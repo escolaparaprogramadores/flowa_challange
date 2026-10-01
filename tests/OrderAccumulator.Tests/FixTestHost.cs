@@ -26,11 +26,11 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
     private readonly string orderDatabaseConnectionString;
     private readonly Action<IServiceCollection>? replaceOrderAccumulatorServices;
 
-    public AccumulatorApp(string orderDatabaseConnectionString, int? fixPort = null, Action<IServiceCollection>? replaceOrderAccumulatorServices = null)
+    public AccumulatorApp(string orderDatabaseConnectionString, int? fixAcceptorPort = null, Action<IServiceCollection>? replaceOrderAccumulatorServices = null)
     {
         this.orderDatabaseConnectionString = orderDatabaseConnectionString;
         this.replaceOrderAccumulatorServices = replaceOrderAccumulatorServices;
-        FixAcceptorPort = fixPort ?? FindFreeFixAcceptorTcpPort();
+        FixAcceptorPort = fixAcceptorPort ?? FindFreeFixAcceptorTcpPort();
     }
 
     public int FixAcceptorPort { get; }

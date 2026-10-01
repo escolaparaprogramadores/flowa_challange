@@ -129,16 +129,16 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     public async Task Restart_keeps_the_exposure_and_a_resent_order_is_not_counted_again()
     {
         ExecutionReport reportBeforeRestart;
-        int fixPort;
+        int fixAcceptorPort;
         await using (var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
         using (var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort))
         {
-            fixPort = orderAccumulatorTestApp.FixAcceptorPort;
+            fixAcceptorPort = orderAccumulatorTestApp.FixAcceptorPort;
             reportBeforeRestart = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("antes-do-reinicio", "VALE3", '1', 100, 10.00m));
         }
 
         // Volta na MESMA porta: só sobe se a parada anterior fechou o acceptor.
-        await using var restartedOrderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, fixPort).StartWithFixAcceptor();
+        await using var restartedOrderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, fixAcceptorPort).StartWithFixAcceptor();
         var exposuresResponse = await restartedOrderAccumulatorTestApp.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
         Assert.Equal(1_000.00m, exposuresResponse!.Exposures.Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
 
