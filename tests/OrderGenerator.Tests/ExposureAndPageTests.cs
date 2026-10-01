@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 
 namespace OrderGenerator.Tests;
 
@@ -151,9 +153,12 @@ public sealed class OrderGeneratorPageTests : IDisposable
 
         var pageResponse = await orderGeneratorClient.GetAsync(pagePath);
 
-        // A página tem de sair da raiz do teste mesmo quando o build da tela existe em src/OrderGenerator/wwwroot.
+        // A página tem de sair só da raiz do teste, mesmo com o build da tela em src/OrderGenerator/wwwroot.
+        // Em Development o provedor vira um composto com o wwwroot do projeto na frente; aqui ele é só a pasta do teste.
         var orderGeneratorHostEnvironment = orderGeneratorFactory.Services.GetRequiredService<IWebHostEnvironment>();
-        Assert.Equal(Path.TrimEndingDirectorySeparator(_temporaryWebRoot), Path.TrimEndingDirectorySeparator(orderGeneratorHostEnvironment.WebRootPath));
+        Assert.Equal(Environments.Production, orderGeneratorHostEnvironment.EnvironmentName);
+        var webRootFileProvider = Assert.IsType<PhysicalFileProvider>(orderGeneratorHostEnvironment.WebRootFileProvider);
+        Assert.Equal(Path.TrimEndingDirectorySeparator(_temporaryWebRoot), Path.TrimEndingDirectorySeparator(webRootFileProvider.Root));
         Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
         Assert.Equal("text/html", pageResponse.Content.Headers.ContentType?.MediaType);
         Assert.Equal(BoletaTestIndexHtml, await pageResponse.Content.ReadAsStringAsync());
