@@ -25,11 +25,22 @@ public sealed class FixAcceptorService(
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        fixAcceptor?.Stop();
+        ShutDownFixAcceptor();
         return Task.CompletedTask;
     }
 
-    public void Dispose() => fixAcceptor?.Dispose();
+    public void Dispose() => ShutDownFixAcceptor();
+
+    // Parar e descartar chegam em qualquer ordem (até juntos); só quem tira o acceptor da referência o desliga.
+    private void ShutDownFixAcceptor()
+    {
+        var runningFixAcceptor = Interlocked.Exchange(ref fixAcceptor, null);
+        if (runningFixAcceptor is null)
+            return;
+
+        runningFixAcceptor.Stop();
+        runningFixAcceptor.Dispose();
+    }
 
     // A sessão vem do acceptor.cfg. A porta vem da configuração (Fix__AcceptorPort) e o dicionário
     // é procurado ao lado do executável, para não depender da pasta de onde o app foi iniciado.

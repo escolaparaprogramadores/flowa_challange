@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
 using OrderAccumulator.Exposure;
 using OrderAccumulator.Fix;
@@ -107,8 +108,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Assert.Equal(ExecType.NEW, repeatedReport.ExecType.Value);
         Assert.Equal(50.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("repetida"));
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine =>
-            logLine == "Information OrderAccumulator.Fix.OrderFixApplication: ClOrdID repetida repetido: devolvendo a resposta original.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine => logLine == "Information OrderAccumulator.Fix.OrderFixApplication: ClOrdID repetida repetido: devolvendo a resposta original.");
     }
 
     [Fact]
@@ -191,8 +191,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         var reportAfterFailure = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("depois-da-falha", "PETR4", '1', 10, 1.00m));
 
         Assert.Equal(ExecType.NEW, reportAfterFailure.ExecType.Value);
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine =>
-            logLine == "Error OrderAccumulator.Fix.OrderFixApplication: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine => logLine == "Error OrderAccumulator.Fix.OrderFixApplication: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
         Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
@@ -206,9 +205,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         var sessionSettings = acceptorSettings.Get(sessionId);
         Assert.Equal("acceptor", sessionSettings.GetString("ConnectionType"));
         Assert.Equal(19876, sessionSettings.GetInt("SocketAcceptPort"));
-        Assert.Equal("Y", sessionSettings.GetString("ResetOnLogon"));
-        Assert.Equal("Y", sessionSettings.GetString("ResetOnLogout"));
-        Assert.Equal("Y", sessionSettings.GetString("ResetOnDisconnect"));
+        Assert.Equal(["Y", "Y", "Y"], new[] { "ResetOnLogon", "ResetOnLogout", "ResetOnDisconnect" }.Select(sessionSettings.GetString));
         Assert.Equal("Y", sessionSettings.GetString("UseDataDictionary"));
         Assert.Equal(Path.Combine(AppContext.BaseDirectory, "FIX44.xml"), sessionSettings.GetString("DataDictionary"));
         Assert.True(File.Exists(sessionSettings.GetString("DataDictionary")));
@@ -267,8 +264,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
 
         orderFixApplication.OnMessage(FixTestInitiator.NewOrder("sem-sessao", "VIIA4", '1', 10, 2.00m), acceptorSessionId);
 
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine =>
-            logLine == "Warning OrderAccumulator.Fix.OrderFixApplication: ExecutionReport da ordem sem-sessao não foi enviado: a sessão FIX não está logada.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine => logLine == "Warning OrderAccumulator.Fix.OrderFixApplication: ExecutionReport da ordem sem-sessao não foi enviado: a sessão FIX não está logada.");
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("sem-sessao"));
         Assert.Equal(20.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
     }
@@ -281,6 +277,25 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
             .Build();
 
         Assert.Equal(9876, appsettings.GetValue<int>("Fix:AcceptorPort"));
+    }
+
+    [Fact]
+    public async Task Stopping_and_disposing_the_acceptor_in_any_order_frees_the_fix_port()
+    {
+        var fixAcceptorPort = AccumulatorApp.FindFreeFixAcceptorTcpPort();
+        var fixAcceptorService = new FixAcceptorService(
+            new OrderFixApplication(orderAccumulatorDatabase.OrderProcessor, NullLogger<OrderFixApplication>.Instance),
+            BuildConfiguration(("Fix:AcceptorPort", fixAcceptorPort.ToString()), ("Fix:AcceptorBindHost", AccumulatorApp.FixAcceptorLoopbackBindHost)),
+            NullLoggerFactory.Instance);
+        await fixAcceptorService.StartAsync(CancellationToken.None);
+
+        // O host pode descartar antes, depois ou junto com a parada: nenhuma ordem pode lançar exceção.
+        await Task.WhenAll(Task.Run(fixAcceptorService.Dispose), fixAcceptorService.StopAsync(CancellationToken.None));
+        await fixAcceptorService.StopAsync(CancellationToken.None);
+        fixAcceptorService.Dispose();
+
+        Assert.DoesNotContain(IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners(),
+            tcpListenerEndpoint => tcpListenerEndpoint.Port == fixAcceptorPort);
     }
 
     [Fact]

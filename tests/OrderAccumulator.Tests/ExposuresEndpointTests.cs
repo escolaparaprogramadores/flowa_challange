@@ -56,9 +56,7 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
     // Lê pelos nomes do contrato (camelCase), não pelo tipo C#: um nome trocado aqui quebra o teste.
     private static List<(string Symbol, decimal Exposure, decimal Remaining)> ReadExposureEntries(JsonElement exposuresJson) =>
         exposuresJson.GetProperty("exposures").EnumerateArray()
-            .Select(exposureEntry => (
-                exposureEntry.GetProperty("symbol").GetString()!,
-                exposureEntry.GetProperty("exposure").GetDecimal(),
-                exposureEntry.GetProperty("remaining").GetDecimal()))
+            .Select(exposureEntry => (exposureEntry.GetProperty("symbol").GetString()!,
+                exposureEntry.GetProperty("exposure").GetDecimal(), exposureEntry.GetProperty("remaining").GetDecimal()))
             .ToList();
 }

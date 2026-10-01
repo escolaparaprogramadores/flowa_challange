@@ -54,7 +54,7 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
         return this;
     }
 
-    private static int FindFreeFixAcceptorTcpPort()
+    public static int FindFreeFixAcceptorTcpPort()
     {
         var portProbe = new TcpListener(IPAddress.Loopback, 0);
         portProbe.Start();
@@ -68,19 +68,14 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
 public sealed class OrderAccumulatorCapturedLogs : ILoggerProvider
 {
     private readonly ConcurrentQueue<string> capturedLines = new();
-
     public IReadOnlyList<string> CapturedLogLines => capturedLines.ToList();
-
     public ILogger CreateLogger(string categoryName) => new OrderAccumulatorLogCaptureLogger(categoryName, capturedLines);
-
     public void Dispose() { }
 
     private sealed class OrderAccumulatorLogCaptureLogger(string categoryName, ConcurrentQueue<string> capturedLines) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
         public bool IsEnabled(LogLevel logLevel) => true;
-
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter) =>
             capturedLines.Enqueue($"{logLevel} {categoryName}: {formatter(state, exception)}");
