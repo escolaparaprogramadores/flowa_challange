@@ -1,10 +1,7 @@
 # Saída do build .NET
 bin/
 obj/
-[Dd]ebug/
-[Rr]elease/
 *.user
-*.suo
 
 # Resultados de teste e cobertura
 TestResults/

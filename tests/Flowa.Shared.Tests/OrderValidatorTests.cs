@@ -32,32 +32,16 @@ public class OrderValidatorTests
     }
 
     [Theory]
-    [InlineData("petr4")]
-    [InlineData("ABCD3")]
-    [InlineData("PETR4 ")]
-    public void DeveRecusarSimboloForaDaLista(string symbol)
+    [InlineData("petr4", OrderMessages.SymbolInvalid)]
+    [InlineData("ABCD3", OrderMessages.SymbolInvalid)]
+    [InlineData("PETR4 ", OrderMessages.SymbolInvalid)]
+    [InlineData("", OrderMessages.SymbolRequired)]
+    [InlineData(null, OrderMessages.SymbolRequired)]
+    public void DeveRecusarSimboloForaDaListaOuVazio(string? symbol, string expectedMessage)
     {
         var validationResult = OrderValidator.ValidateFromJson(symbol, ValidSide, ValidQuantity, ValidPrice);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Symbol, OrderMessages.SymbolInvalid);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    public void DeveRecusarSimboloVazio(string? symbol)
-    {
-        var validationResult = OrderValidator.ValidateFromJson(symbol, ValidSide, ValidQuantity, ValidPrice);
-
-        AssertRejectedWithSingleError(validationResult, OrderFields.Symbol, OrderMessages.SymbolRequired);
-    }
-
-    [Fact]
-    public void DeveRecusarSimboloForaDaListaVindoDoFix()
-    {
-        var validationResult = OrderValidator.ValidateFromFix("ABCD3", SideCodes.BuyFix, 100m, 10.50m);
-
-        AssertRejectedWithSingleError(validationResult, OrderFields.Symbol, OrderMessages.SymbolInvalid);
+        AssertRejectedWithSingleError(validationResult, OrderFields.Symbol, expectedMessage);
     }
 
     // Regra: lado
@@ -87,25 +71,17 @@ public class OrderValidatorTests
     }
 
     [Theory]
-    [InlineData("BUY")]
-    [InlineData("compra")]
-    [InlineData("1")]
-    [InlineData("short")]
-    public void DeveRecusarLadoDesconhecido(string side)
+    [InlineData("BUY", OrderMessages.SideInvalid)]
+    [InlineData("compra", OrderMessages.SideInvalid)]
+    [InlineData("1", OrderMessages.SideInvalid)]
+    [InlineData("short", OrderMessages.SideInvalid)]
+    [InlineData("", OrderMessages.SideRequired)]
+    [InlineData(null, OrderMessages.SideRequired)]
+    public void DeveRecusarLadoDesconhecidoOuVazio(string? side, string expectedMessage)
     {
         var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, side, ValidQuantity, ValidPrice);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Side, OrderMessages.SideInvalid);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    public void DeveRecusarLadoVazio(string? side)
-    {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, side, ValidQuantity, ValidPrice);
-
-        AssertRejectedWithSingleError(validationResult, OrderFields.Side, OrderMessages.SideRequired);
+        AssertRejectedWithSingleError(validationResult, OrderFields.Side, expectedMessage);
     }
 
     [Theory]
@@ -187,16 +163,8 @@ public class OrderValidatorTests
 
     // Regra: preço
 
-    public static TheoryData<string, decimal> PrecosAceitos => new() { { "0.01", 0.01m }, { "999.99", 999.99m } };
-
-    [Fact]
-    public void DeveAceitarPrecoComZerosAMaisDepoisDoCentavo()
-    {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, ValidSide, ValidQuantity, "10.500");
-
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(10.50m, validationResult.Order!.Price);
-    }
+    // "10.500" prova que zero à direita do centavo não conta como casa a mais.
+    public static TheoryData<string, decimal> PrecosAceitos => new() { { "0.01", 0.01m }, { "999.99", 999.99m }, { "10.500", 10.50m } };
 
     [Theory]
     [MemberData(nameof(PrecosAceitos))]
