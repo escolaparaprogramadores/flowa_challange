@@ -1,0 +1,15 @@
+# Só o código-fonte entra no contexto de build das imagens.
+.vs/
+.vscode/
+.idea/
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/TestResults/
+**/playwright-report/
+**/test-results/
+src/OrderGenerator/wwwroot/
+.env
+.env.*
+*.log
