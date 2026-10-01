@@ -15,11 +15,11 @@ var orderGeneratorBuilder = WebApplication.CreateBuilder(new WebApplicationOptio
 OrderGeneratorHttpPortConfiguration.UseDefaultOrderGeneratorHttpPortWhenMissing(orderGeneratorBuilder);
 
 orderGeneratorBuilder.Services.AddSingleton<FixOrderClient>();
-orderGeneratorBuilder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FixOrderClient>());
+orderGeneratorBuilder.Services.AddHostedService(orderGeneratorServices => orderGeneratorServices.GetRequiredService<FixOrderClient>());
 
-orderGeneratorBuilder.Services.AddHttpClient(OrderGeneratorApiEndpoints.AccumulatorHttpClientName, (serviceProvider, accumulatorClient) =>
+orderGeneratorBuilder.Services.AddHttpClient(OrderGeneratorApiEndpoints.AccumulatorHttpClientName, (orderGeneratorServices, accumulatorClient) =>
 {
-    var accumulatorBaseUrl = serviceProvider.GetRequiredService<IConfiguration>()["OrderAccumulator:BaseUrl"]
+    var accumulatorBaseUrl = orderGeneratorServices.GetRequiredService<IConfiguration>()["OrderAccumulator:BaseUrl"]
         ?? throw new InvalidOperationException("Configuração OrderAccumulator:BaseUrl ausente.");
     accumulatorClient.BaseAddress = new Uri(accumulatorBaseUrl);
     accumulatorClient.Timeout = TimeSpan.FromSeconds(5);

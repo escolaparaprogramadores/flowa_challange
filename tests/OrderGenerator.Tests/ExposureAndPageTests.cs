@@ -82,8 +82,8 @@ public sealed class ExposureProxyTests
     [Fact]
     public async Task Erro_nao_previsto_vira_500_com_o_corpo_do_contrato_sem_detalhe_interno()
     {
-        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(webHostBuilder =>
-            webHostBuilder.ConfigureTestServices(testServices => testServices
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(orderGeneratorWebHostBuilder =>
+            orderGeneratorWebHostBuilder.ConfigureTestServices(testServices => testServices
                 .AddHttpClient(OrderGeneratorApiEndpoints.AccumulatorHttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => new ExplodingAccumulatorHandler())));
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();

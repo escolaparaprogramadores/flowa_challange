@@ -176,13 +176,13 @@ public static class OrderGeneratorTestHost
     }
 
     public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixAcceptorPort, string accumulatorBaseUrl = "http://127.0.0.1:1", string? orderGeneratorWebRoot = null) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(webHostBuilder =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(orderGeneratorWebHostBuilder =>
         {
-            webHostBuilder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
-            webHostBuilder.UseSetting("Fix:AcceptorPort", fixAcceptorPort.ToString());
-            webHostBuilder.UseSetting("OrderAccumulator:BaseUrl", accumulatorBaseUrl);
+            orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
+            orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorPort", fixAcceptorPort.ToString());
+            orderGeneratorWebHostBuilder.UseSetting("OrderAccumulator:BaseUrl", accumulatorBaseUrl);
             if (orderGeneratorWebRoot is not null)
-                webHostBuilder.UseSetting(WebHostDefaults.WebRootKey, orderGeneratorWebRoot);
+                orderGeneratorWebHostBuilder.UseSetting(WebHostDefaults.WebRootKey, orderGeneratorWebRoot);
         });
 
     public static async Task WaitUntilTestConditionHolds(Func<bool> expectedCondition)

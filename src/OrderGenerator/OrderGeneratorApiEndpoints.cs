@@ -65,9 +65,9 @@ public static class OrderGeneratorApiEndpoints
         };
     }
 
-    private static async Task<IResult> GetExposures(IHttpClientFactory httpClientFactory, CancellationToken requestAborted)
+    private static async Task<IResult> GetExposures(IHttpClientFactory accumulatorHttpClientFactory, CancellationToken requestAborted)
     {
-        var accumulatorClient = httpClientFactory.CreateClient(AccumulatorHttpClientName);
+        var accumulatorClient = accumulatorHttpClientFactory.CreateClient(AccumulatorHttpClientName);
         try
         {
             using var accumulatorExposuresResponse = await accumulatorClient.GetAsync("/api/exposures", requestAborted);
