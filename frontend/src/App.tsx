@@ -24,11 +24,11 @@ export function PaginaDaBoletaEExposicao() {
   // senão uma resposta antiga e lenta apagaria a exposição já atualizada depois de um envio.
   const atualizarExposicoes = useCallback(async () => {
     const numeroDestaLeitura = ++numeroDaUltimaLeituraDaExposicao.current;
-    const estadoLido: EstadoDasExposicoes = await lerExposicoes().then(
+    const estadoDasExposicoesLido: EstadoDasExposicoes = await lerExposicoes().then(
       (exposicoesPorSimbolo) => ({ situacao: 'pronto', exposicoesPorSimbolo }),
       (falhaNaLeitura: Error) => ({ situacao: 'erro', mensagemDeErro: falhaNaLeitura.message }),
     );
-    if (numeroDestaLeitura === numeroDaUltimaLeituraDaExposicao.current) setEstadoDasExposicoes(estadoLido);
+    if (numeroDestaLeitura === numeroDaUltimaLeituraDaExposicao.current) setEstadoDasExposicoes(estadoDasExposicoesLido);
   }, []);
 
   useEffect(() => {

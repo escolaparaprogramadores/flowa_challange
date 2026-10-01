@@ -58,9 +58,9 @@ async function chamarApiComPrazo<CorpoEsperado>(rotaDaApi: string, opcoesDaRequi
 }
 
 export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrdem> {
-  let respostaDaCriacao: Awaited<ReturnType<typeof chamarApiComPrazo<CorpoDaRespostaDaOrdem>>>;
+  let respostaDaCriacaoDaOrdem: Awaited<ReturnType<typeof chamarApiComPrazo<CorpoDaRespostaDaOrdem>>>;
   try {
-    respostaDaCriacao = await chamarApiComPrazo<CorpoDaRespostaDaOrdem>(ROTA_DE_CRIACAO_DE_ORDEM, {
+    respostaDaCriacaoDaOrdem = await chamarApiComPrazo<CorpoDaRespostaDaOrdem>(ROTA_DE_CRIACAO_DE_ORDEM, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -74,7 +74,7 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
     return { situacao: 'falha-de-comunicacao', mensagemDoServidor: MENSAGEM_DE_ORDEM_NAO_CONFIRMADA };
   }
 
-  const { respostaHttp, corpoDaResposta } = respostaDaCriacao;
+  const { respostaHttp, corpoDaResposta } = respostaDaCriacaoDaOrdem;
   if (respostaHttp.ok && (corpoDaResposta?.status === 'accepted' || corpoDaResposta?.status === 'rejected')) {
     return {
       situacao: corpoDaResposta.status === 'accepted' ? 'aceita' : 'rejeitada',

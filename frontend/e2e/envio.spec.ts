@@ -16,9 +16,9 @@ async function enviarOrdemPelaBoleta(page: Page, ordem: OrdemDoTeste) {
   await page.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: ordem.lado }).click();
   await page.getByLabel(/^Quantidade de/).fill(ordem.quantidade);
   await page.getByLabel('Preço por ação (R$)').fill(ordem.preco);
-  const respostaDaCriacao = page.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
+  const respostaDaCriacaoDaOrdem = page.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
   await page.getByRole('button', { name: /^Enviar ordem/ }).click();
-  await respostaDaCriacao;
+  await respostaDaCriacaoDaOrdem;
   await expect(page.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
 }
 
@@ -119,9 +119,9 @@ test('CA-16 e CA-17: ordem que estoura o limite aparece rejeitada com o motivo e
 
 test('RF-24: enquanto a ordem viaja, o envio fica desabilitado e mostra "Enviando…"', async ({ page }) => {
   // Segura a requisição real por um instante, sem trocar a resposta do servidor.
-  await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, async (requisicaoSegurada) => {
+  await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, async (criacaoDaOrdemSegurada) => {
     await new Promise((liberarRequisicaoSegurada) => setTimeout(liberarRequisicaoSegurada, 800));
-    await requisicaoSegurada.continue();
+    await criacaoDaOrdemSegurada.continue();
   });
   await page.getByLabel(/^Quantidade de/).fill('10');
   await page.getByLabel('Preço por ação (R$)').fill('10,00');

@@ -3,7 +3,7 @@ import { PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS, enviarOrdem, lerExposicoes, type 
 
 const ordemDeCompra: OrdemParaEnviar = { simbolo: 'PETR4', lado: 'Compra', quantidade: 100, precoEmCentavos: 1_050 };
 
-function responderComJson(statusHttpDaResposta: number, corpoDaResposta: unknown) {
+function simularServidorRespondendoComJson(statusHttpDaResposta: number, corpoDaResposta: unknown) {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(corpoDaResposta), { status: statusHttpDaResposta })));
 }
 
@@ -24,7 +24,7 @@ describe('enviarOrdem', () => {
   });
 
   it('RF-25: traduz o 400 de validação do servidor nas mensagens de cada campo', async () => {
-    responderComJson(400, {
+    simularServidorRespondendoComJson(400, {
       status: 'validation_error',
       message: 'A ordem tem campos inválidos.',
       errors: [{ field: 'price', message: 'O preço deve ser múltiplo de 0,01.' }],
@@ -37,7 +37,7 @@ describe('enviarOrdem', () => {
   });
 
   it('RF-23: 503 do servidor vira "ordem não confirmada", sem o nome do serviço interno', async () => {
-    responderComJson(503, { status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.' });
+    simularServidorRespondendoComJson(503, { status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.' });
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
@@ -53,7 +53,7 @@ describe('enviarOrdem', () => {
   });
 
   it('RF-23: 404 fora do contrato também é resposta com erro, não "não respondeu"', async () => {
-    responderComJson(404, {});
+    simularServidorRespondendoComJson(404, {});
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
@@ -61,7 +61,7 @@ describe('enviarOrdem', () => {
   });
 
   it('RF-23: 500 do contrato vira "erro inesperado", porque o servidor respondeu', async () => {
-    responderComJson(500, { status: 'error', message: 'Erro inesperado ao processar a ordem.' });
+    simularServidorRespondendoComJson(500, { status: 'error', message: 'Erro inesperado ao processar a ordem.' });
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
@@ -76,11 +76,11 @@ describe('enviarOrdem', () => {
       });
     vi.stubGlobal('fetch', vi.fn(fetchQueNuncaResponde));
     let ordemTerminou = false;
-    const respostaPendente = enviarOrdem(ordemDeCompra).finally(() => { ordemTerminou = true; });
+    const respostaDaOrdemPendente = enviarOrdem(ordemDeCompra).finally(() => { ordemTerminou = true; });
     await vi.advanceTimersByTimeAsync(PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS - 1);
     expect(ordemTerminou).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await respostaPendente).toEqual({
+    expect(await respostaDaOrdemPendente).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
     });
@@ -98,9 +98,9 @@ describe('enviarOrdem', () => {
       return new Response(corpoQueNuncaTermina, { status: 200 });
     };
     vi.stubGlobal('fetch', vi.fn(fetchComCorpoTravado));
-    const respostaPendente = enviarOrdem(ordemDeCompra);
+    const respostaDaOrdemPendente = enviarOrdem(ordemDeCompra);
     await vi.advanceTimersByTimeAsync(PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS);
-    expect(await respostaPendente).toEqual({
+    expect(await respostaDaOrdemPendente).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
     });
@@ -109,12 +109,12 @@ describe('enviarOrdem', () => {
 
 describe('lerExposicoes', () => {
   it('converte o corpo do contrato para a tela, na ordem recebida', async () => {
-    responderComJson(200, { limit: 100_000_000, exposures: [{ symbol: 'PETR4', exposure: -500, remaining: 99_999_500 }] });
+    simularServidorRespondendoComJson(200, { limit: 100_000_000, exposures: [{ symbol: 'PETR4', exposure: -500, remaining: 99_999_500 }] });
     expect(await lerExposicoes()).toEqual([{ simbolo: 'PETR4', exposicao: -500, restanteAteOLimite: 99_999_500 }]);
   });
 
   it('RF-32: 503 do servidor vira erro claro, sem o nome do serviço interno', async () => {
-    responderComJson(503, { status: 'communication_error', message: 'Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.' });
+    simularServidorRespondendoComJson(503, { status: 'communication_error', message: 'Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.' });
     await expect(lerExposicoes()).rejects.toThrow('Não foi possível ler a exposição agora. Tente de novo em instantes.');
   });
 });

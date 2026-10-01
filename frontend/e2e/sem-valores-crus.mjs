@@ -16,15 +16,15 @@ function removerTokensCssDoValorDaDeclaracao(valorDaDeclaracao) {
 
 // Devolve o motivo quando a declaração CSS "propriedade: valor" traz cor, fonte, raio, espaço ou letra escritos direto.
 function motivoDoValorCruNoCss(propriedadeDaDeclaracao, valorDaDeclaracao) {
-  const valorSemTokens = removerTokensCssDoValorDaDeclaracao(valorDaDeclaracao);
-  if (/#[0-9a-f]{3,8}\b|\b(rgb|hsl|hwb|lab|lch|oklab|oklch)a?\(/i.test(valorSemTokens)) return 'cor escrita direto';
+  const valorDaDeclaracaoSemTokens = removerTokensCssDoValorDaDeclaracao(valorDaDeclaracao);
+  if (/#[0-9a-f]{3,8}\b|\b(rgb|hsl|hwb|lab|lch|oklab|oklch)a?\(/i.test(valorDaDeclaracaoSemTokens)) return 'cor escrita direto';
   if (PROPRIEDADES_DE_COR.test(propriedadeDaDeclaracao)) {
-    const palavraDeCor = (valorSemTokens.match(/[a-z]+/gi) ?? []).find((palavra) => !PALAVRAS_SEM_COR.has(palavra.toLowerCase()) && !/^(px|em|rem|s|ms|deg)$/i.test(palavra));
+    const palavraDeCor = (valorDaDeclaracaoSemTokens.match(/[a-z]+/gi) ?? []).find((palavra) => !PALAVRAS_SEM_COR.has(palavra.toLowerCase()) && !/^(px|em|rem|s|ms|deg)$/i.test(palavra));
     if (palavraDeCor) return `cor por nome (${palavraDeCor})`;
   }
-  if ((propriedadeDaDeclaracao === 'font-family' || propriedadeDaDeclaracao === 'font') && valorSemTokens !== '' && valorSemTokens !== 'inherit') return 'fonte escrita direto';
-  if (/^border(-(top|bottom)-(left|right))?-radius$/.test(propriedadeDaDeclaracao) && valorSemTokens !== '' && valorSemTokens !== '0') return 'raio escrito direto';
-  if (PROPRIEDADES_DE_ESPACO_E_LETRA.test(propriedadeDaDeclaracao) && /(^|[\s(,-])\d*\.?\d+(px|rem|em|vw|vh|%)(?![\w-])/.test(valorSemTokens)) return 'espaço ou tamanho de letra escrito direto';
+  if ((propriedadeDaDeclaracao === 'font-family' || propriedadeDaDeclaracao === 'font') && valorDaDeclaracaoSemTokens !== '' && valorDaDeclaracaoSemTokens !== 'inherit') return 'fonte escrita direto';
+  if (/^border(-(top|bottom)-(left|right))?-radius$/.test(propriedadeDaDeclaracao) && valorDaDeclaracaoSemTokens !== '' && valorDaDeclaracaoSemTokens !== '0') return 'raio escrito direto';
+  if (PROPRIEDADES_DE_ESPACO_E_LETRA.test(propriedadeDaDeclaracao) && /(^|[\s(,-])\d*\.?\d+(px|rem|em|vw|vh|%)(?![\w-])/.test(valorDaDeclaracaoSemTokens)) return 'espaço ou tamanho de letra escrito direto';
   return undefined;
 }
 
