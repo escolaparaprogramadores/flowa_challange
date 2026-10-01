@@ -134,7 +134,11 @@ public sealed class ComposeTests(ComposeFixture compose)
         var generatorBefore = await compose.InspectServiceContainerAsync("ordergenerator");
         var accumulatorBefore = await compose.InspectServiceContainerAsync("orderaccumulator");
         var logonsBeforeRecreate = await compose.CountFixLogonsFromAcceptorAsync();
-        var exposuresBeforeRecreate = await compose.OrderGeneratorHttp.GetStringAsync("/api/exposures");
+
+        // Só este teste usa VALE3: a exposição dele parte de zero no compose de teste.
+        var orderBeforeRecreate = await PostOrderAsync("VALE3", "buy", 1, 1.00m);
+        Assert.Equal("accepted", orderBeforeRecreate.GetProperty("status").GetString());
+        Assert.Equal(1.00m, await ReadSymbolExposureAsync("VALE3"));
 
         await compose.RunComposeCommandAsync(TimeSpan.FromMinutes(3), "up", "-d", "--no-deps", "--force-recreate", "--wait", "orderaccumulator");
 
@@ -147,14 +151,31 @@ public sealed class ComposeTests(ComposeFixture compose)
         Assert.Equal(generatorBefore.ContainerId, generatorAfter.ContainerId);
         Assert.Equal(generatorBefore.StartedAt, generatorAfter.StartedAt);
 
-        // O banco fica num volume nomeado: o container novo enxerga a mesma exposição de antes.
-        Assert.Equal(exposuresBeforeRecreate, await compose.OrderGeneratorHttp.GetStringAsync("/api/exposures"));
+        // O OrderAccumulator novo não guarda nada em memória: lê do banco a exposição de antes.
+        Assert.Equal(1.00m, await ReadSymbolExposureAsync("VALE3"));
 
         var orderAfterRelogon = await PostOrderAsync("VALE3", "buy", 10, 50.00m);
         Assert.Equal("accepted", orderAfterRelogon.GetProperty("status").GetString());
         var clOrdId = orderAfterRelogon.GetProperty("clOrdId").GetString()!;
         var executionReport = await FindSingleFixMessageAsync("orderaccumulator", "8", clOrdId, senderCompId: "ORDERACCUMULATOR");
         Assert.Equal("0", executionReport.TagValue(150));
+        Assert.Equal(501.00m, await ReadSymbolExposureAsync("VALE3"));
+    }
+
+    [Fact]
+    public async Task Os_dados_do_postgres_ficam_num_volume_nomeado()
+    {
+        var postgres = await compose.InspectServiceContainerAsync("postgres");
+
+        Assert.Equal(new[] { $"volume:{ComposeFixture.ComposeProjectName}_pgdata->/var/lib/postgresql/data" }, postgres.VolumeMounts);
+    }
+
+    private async Task<decimal> ReadSymbolExposureAsync(string symbol)
+    {
+        var exposures = await compose.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures");
+        var symbolExposure = Assert.Single(exposures.GetProperty("exposures").EnumerateArray(),
+            exposureRow => exposureRow.GetProperty("symbol").GetString() == symbol);
+        return symbolExposure.GetProperty("exposure").GetDecimal();
     }
 
     private async Task<JsonElement> PostOrderAsync(string symbol, string side, int quantity, decimal price)

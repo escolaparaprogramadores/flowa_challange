@@ -88,7 +88,11 @@ public sealed class ComposeFixture : IAsyncLifetime
             containerState.GetProperty("Status").GetString()!,
             containerState.GetProperty("StartedAt").GetString()!,
             string.Join(' ', container.GetProperty("Config").GetProperty("Entrypoint").EnumerateArray().Select(entrypointPart => entrypointPart.GetString())),
-            publishedPortBindings.Order().ToList());
+            publishedPortBindings.Order().ToList(),
+            container.GetProperty("Mounts").EnumerateArray()
+                .Select(containerMount => $"{containerMount.GetProperty("Type").GetString()}:{containerMount.GetProperty("Name").GetString()}->{containerMount.GetProperty("Destination").GetString()}")
+                .Order()
+                .ToList());
     }
 
     // O uid de quem roda o processo dentro do container, lido no próprio container.
@@ -177,7 +181,8 @@ public sealed record ServiceContainerState(
     string Status,
     string StartedAt,
     string Entrypoint,
-    IReadOnlyList<string> PublishedPortBindings);
+    IReadOnlyList<string> PublishedPortBindings,
+    IReadOnlyList<string> VolumeMounts);
 
 public static class RepoPaths
 {
