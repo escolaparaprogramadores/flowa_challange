@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
-// Roda contra um OrderGenerator sem OrderAccumulator de pé (CA-19). O cenário do manifesto aponta
-// para esse Generator (porta 13090 nesta janela); o teste não desliga nada sozinho.
+// Roda contra o OrderGenerator com o OrderAccumulator parado (CA-19). Quem roda o cenário para o
+// OrderAccumulator antes e o religa depois; o teste não desliga nada sozinho.
 
 test('CA-19: sem o OrderAccumulator a tela diz que a ordem não foi confirmada em até ~5 s e continua respondendo', async ({ page }) => {
   await page.goto('/');
