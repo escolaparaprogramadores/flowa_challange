@@ -92,7 +92,7 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         var message = new QuickFix.FIX44.NewOrderSingle(
             new ClOrdID(clOrdId),
             new Symbol(order.Symbol),
-            new FixSide(order.Side.ToFix()),
+            new FixSide(order.Side.ToFixOrderSide()),
             new TransactTime(DateTime.UtcNow),
             new OrdType(OrdType.LIMIT));
         message.Set(new OrderQty(order.Quantity));

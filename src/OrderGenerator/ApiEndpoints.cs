@@ -95,7 +95,7 @@ public static class ApiEndpoints
         orderId = result.OrderId,
         execId = result.ExecId,
         symbol = order.Symbol,
-        side = order.Side.ToJson(),
+        side = order.Side.ToJsonOrderSide(),
         quantity = order.Quantity,
         price = order.Price,
         message
