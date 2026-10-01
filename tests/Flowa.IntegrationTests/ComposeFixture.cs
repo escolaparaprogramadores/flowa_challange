@@ -67,20 +67,20 @@ public sealed class ComposeFixture : IAsyncLifetime
         var containerId = (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "ps", "-q", serviceName)).Trim();
         Assert.False(string.IsNullOrEmpty(containerId), $"o serviço {serviceName} não tem container");
 
-        var inspectJson = await CaptureCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "inspect", containerId);
-        using var inspectDocument = JsonDocument.Parse(inspectJson);
-        var serviceContainer = inspectDocument.RootElement[0];
+        var containerInspectJson = await CaptureCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "inspect", containerId);
+        using var containerInspectDocument = JsonDocument.Parse(containerInspectJson);
+        var serviceContainer = containerInspectDocument.RootElement[0];
         var containerState = serviceContainer.GetProperty("State");
 
         // Só as portas com ligação no host contam como publicadas; as outras ficam na rede do compose.
         // Guardamos cada ligação, para uma segunda ligação da mesma porta não sumir da comparação.
         var publishedPortBindings = new List<string>();
-        foreach (var exposedPort in serviceContainer.GetProperty("NetworkSettings").GetProperty("Ports").EnumerateObject())
+        foreach (var exposedContainerPort in serviceContainer.GetProperty("NetworkSettings").GetProperty("Ports").EnumerateObject())
         {
-            if (exposedPort.Value.ValueKind != JsonValueKind.Array) continue;
-            foreach (var hostBinding in exposedPort.Value.EnumerateArray())
+            if (exposedContainerPort.Value.ValueKind != JsonValueKind.Array) continue;
+            foreach (var hostPortBinding in exposedContainerPort.Value.EnumerateArray())
                 publishedPortBindings.Add(
-                    $"{exposedPort.Name}->{hostBinding.GetProperty("HostIp").GetString()}:{hostBinding.GetProperty("HostPort").GetString()}");
+                    $"{exposedContainerPort.Name}->{hostPortBinding.GetProperty("HostIp").GetString()}:{hostPortBinding.GetProperty("HostPort").GetString()}");
         }
 
         return new ServiceContainerState(
@@ -107,7 +107,7 @@ public sealed class ComposeFixture : IAsyncLifetime
     // filtrar por hora porque o relógio do Docker pode não bater com o da máquina.
     public async Task<int> CountFixLogonsFromAcceptorAsync() =>
         FixLog.ParseFixMessages(await ReadServiceLogAsync("ordergenerator"))
-            .Count(fixMessage => fixMessage.TagValue(35) == "A" && fixMessage.TagValue(49) == "ORDERACCUMULATOR");
+            .Count(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERACCUMULATOR");
 
     public async Task WaitForNewFixLogonAsync(int logonsAlreadySeen)
     {
@@ -131,8 +131,8 @@ public sealed class ComposeFixture : IAsyncLifetime
         {
             try
             {
-                using var healthResponse = await OrderGeneratorHttp.GetAsync("/health");
-                if (healthResponse.IsSuccessStatusCode) return;
+                using var orderGeneratorHealthResponse = await OrderGeneratorHttp.GetAsync("/health");
+                if (orderGeneratorHealthResponse.IsSuccessStatusCode) return;
             }
             catch (HttpRequestException) { }
             catch (TaskCanceledException) { }
@@ -143,26 +143,26 @@ public sealed class ComposeFixture : IAsyncLifetime
 
     private async Task<string> CaptureCommandOutputAsync(string commandExecutable, TimeSpan commandTimeout, params string[] commandArguments)
     {
-        var startInfo = new ProcessStartInfo(commandExecutable)
+        var commandStartInfo = new ProcessStartInfo(commandExecutable)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
         };
-        foreach (var commandArgument in commandArguments) startInfo.ArgumentList.Add(commandArgument);
-        startInfo.Environment["FLOWA_HTTP_PORT"] = OrderGeneratorHostPort.ToString();
+        foreach (var commandArgument in commandArguments) commandStartInfo.ArgumentList.Add(commandArgument);
+        commandStartInfo.Environment["FLOWA_HTTP_PORT"] = OrderGeneratorHostPort.ToString();
         if (sourceRevisionId is not null)
-            startInfo.Environment["SOURCE_REVISION_ID"] = sourceRevisionId;
+            commandStartInfo.Environment["SOURCE_REVISION_ID"] = sourceRevisionId;
 
         var commandLine = $"{commandExecutable} {string.Join(' ', commandArguments)}";
-        using var commandProcess = Process.Start(startInfo)!;
-        var standardOutput = commandProcess.StandardOutput.ReadToEndAsync();
-        var standardError = commandProcess.StandardError.ReadToEndAsync();
-        using var timeoutSource = new CancellationTokenSource(commandTimeout);
+        using var commandProcess = Process.Start(commandStartInfo)!;
+        var commandStandardOutput = commandProcess.StandardOutput.ReadToEndAsync();
+        var commandStandardError = commandProcess.StandardError.ReadToEndAsync();
+        using var commandTimeoutSource = new CancellationTokenSource(commandTimeout);
         try
         {
-            await commandProcess.WaitForExitAsync(timeoutSource.Token);
+            await commandProcess.WaitForExitAsync(commandTimeoutSource.Token);
         }
         catch (OperationCanceledException)
         {
@@ -171,16 +171,16 @@ public sealed class ComposeFixture : IAsyncLifetime
         }
 
         if (commandProcess.ExitCode != 0)
-            throw new InvalidOperationException($"{commandLine} saiu com {commandProcess.ExitCode}: {await standardError}");
-        return await standardOutput;
+            throw new InvalidOperationException($"{commandLine} saiu com {commandProcess.ExitCode}: {await commandStandardError}");
+        return await commandStandardOutput;
     }
 }
 
 public sealed record ServiceContainerState(
     string ContainerId,
     string ContainerStatus,
-    string StartedAt,
-    string Entrypoint,
+    string ContainerStartedAt,
+    string ContainerEntrypoint,
     IReadOnlyList<string> PublishedPortBindings,
     IReadOnlyList<string> VolumeMounts);
 
@@ -199,7 +199,7 @@ public static class RepoPaths
 // aceitamos também "|" para o caso de o log já vir trocado.
 public sealed record FixMessage(string RawFixText, IReadOnlyDictionary<int, string> ValuesByFixTag)
 {
-    public string? TagValue(int fixTag) => ValuesByFixTag.TryGetValue(fixTag, out var fixTagValue) ? fixTagValue : null;
+    public string? ReadFixTagValue(int fixTag) => ValuesByFixTag.TryGetValue(fixTag, out var fixTagValue) ? fixTagValue : null;
 }
 
 public static partial class FixLog
@@ -215,9 +215,9 @@ public static partial class FixLog
         var valuesByFixTag = new Dictionary<int, string>();
         foreach (var fixTagAndValue in rawFixText.Split(['\u0001', '|'], StringSplitOptions.RemoveEmptyEntries))
         {
-            var equalsIndex = fixTagAndValue.IndexOf('=');
-            if (equalsIndex > 0 && int.TryParse(fixTagAndValue[..equalsIndex], out var fixTag))
-                valuesByFixTag.TryAdd(fixTag, fixTagAndValue[(equalsIndex + 1)..]);
+            var tagValueSeparatorIndex = fixTagAndValue.IndexOf('=');
+            if (tagValueSeparatorIndex > 0 && int.TryParse(fixTagAndValue[..tagValueSeparatorIndex], out var fixTag))
+                valuesByFixTag.TryAdd(fixTag, fixTagAndValue[(tagValueSeparatorIndex + 1)..]);
         }
         return new FixMessage(rawFixText.Replace('\u0001', '|'), valuesByFixTag);
     }
