@@ -28,8 +28,8 @@ public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<
         catch (Exception exception)
         {
             // Ponto único de erro desta entrada. Sem resposta, o OrderGenerator desiste em 5 s e mostra
-            // communication_error (contrato, seção 3). A transação foi desfeita, então nada ficou gravado
-            // e a sessão FIX segue de pé para as próximas ordens.
+            // communication_error (contrato, seção 3). O processador grava numa transação só
+            // (PostgresOrderProcessor), então a falha não deixa ordem pela metade; a sessão FIX segue de pé.
             logger.LogError(exception, "Falha ao processar a ordem {ClOrdId}; nenhum ExecutionReport enviado.", incomingOrder.ClOrdId);
             return;
         }

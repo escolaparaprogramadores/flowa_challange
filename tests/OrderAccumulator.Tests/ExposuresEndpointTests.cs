@@ -41,6 +41,7 @@ public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
             [("PETR4", 1_050.00m, 99_998_950.00m), ("VALE3", -500.00m, 99_999_500.00m), ("VIIA4", 0m, 100_000_000m)],
             exposuresAfterAccepted);
         Assert.Equal(QuickFix.Fields.ExecType.REJECTED, rejectedReport.ExecType.Value);
+        Assert.Equal("A quantidade deve ser menor que 100.000.", rejectedReport.Text.Value);
         Assert.Equal(exposuresAfterAccepted, exposuresAfterRejected);
     }
 

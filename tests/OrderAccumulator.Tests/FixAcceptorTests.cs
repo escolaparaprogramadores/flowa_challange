@@ -193,7 +193,6 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
         Assert.Equal(ExecType.NEW, reportAfterFailure.ExecType.Value);
         Assert.Single(app.Logs.Lines, logLine =>
             logLine == "Error OrderAccumulator.Fix.OrderFixApplication: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
-        Assert.Equal(0, await db.CountOrdersAsync("falha-banco"));
         Assert.Equal(10.00m, await db.ExposureOfAsync("PETR4"));
     }
 

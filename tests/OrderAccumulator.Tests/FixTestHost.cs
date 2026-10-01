@@ -90,7 +90,7 @@ public sealed class CapturedLogs : ILoggerProvider
 // A ponta initiator usada só nos testes: faz o papel do OrderGenerator sem depender dele.
 public sealed class TestInitiator : IApplication, IDisposable
 {
-    private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan FixAnswerTimeout = TimeSpan.FromSeconds(10);
 
     private readonly SocketInitiator initiator;
     private readonly TaskCompletionSource loggedOn = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -127,7 +127,7 @@ public sealed class TestInitiator : IApplication, IDisposable
     {
         var testInitiator = new TestInitiator(port);
         testInitiator.initiator.Start();
-        await testInitiator.loggedOn.Task.WaitAsync(ReportTimeout);
+        await testInitiator.loggedOn.Task.WaitAsync(FixAnswerTimeout);
         return testInitiator;
     }
 
@@ -145,7 +145,7 @@ public sealed class TestInitiator : IApplication, IDisposable
     public async Task<ExecutionReport> SendAsync(NewOrderSingle order)
     {
         Assert.True(Session.SendToTarget(order, sessionId!));
-        var executionReport = await executionReports.Reader.ReadAsync().AsTask().WaitAsync(ReportTimeout);
+        var executionReport = await executionReports.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
         Assert.Equal(order.ClOrdID.Value, executionReport.ClOrdID.Value);
         return executionReport;
     }
@@ -163,7 +163,7 @@ public sealed class TestInitiator : IApplication, IDisposable
     public async Task<BusinessMessageReject> SendExpectingBusinessRejectAsync(NewOrderSingle order)
     {
         Assert.True(Session.SendToTarget(order, sessionId!));
-        return await businessRejects.Reader.ReadAsync().AsTask().WaitAsync(ReportTimeout);
+        return await businessRejects.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
     }
 
     public void Dispose() => initiator.Dispose();
