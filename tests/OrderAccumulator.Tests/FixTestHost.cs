@@ -37,14 +37,14 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
 
     public CapturedLogs Logs { get; } = new();
 
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    protected override void ConfigureWebHost(IWebHostBuilder webHostBuilder)
     {
-        builder.UseSetting("ConnectionStrings:Flowa", connectionString);
-        builder.UseSetting("Fix:AcceptorPort", FixPort.ToString());
-        builder.UseSetting("Fix:AcceptorBindHost", BindHost);
-        builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+        webHostBuilder.UseSetting("ConnectionStrings:Flowa", connectionString);
+        webHostBuilder.UseSetting("Fix:AcceptorPort", FixPort.ToString());
+        webHostBuilder.UseSetting("Fix:AcceptorBindHost", BindHost);
+        webHostBuilder.ConfigureLogging(loggingBuilder => loggingBuilder.AddProvider(Logs));
         if (replaceServices is not null)
-            builder.ConfigureTestServices(replaceServices);
+            webHostBuilder.ConfigureTestServices(replaceServices);
     }
 
     // Força a subida do host (e do acceptor) sem precisar de uma chamada HTTP antes.
@@ -56,11 +56,11 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
 
     private static int FreeTcpPort()
     {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
+        var portProbe = new TcpListener(IPAddress.Loopback, 0);
+        portProbe.Start();
+        var freePort = ((IPEndPoint)portProbe.LocalEndpoint).Port;
+        portProbe.Stop();
+        return freePort;
     }
 }
 
@@ -75,7 +75,7 @@ public sealed class CapturedLogs : ILoggerProvider
 
     public void Dispose() { }
 
-    private sealed class CapturingLogger(string category, ConcurrentQueue<string> capturedLines) : ILogger
+    private sealed class CapturingLogger(string categoryName, ConcurrentQueue<string> capturedLines) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -83,7 +83,7 @@ public sealed class CapturedLogs : ILoggerProvider
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter) =>
-            capturedLines.Enqueue($"{logLevel} {category}: {formatter(state, exception)}");
+            capturedLines.Enqueue($"{logLevel} {categoryName}: {formatter(state, exception)}");
     }
 }
 
@@ -151,11 +151,11 @@ public sealed class TestInitiator : IApplication, IDisposable
     }
 
     // Manda a ordem e confere que nenhum ExecutionReport volta dentro do prazo.
-    public async Task ExpectNoAnswerAsync(NewOrderSingle order, TimeSpan wait)
+    public async Task ExpectNoAnswerAsync(NewOrderSingle order, TimeSpan noAnswerWindow)
     {
         Assert.True(Session.SendToTarget(order, sessionId!));
         // Leitura cancelável: um ReadAsync pendurado depois do prazo engoliria o próximo relatório.
-        using var timeout = new CancellationTokenSource(wait);
+        using var timeout = new CancellationTokenSource(noAnswerWindow);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executionReports.Reader.ReadAsync(timeout.Token).AsTask());
     }
 

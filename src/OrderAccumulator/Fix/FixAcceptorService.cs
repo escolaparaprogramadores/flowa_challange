@@ -5,11 +5,11 @@ namespace OrderAccumulator.Fix;
 
 // Liga o acceptor FIX junto com o app e desliga na parada.
 public sealed class FixAcceptorService(
-    OrderFixApplication application, IConfiguration configuration, ILoggerFactory loggerFactory)
+    OrderFixApplication orderFixApplication, IConfiguration configuration, ILoggerFactory loggerFactory)
     : IHostedService, IDisposable
 {
-    private const string SettingsFile = "acceptor.cfg";
-    private const string DictionaryFile = "FIX44.xml";
+    private const string AcceptorSettingsFile = "acceptor.cfg";
+    private const string Fix44DictionaryFile = "FIX44.xml";
 
     private ThreadedSocketAcceptor? acceptor;
 
@@ -17,7 +17,7 @@ public sealed class FixAcceptorService(
     {
         // O log FIX vai para o ILoggerFactory do app, que escreve no stdout (D-34).
         acceptor = new ThreadedSocketAcceptor(
-            application, new MemoryStoreFactory(), LoadSessionSettings(configuration), loggerFactory,
+            orderFixApplication, new MemoryStoreFactory(), LoadSessionSettings(configuration), loggerFactory,
             new DefaultMessageFactory([typeof(QuickFix.FIX44.NewOrderSingle).Assembly], string.Empty));
         acceptor.Start();
         return Task.CompletedTask;
@@ -41,12 +41,12 @@ public sealed class FixAcceptorService(
             ?? throw new InvalidOperationException("Defina a porta do acceptor FIX em Fix__AcceptorPort.");
         var bindHost = configuration["Fix:AcceptorBindHost"];
 
-        var acceptorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, SettingsFile));
+        var acceptorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, AcceptorSettingsFile));
         foreach (var sessionId in acceptorSettings.GetSessions())
         {
             var sessionSettings = acceptorSettings.Get(sessionId);
             sessionSettings.SetLong("SocketAcceptPort", port);
-            sessionSettings.SetString("DataDictionary", Path.Combine(AppContext.BaseDirectory, DictionaryFile));
+            sessionSettings.SetString("DataDictionary", Path.Combine(AppContext.BaseDirectory, Fix44DictionaryFile));
             if (!string.IsNullOrWhiteSpace(bindHost))
                 sessionSettings.SetString("SocketAcceptHost", bindHost);
         }

@@ -32,24 +32,24 @@ public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
 
         await testInitiator.SendAsync(TestInitiator.NewOrder("compra-petr4", "PETR4", '1', 100, 10.50m));
         await testInitiator.SendAsync(TestInitiator.NewOrder("venda-vale3", "VALE3", '2', 20, 25.00m));
-        var afterAccepted = ReadExposureEntries(await GetExposuresJsonAsync(app));
+        var exposuresAfterAccepted = ReadExposureEntries(await GetExposuresJsonAsync(app));
 
         var rejectedReport = await testInitiator.SendAsync(TestInitiator.NewOrder("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
-        var afterRejected = ReadExposureEntries(await GetExposuresJsonAsync(app));
+        var exposuresAfterRejected = ReadExposureEntries(await GetExposuresJsonAsync(app));
 
         Assert.Equal(
             [("PETR4", 1_050.00m, 99_998_950.00m), ("VALE3", -500.00m, 99_999_500.00m), ("VIIA4", 0m, 100_000_000m)],
-            afterAccepted);
+            exposuresAfterAccepted);
         Assert.Equal(QuickFix.Fields.ExecType.REJECTED, rejectedReport.ExecType.Value);
-        Assert.Equal(afterAccepted, afterRejected);
+        Assert.Equal(exposuresAfterAccepted, exposuresAfterRejected);
     }
 
     private static async Task<JsonElement> GetExposuresJsonAsync(AccumulatorApp app)
     {
-        var response = await app.CreateClient().GetAsync("/api/exposures");
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
-        return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        var exposuresHttpResponse = await app.CreateClient().GetAsync("/api/exposures");
+        Assert.Equal(HttpStatusCode.OK, exposuresHttpResponse.StatusCode);
+        Assert.Equal("application/json", exposuresHttpResponse.Content.Headers.ContentType?.MediaType);
+        return JsonDocument.Parse(await exposuresHttpResponse.Content.ReadAsStringAsync()).RootElement;
     }
 
     // Lê pelos nomes do contrato (camelCase), não pelo tipo C#: um nome trocado aqui quebra o teste.
