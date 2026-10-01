@@ -325,6 +325,7 @@ public sealed class CleanCloneImageCommitTests
         }
 
         var repoHeadCommit = (await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
+        var cloneTestFailed = false;
         try
         {
             await RunWithCloneEnvironmentAsync(TimeSpan.FromMinutes(2), "git", "clone", "--quiet", "--no-local", repoRoot, cloneDirectory);
@@ -343,11 +344,24 @@ public sealed class CleanCloneImageCommitTests
             Assert.Equal(newCloneCommit, await ReadCloneOrderGeneratorCommitAsync());
             Assert.Equal(newCloneCommit, await ReadCloneOrderAccumulatorCommitAsync());
         }
+        catch
+        {
+            cloneTestFailed = true;
+            throw;
+        }
         finally
         {
-            if (File.Exists(cloneComposeFile))
-                await RunCloneComposeAsync("down", "-v", "--rmi", "local");
-            DeleteCloneDirectory(cloneDirectory);
+            try
+            {
+                if (File.Exists(cloneComposeFile))
+                    await RunCloneComposeAsync("down", "-v", "--rmi", "local");
+            }
+            // Com o teste já reprovado, a falha do down não pode tomar o lugar da falha original.
+            catch (Exception) when (cloneTestFailed) { }
+            finally
+            {
+                DeleteCloneDirectory(cloneDirectory);
+            }
         }
     }
 
