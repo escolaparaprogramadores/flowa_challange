@@ -87,10 +87,10 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
     {
         await _acceptorLogon.Task.WaitAsync(TimeSpan.FromSeconds(15));
         var initiatorSessionId = new SessionID("FIX.4.4", "ORDERGENERATOR", "ORDERACCUMULATOR");
-        var logonClock = Stopwatch.StartNew();
+        var fixLogonClock = Stopwatch.StartNew();
         while (Session.LookupSession(initiatorSessionId)?.IsLoggedOn != true)
         {
-            if (logonClock.Elapsed > TimeSpan.FromSeconds(15))
+            if (fixLogonClock.Elapsed > TimeSpan.FromSeconds(15))
                 throw new TimeoutException("O initiator não logou.");
             await Task.Delay(50);
         }
@@ -101,9 +101,9 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
 
     public Message BuildRejectedExecutionReport(Message receivedOrder, string rejectionText)
     {
-        var rejectedReport = BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
-        rejectedReport.SetField(new Text(rejectionText));
-        return rejectedReport;
+        var rejectedExecutionReport = BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
+        rejectedExecutionReport.SetField(new Text(rejectionText));
+        return rejectedExecutionReport;
     }
 
     public Message BuildExecutionReport(Message receivedOrder, char execType, char ordStatus, decimal leavesQty, string? clOrdId = null)
@@ -168,29 +168,29 @@ public static class OrderGeneratorTestHost
     // Porta livre na hora do teste; ninguém escuta nela até alguém subir algo.
     public static int FindFreeTcpPort()
     {
-        var freePortProbe = new TcpListener(IPAddress.Loopback, 0);
-        freePortProbe.Start();
-        var freePort = ((IPEndPoint)freePortProbe.LocalEndpoint).Port;
-        freePortProbe.Stop();
-        return freePort;
+        var freeTcpPortProbe = new TcpListener(IPAddress.Loopback, 0);
+        freeTcpPortProbe.Start();
+        var freeTcpPort = ((IPEndPoint)freeTcpPortProbe.LocalEndpoint).Port;
+        freeTcpPortProbe.Stop();
+        return freeTcpPort;
     }
 
-    public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixPort, string accumulatorUrl = "http://127.0.0.1:1", string? webRoot = null) =>
+    public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixAcceptorPort, string accumulatorBaseUrl = "http://127.0.0.1:1", string? orderGeneratorWebRoot = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(webHostBuilder =>
         {
             webHostBuilder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
-            webHostBuilder.UseSetting("Fix:AcceptorPort", fixPort.ToString());
-            webHostBuilder.UseSetting("OrderAccumulator:BaseUrl", accumulatorUrl);
-            if (webRoot is not null)
-                webHostBuilder.UseSetting(WebHostDefaults.WebRootKey, webRoot);
+            webHostBuilder.UseSetting("Fix:AcceptorPort", fixAcceptorPort.ToString());
+            webHostBuilder.UseSetting("OrderAccumulator:BaseUrl", accumulatorBaseUrl);
+            if (orderGeneratorWebRoot is not null)
+                webHostBuilder.UseSetting(WebHostDefaults.WebRootKey, orderGeneratorWebRoot);
         });
 
     public static async Task WaitUntilTestConditionHolds(Func<bool> expectedCondition)
     {
-        var conditionClock = Stopwatch.StartNew();
+        var testConditionClock = Stopwatch.StartNew();
         while (!expectedCondition())
         {
-            Assert.True(conditionClock.Elapsed < TimeSpan.FromSeconds(10), "a condição esperada não aconteceu em 10 s");
+            Assert.True(testConditionClock.Elapsed < TimeSpan.FromSeconds(10), "a condição esperada não aconteceu em 10 s");
             await Task.Delay(50);
         }
     }

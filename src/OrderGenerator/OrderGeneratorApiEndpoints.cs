@@ -6,7 +6,7 @@ using Flowa.Shared;
 namespace OrderGenerator;
 
 // Rotas HTTP do contrato v1. Recebem, chamam quem faz o trabalho e traduzem o resultado.
-public static class ApiEndpoints
+public static class OrderGeneratorApiEndpoints
 {
     public const string AccumulatorHttpClientName = "OrderAccumulator";
 
@@ -31,13 +31,13 @@ public static class ApiEndpoints
     // O SDK grava o commit na versão informativa do assembly ("1.0.0+<sha>") quando compila dentro do git.
     public static string? ReadBuildCommitSha()
     {
-        var informationalVersion = typeof(ApiEndpoints).Assembly
+        var informationalVersion = typeof(OrderGeneratorApiEndpoints).Assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
         var commitSeparatorIndex = informationalVersion?.IndexOf('+') ?? -1;
         return commitSeparatorIndex < 0 ? null : informationalVersion![(commitSeparatorIndex + 1)..];
     }
 
-    public static IResult BuildUnexpectedErrorResponse() =>
+    public static IResult BuildOrderGeneratorUnexpectedErrorResponse() =>
         Results.Json(new { status = "error", message = UnexpectedErrorMessage }, statusCode: StatusCodes.Status500InternalServerError);
 
     private static async Task<IResult> PostOrder(HttpRequest orderHttpRequest, FixOrderClient fixOrderClient)
@@ -60,8 +60,8 @@ public static class ApiEndpoints
             OrderOutcome.Accepted => Results.Json(BuildOrderResponseBody("accepted", fixOrderResult, validOrder, AcceptedOrderMessage)),
             OrderOutcome.Rejected => Results.Json(BuildOrderResponseBody("rejected", fixOrderResult, validOrder,
                 fixOrderResult.RejectionText ?? RejectedOrderWithoutTextMessage)),
-            OrderOutcome.NoLoggedOnSession or OrderOutcome.ExecutionReportTimeout => BuildCommunicationErrorResponse(OrderCommunicationMessage),
-            _ => BuildUnexpectedErrorResponse()
+            OrderOutcome.NoLoggedOnSession or OrderOutcome.ExecutionReportTimeout => BuildOrderAccumulatorCommunicationErrorResponse(OrderCommunicationMessage),
+            _ => BuildOrderGeneratorUnexpectedErrorResponse()
         };
     }
 
@@ -72,23 +72,23 @@ public static class ApiEndpoints
         {
             using var accumulatorExposuresResponse = await accumulatorClient.GetAsync("/api/exposures", requestAborted);
             if (accumulatorExposuresResponse.StatusCode != HttpStatusCode.OK)
-                return BuildCommunicationErrorResponse(ExposureCommunicationMessage);
+                return BuildOrderAccumulatorCommunicationErrorResponse(ExposureCommunicationMessage);
 
             var exposuresJson = await accumulatorExposuresResponse.Content.ReadAsStringAsync(requestAborted);
             return Results.Content(exposuresJson, "application/json", statusCode: StatusCodes.Status200OK);
         }
         catch (HttpRequestException)
         {
-            return BuildCommunicationErrorResponse(ExposureCommunicationMessage);
+            return BuildOrderAccumulatorCommunicationErrorResponse(ExposureCommunicationMessage);
         }
         catch (TaskCanceledException) when (!requestAborted.IsCancellationRequested)
         {
             // Cancelamento sem pedido de quem chamou é o timeout de 5 s do HttpClient.
-            return BuildCommunicationErrorResponse(ExposureCommunicationMessage);
+            return BuildOrderAccumulatorCommunicationErrorResponse(ExposureCommunicationMessage);
         }
     }
 
-    private static IResult BuildCommunicationErrorResponse(string communicationErrorMessage) =>
+    private static IResult BuildOrderAccumulatorCommunicationErrorResponse(string communicationErrorMessage) =>
         Results.Json(new { status = "communication_error", message = communicationErrorMessage },
             statusCode: StatusCodes.Status503ServiceUnavailable);
 

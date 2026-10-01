@@ -1,7 +1,7 @@
 using OrderGenerator;
 
 // O /version promete o sha completo; sem ele o app não sobe, para o erro aparecer no build e não no aceite.
-var buildCommitSha = ApiEndpoints.ReadBuildCommitSha() is { Length: 40 } shaFromBuild
+var buildCommitSha = OrderGeneratorApiEndpoints.ReadBuildCommitSha() is { Length: 40 } shaFromBuild
     ? shaFromBuild
     : throw new InvalidOperationException(
         "O build não gravou o commit. Compile dentro do repositório git ou passe -p:SourceRevisionId=<sha completo>.");
@@ -12,12 +12,12 @@ var orderGeneratorBuilder = WebApplication.CreateBuilder(new WebApplicationOptio
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
 });
-ContractHttpPort.UseDefaultOrderGeneratorHttpPortWhenMissing(orderGeneratorBuilder);
+OrderGeneratorHttpPortConfiguration.UseDefaultOrderGeneratorHttpPortWhenMissing(orderGeneratorBuilder);
 
 orderGeneratorBuilder.Services.AddSingleton<FixOrderClient>();
 orderGeneratorBuilder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FixOrderClient>());
 
-orderGeneratorBuilder.Services.AddHttpClient(ApiEndpoints.AccumulatorHttpClientName, (serviceProvider, accumulatorClient) =>
+orderGeneratorBuilder.Services.AddHttpClient(OrderGeneratorApiEndpoints.AccumulatorHttpClientName, (serviceProvider, accumulatorClient) =>
 {
     var accumulatorBaseUrl = serviceProvider.GetRequiredService<IConfiguration>()["OrderAccumulator:BaseUrl"]
         ?? throw new InvalidOperationException("Configuração OrderAccumulator:BaseUrl ausente.");
@@ -28,8 +28,8 @@ orderGeneratorBuilder.Services.AddHttpClient(ApiEndpoints.AccumulatorHttpClientN
 var orderGeneratorApp = orderGeneratorBuilder.Build();
 
 // Erro não previsto vira o corpo do contrato, sem stack trace para quem chamou.
-orderGeneratorApp.UseExceptionHandler(errorPipeline =>
-    errorPipeline.Run(httpContext => ApiEndpoints.BuildUnexpectedErrorResponse().ExecuteAsync(httpContext)));
+orderGeneratorApp.UseExceptionHandler(unexpectedErrorPipeline =>
+    unexpectedErrorPipeline.Run(failedRequestHttpContext => OrderGeneratorApiEndpoints.BuildOrderGeneratorUnexpectedErrorResponse().ExecuteAsync(failedRequestHttpContext)));
 
 orderGeneratorApp.UseDefaultFiles();
 orderGeneratorApp.UseStaticFiles();
@@ -42,7 +42,7 @@ orderGeneratorApp.Run();
 public partial class Program;
 
 // Contrato §4: a porta HTTP vem de ASPNETCORE_HTTP_PORTS; 8080 só quando ninguém informou porta nem URL.
-public static class ContractHttpPort
+public static class OrderGeneratorHttpPortConfiguration
 {
     public const string DefaultOrderGeneratorHttpPort = "8080";
 

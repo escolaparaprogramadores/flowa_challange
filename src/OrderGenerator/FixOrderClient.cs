@@ -29,9 +29,9 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     private readonly SocketInitiator _fixSocketInitiator;
     private SessionID? _initiatorSessionId;
 
-    public FixOrderClient(IConfiguration configuration)
+    public FixOrderClient(IConfiguration orderGeneratorConfiguration)
     {
-        var initiatorSettings = LoadInitiatorSessionSettings(configuration);
+        var initiatorSettings = LoadInitiatorSessionSettings(orderGeneratorConfiguration);
         _fixSocketInitiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, new ScreenLogFactory(initiatorSettings), null);
     }
 
@@ -67,12 +67,12 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         }
     }
 
-    private static SessionSettings LoadInitiatorSessionSettings(IConfiguration configuration)
+    private static SessionSettings LoadInitiatorSessionSettings(IConfiguration orderGeneratorConfiguration)
     {
         var initiatorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, "initiator.cfg"));
-        var acceptorHost = configuration["Fix:AcceptorHost"]
+        var acceptorHost = orderGeneratorConfiguration["Fix:AcceptorHost"]
             ?? throw new InvalidOperationException("Configuração Fix:AcceptorHost ausente.");
-        var acceptorPort = configuration.GetValue<int?>("Fix:AcceptorPort")
+        var acceptorPort = orderGeneratorConfiguration.GetValue<int?>("Fix:AcceptorPort")
             ?? throw new InvalidOperationException("Configuração Fix:AcceptorPort ausente.");
 
         foreach (var configuredSessionId in initiatorSettings.GetSessions())

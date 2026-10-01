@@ -70,7 +70,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
 
     [Theory]
     [MemberData(nameof(InvalidOrders))]
-    public async Task Campo_invalido_responde_400_em_portugues_e_nao_envia_FIX(string invalidOrderJson, string expectedField, string expectedMessage)
+    public async Task Campo_invalido_responde_400_em_portugues_e_nao_envia_FIX(string invalidOrderJson, string expectedOrderFieldName, string expectedOrderFieldErrorMessage)
     {
         var invalidOrderHttpResponse = await PostOrderJson(invalidOrderJson);
 
@@ -78,9 +78,9 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         var validationErrorResponse = await ReadOrderGeneratorResponseJson(invalidOrderHttpResponse);
         Assert.Equal("validation_error", validationErrorResponse.GetProperty("status").GetString());
         Assert.Equal("A ordem tem campos inválidos.", validationErrorResponse.GetProperty("message").GetString());
-        var fieldError = Assert.Single(validationErrorResponse.GetProperty("errors").EnumerateArray());
-        Assert.Equal(expectedField, fieldError.GetProperty("field").GetString());
-        Assert.Equal(expectedMessage, fieldError.GetProperty("message").GetString());
+        var orderFieldError = Assert.Single(validationErrorResponse.GetProperty("errors").EnumerateArray());
+        Assert.Equal(expectedOrderFieldName, orderFieldError.GetProperty("field").GetString());
+        Assert.Equal(expectedOrderFieldErrorMessage, orderFieldError.GetProperty("message").GetString());
         await AssertOnlySentinelReachedAcceptor();
     }
 
@@ -90,8 +90,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         var notJsonHttpResponse = await PostOrderJson("isto não é json");
 
         Assert.Equal(HttpStatusCode.BadRequest, notJsonHttpResponse.StatusCode);
-        var fieldErrors = (await ReadOrderGeneratorResponseJson(notJsonHttpResponse)).GetProperty("errors").EnumerateArray()
-            .Select(fieldError => (fieldError.GetProperty("field").GetString(), fieldError.GetProperty("message").GetString()))
+        var orderFieldErrors = (await ReadOrderGeneratorResponseJson(notJsonHttpResponse)).GetProperty("errors").EnumerateArray()
+            .Select(orderFieldError => (orderFieldError.GetProperty("field").GetString(), orderFieldError.GetProperty("message").GetString()))
             .ToList();
         Assert.Equal(
             [
@@ -100,7 +100,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
                 (OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityRequiredMessage),
                 (OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceRequiredMessage)
             ],
-            fieldErrors);
+            orderFieldErrors);
         await AssertOnlySentinelReachedAcceptor();
     }
 
@@ -114,8 +114,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         var emptyOrderHttpResponse = await PostOrderJson(orderJsonWithoutFields);
 
         Assert.Equal(HttpStatusCode.BadRequest, emptyOrderHttpResponse.StatusCode);
-        var fieldErrors = (await ReadOrderGeneratorResponseJson(emptyOrderHttpResponse)).GetProperty("errors").EnumerateArray()
-            .Select(fieldError => (fieldError.GetProperty("field").GetString(), fieldError.GetProperty("message").GetString()))
+        var orderFieldErrors = (await ReadOrderGeneratorResponseJson(emptyOrderHttpResponse)).GetProperty("errors").EnumerateArray()
+            .Select(orderFieldError => (orderFieldError.GetProperty("field").GetString(), orderFieldError.GetProperty("message").GetString()))
             .ToList();
         Assert.Equal(
             [
@@ -124,29 +124,29 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
                 (OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityRequiredMessage),
                 (OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceRequiredMessage)
             ],
-            fieldErrors);
+            orderFieldErrors);
         await AssertOnlySentinelReachedAcceptor();
     }
 
     [Theory]
     [InlineData("buy", '1')]
     [InlineData("sell", '2')]
-    public async Task Compra_e_venda_saem_como_NewOrderSingle_e_voltam_aceitas(string jsonSide, char fixSide)
+    public async Task Compra_e_venda_saem_como_NewOrderSingle_e_voltam_aceitas(string orderSideJson, char orderSideFixCode)
     {
         // TransactTime vai em UTC com milissegundos; a janela aceita esse arredondamento.
-        var sentAfter = DateTime.UtcNow.AddMilliseconds(-1);
-        var orderHttpResponse = await PostOrderJson($$"""{"symbol":"VALE3","side":"{{jsonSide}}","quantity":250,"price":61.37}""");
-        var sentBefore = DateTime.UtcNow;
+        var orderSentNotBeforeUtc = DateTime.UtcNow.AddMilliseconds(-1);
+        var orderHttpResponse = await PostOrderJson($$"""{"symbol":"VALE3","side":"{{orderSideJson}}","quantity":250,"price":61.37}""");
+        var orderSentNotAfterUtc = DateTime.UtcNow;
 
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
         var sentNewOrderSingle = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
         Assert.Equal("D", sentNewOrderSingle.Header.GetString(Tags.MsgType));
         Assert.Equal("VALE3", sentNewOrderSingle.GetString(Tags.Symbol));
-        Assert.Equal(fixSide, sentNewOrderSingle.GetChar(Tags.Side));
+        Assert.Equal(orderSideFixCode, sentNewOrderSingle.GetChar(Tags.Side));
         Assert.Equal(250m, sentNewOrderSingle.GetDecimal(Tags.OrderQty));
         Assert.Equal(61.37m, sentNewOrderSingle.GetDecimal(Tags.Price));
         Assert.Equal(OrdType.LIMIT, sentNewOrderSingle.GetChar(Tags.OrdType));
-        Assert.InRange(sentNewOrderSingle.GetDateTime(Tags.TransactTime), sentAfter, sentBefore);
+        Assert.InRange(sentNewOrderSingle.GetDateTime(Tags.TransactTime), orderSentNotBeforeUtc, orderSentNotAfterUtc);
 
         var orderResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
         var clOrdId = sentNewOrderSingle.GetString(Tags.ClOrdID);
@@ -155,7 +155,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         Assert.Matches("^[0-9a-f]{32}$", clOrdId);
         AssertAnswersItsOwnExecutionReport(orderResponse);
         Assert.Equal("VALE3", orderResponse.GetProperty("symbol").GetString());
-        Assert.Equal(jsonSide, orderResponse.GetProperty("side").GetString());
+        Assert.Equal(orderSideJson, orderResponse.GetProperty("side").GetString());
         Assert.Equal(250, orderResponse.GetProperty("quantity").GetInt32());
         Assert.Equal(61.37m, orderResponse.GetProperty("price").GetDecimal());
         Assert.Equal("Ordem aceita.", orderResponse.GetProperty("message").GetString());
@@ -165,23 +165,23 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     [InlineData("1", "0.01")]
     [InlineData("99999", "999.99")]
     [InlineData("\"1\"", "\"0.01\"")]
-    public async Task Bordas_aceitas_de_quantidade_e_preco_saem_pelo_FIX(string quantityJson, string priceJson)
+    public async Task Bordas_aceitas_de_quantidade_e_preco_saem_pelo_FIX(string orderQuantityJson, string orderPriceJson)
     {
-        var orderHttpResponse = await PostOrderJson($$"""{"symbol":"VIIA4","side":"sell","quantity":{{quantityJson}},"price":{{priceJson}}}""");
+        var orderHttpResponse = await PostOrderJson($$"""{"symbol":"VIIA4","side":"sell","quantity":{{orderQuantityJson}},"price":{{orderPriceJson}}}""");
 
-        var expectedQuantity = int.Parse(quantityJson.Trim('"'));
-        var expectedPrice = decimal.Parse(priceJson.Trim('"'), System.Globalization.CultureInfo.InvariantCulture);
+        var expectedOrderQuantity = int.Parse(orderQuantityJson.Trim('"'));
+        var expectedOrderPrice = decimal.Parse(orderPriceJson.Trim('"'), System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
         var sentNewOrderSingle = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
         Assert.Equal("VIIA4", sentNewOrderSingle.GetString(Tags.Symbol));
         Assert.Equal(Side.SELL, sentNewOrderSingle.GetChar(Tags.Side));
-        Assert.Equal(expectedQuantity, sentNewOrderSingle.GetDecimal(Tags.OrderQty));
-        Assert.Equal(expectedPrice, sentNewOrderSingle.GetDecimal(Tags.Price));
+        Assert.Equal(expectedOrderQuantity, sentNewOrderSingle.GetDecimal(Tags.OrderQty));
+        Assert.Equal(expectedOrderPrice, sentNewOrderSingle.GetDecimal(Tags.Price));
         var orderResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
-        Assert.Equal(expectedQuantity, orderResponse.GetProperty("quantity").GetInt32());
-        Assert.Equal(expectedPrice, orderResponse.GetProperty("price").GetDecimal());
+        Assert.Equal(expectedOrderQuantity, orderResponse.GetProperty("quantity").GetInt32());
+        Assert.Equal(expectedOrderPrice, orderResponse.GetProperty("price").GetDecimal());
     }
 
     [Fact]
@@ -230,9 +230,9 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         var orderHttpResponse = await PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":10,"price":20.00}""");
 
         Assert.Equal(HttpStatusCode.InternalServerError, orderHttpResponse.StatusCode);
-        var errorResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
-        Assert.Equal("error", errorResponse.GetProperty("status").GetString());
-        Assert.Equal("Erro inesperado ao processar a ordem.", errorResponse.GetProperty("message").GetString());
+        var unexpectedErrorResponseJson = await ReadOrderGeneratorResponseJson(orderHttpResponse);
+        Assert.Equal("error", unexpectedErrorResponseJson.GetProperty("status").GetString());
+        Assert.Equal("Erro inesperado ao processar a ordem.", unexpectedErrorResponseJson.GetProperty("message").GetString());
     }
 
     [Fact]
@@ -296,9 +296,9 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     public async Task Mensagens_FIX_de_ida_e_volta_aparecem_no_stdout()
     {
         // Contrato §3: o log FIX vai para o stdout, que é o que o docker compose logs mostra.
-        var originalStdout = Console.Out;
-        var capturedStdout = new StringWriter();
-        Console.SetOut(TextWriter.Synchronized(capturedStdout));
+        var originalConsoleStdout = Console.Out;
+        var capturedConsoleStdout = new StringWriter();
+        Console.SetOut(TextWriter.Synchronized(capturedConsoleStdout));
         string clOrdId;
         try
         {
@@ -307,13 +307,13 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         }
         finally
         {
-            Console.SetOut(originalStdout);
+            Console.SetOut(originalConsoleStdout);
         }
 
         // O ScreenLog do QuickFIX troca o separador SOH por "|" e marca a direção da mensagem.
-        var stdoutLines = capturedStdout.ToString().Split('\n');
-        Assert.Single(stdoutLines, stdoutLine => stdoutLine.StartsWith("<outgoing> ") && stdoutLine.Contains("|35=D|") && stdoutLine.Contains("|11=" + clOrdId + "|"));
-        Assert.Single(stdoutLines, stdoutLine => stdoutLine.StartsWith("<incoming> ") && stdoutLine.Contains("|35=8|") && stdoutLine.Contains("|11=" + clOrdId + "|"));
+        var fixLogLines = capturedConsoleStdout.ToString().Split('\n');
+        Assert.Single(fixLogLines, fixLogLine => fixLogLine.StartsWith("<outgoing> ") && fixLogLine.Contains("|35=D|") && fixLogLine.Contains("|11=" + clOrdId + "|"));
+        Assert.Single(fixLogLines, fixLogLine => fixLogLine.StartsWith("<incoming> ") && fixLogLine.Contains("|35=8|") && fixLogLine.Contains("|11=" + clOrdId + "|"));
     }
 
     // A sessão FIX entrega em ordem: se uma ordem inválida tivesse saído, ela chegaria antes da sentinela.
@@ -348,27 +348,27 @@ public sealed class OrderCommunicationTests
     [Fact]
     public async Task Sem_sessao_FIX_responde_503_na_hora()
     {
-        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort());
-        using var orderGeneratorClient = orderGenerator.CreateClient();
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort());
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
-        var responseClock = Stopwatch.StartNew();
+        var apiResponseClock = Stopwatch.StartNew();
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
-        responseClock.Stop();
+        apiResponseClock.Stop();
 
         await AssertOrderCommunicationError(orderHttpResponse);
-        Assert.True(responseClock.Elapsed < TimeSpan.FromSeconds(1), $"levou {responseClock.Elapsed}");
-        Assert.Equal(0, orderGenerator.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
+        Assert.True(apiResponseClock.Elapsed < TimeSpan.FromSeconds(1), $"levou {apiResponseClock.Elapsed}");
+        Assert.Equal(0, orderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
 
     [Fact]
     public void Acceptor_de_teste_escuta_so_no_loopback()
     {
         // Escutando em todas as redes, o Windows pede ao dono para liberar o testhost no firewall.
-        using var acceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
-        acceptor.StartFixTestAcceptor();
+        using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        fixTestAcceptor.StartFixTestAcceptor();
 
         var acceptorListeners = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties()
-            .GetActiveTcpListeners().Where(listenerEndpoint => listenerEndpoint.Port == acceptor.AcceptorPort).ToList();
+            .GetActiveTcpListeners().Where(listenerEndpoint => listenerEndpoint.Port == fixTestAcceptor.AcceptorPort).ToList();
 
         var acceptorListener = Assert.Single(acceptorListeners);
         Assert.Equal(IPAddress.Loopback, acceptorListener.Address);
@@ -377,41 +377,41 @@ public sealed class OrderCommunicationTests
     [Fact]
     public async Task Acceptor_mudo_responde_503_em_5_segundos_e_descarta_a_espera()
     {
-        using var acceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
-        acceptor.StartFixTestAcceptor();
-        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(acceptor.AcceptorPort);
-        using var orderGeneratorClient = orderGenerator.CreateClient();
-        await acceptor.WaitForFixSessionLogonAsync();
+        using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        fixTestAcceptor.StartFixTestAcceptor();
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(fixTestAcceptor.AcceptorPort);
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+        await fixTestAcceptor.WaitForFixSessionLogonAsync();
 
-        var responseClock = Stopwatch.StartNew();
+        var apiResponseClock = Stopwatch.StartNew();
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
-        responseClock.Stop();
+        apiResponseClock.Stop();
 
         await AssertOrderCommunicationError(orderHttpResponse);
-        Assert.Single(acceptor.ReceivedOrders);
-        Assert.InRange(responseClock.Elapsed, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6.5));
-        Assert.Equal(0, orderGenerator.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
+        Assert.Single(fixTestAcceptor.ReceivedOrders);
+        Assert.InRange(apiResponseClock.Elapsed, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6.5));
+        Assert.Equal(0, orderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
 
     [Fact]
     public async Task Quando_o_acceptor_volta_o_initiator_reloga_e_so_a_ordem_nova_passa()
     {
-        using var acceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
-        await using var orderGenerator = OrderGeneratorTestHost.CreateOrderGeneratorFactory(acceptor.AcceptorPort);
-        using var orderGeneratorClient = orderGenerator.CreateClient();
+        using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(fixTestAcceptor.AcceptorPort);
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
         await AssertOrderCommunicationError(await PostValidOrder(orderGeneratorClient));
 
-        acceptor.ExecutionReportResponder = acceptor.BuildAcceptedExecutionReport;
-        acceptor.StartFixTestAcceptor();
-        await acceptor.WaitForFixSessionLogonAsync();
+        fixTestAcceptor.ExecutionReportResponder = fixTestAcceptor.BuildAcceptedExecutionReport;
+        fixTestAcceptor.StartFixTestAcceptor();
+        await fixTestAcceptor.WaitForFixSessionLogonAsync();
 
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
         var orderResponse = await OrderApiTests.ReadOrderGeneratorResponseJson(orderHttpResponse);
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
         // D-34: a ordem recusada sem sessão não ficou na store para sair depois do logon.
-        var receivedOrder = Assert.Single(acceptor.ReceivedOrders);
+        var receivedOrder = Assert.Single(fixTestAcceptor.ReceivedOrders);
         Assert.Equal(orderResponse.GetProperty("clOrdId").GetString(), receivedOrder.GetString(Tags.ClOrdID));
     }
 
