@@ -299,6 +299,20 @@ public sealed class OrderCommunicationTests
     }
 
     [Fact]
+    public void Acceptor_de_teste_escuta_so_no_loopback()
+    {
+        // Escutando em todas as redes, o Windows pede ao dono para liberar o testhost no firewall.
+        using var acceptor = new TestAcceptor(TestHost.FreePort());
+        acceptor.Start();
+
+        var listeners = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties()
+            .GetActiveTcpListeners().Where(endpoint => endpoint.Port == acceptor.Port).ToList();
+
+        var listener = Assert.Single(listeners);
+        Assert.Equal(IPAddress.Loopback, listener.Address);
+    }
+
+    [Fact]
     public async Task Acceptor_mudo_responde_503_em_5_segundos_e_descarta_a_espera()
     {
         using var acceptor = new TestAcceptor(TestHost.FreePort());

@@ -55,6 +55,7 @@ public sealed class TestAcceptor : IApplication, IDisposable
         var settings = new SessionSettings(new StringReader($"""
             [DEFAULT]
             ConnectionType=acceptor
+            SocketAcceptHost=127.0.0.1
             SocketAcceptPort={Port}
             StartTime=00:00:00
             EndTime=00:00:00
