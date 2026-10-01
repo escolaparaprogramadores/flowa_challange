@@ -11,22 +11,22 @@ public static class OrderRules
     public const decimal PriceTick = 0.01m;
 }
 
-public enum Side
+public enum OrderSide
 {
     Buy,
     Sell
 }
 
-public static class SideCodes
+public static class OrderSideCodes
 {
     public const string BuyJson = "buy";
     public const string SellJson = "sell";
     public const char BuyFix = '1';
     public const char SellFix = '2';
 
-    public static char ToFix(this Side side) => side == Side.Buy ? BuyFix : SellFix;
+    public static char ToFixOrderSide(this OrderSide orderSide) => orderSide == OrderSide.Buy ? BuyFix : SellFix;
 
-    public static string ToJson(this Side side) => side == Side.Buy ? BuyJson : SellJson;
+    public static string ToJsonOrderSide(this OrderSide orderSide) => orderSide == OrderSide.Buy ? BuyJson : SellJson;
 }
 
 public static class OrderFields

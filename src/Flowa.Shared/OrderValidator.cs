@@ -2,11 +2,11 @@ using System.Globalization;
 
 namespace Flowa.Shared;
 
-public sealed record FieldError(string Field, string Message);
+public sealed record OrderFieldError(string Field, string Message);
 
-public sealed record ValidOrder(string Symbol, Side Side, int Quantity, decimal Price);
+public sealed record ValidOrder(string Symbol, OrderSide Side, int Quantity, decimal Price);
 
-public sealed record OrderValidationResult(ValidOrder? Order, IReadOnlyList<FieldError> Errors)
+public sealed record OrderValidationResult(ValidOrder? Order, IReadOnlyList<OrderFieldError> Errors)
 {
     public bool IsValid => Errors.Count == 0;
 }
@@ -19,160 +19,160 @@ public static class OrderValidator
     // Entrada da tela: os campos chegam como texto cru do JSON.
     public static OrderValidationResult ValidateFromJson(string? symbol, string? side, string? quantity, string? price)
     {
-        var errors = new List<FieldError>();
+        var orderFieldErrors = new List<OrderFieldError>();
 
-        var validSymbol = CheckSymbol(symbol, errors);
-        var validSide = ParseJsonSide(side, errors);
-        var validQuantity = ParseQuantity(quantity, errors);
-        var validPrice = ParsePrice(price, errors);
+        var validSymbol = CheckSymbol(symbol, orderFieldErrors);
+        var validSide = ParseJsonSide(side, orderFieldErrors);
+        var validQuantity = ParseQuantity(quantity, orderFieldErrors);
+        var validPrice = ParsePrice(price, orderFieldErrors);
 
-        return BuildValidationResult(validSymbol, validSide, validQuantity, validPrice, errors);
+        return BuildValidationResult(validSymbol, validSide, validQuantity, validPrice, orderFieldErrors);
     }
 
     // Entrada do FIX: o lado chega como o caractere da tag 54; quantidade e preço como decimal.
     public static OrderValidationResult ValidateFromFix(string? symbol, char side, decimal quantity, decimal price)
     {
-        var errors = new List<FieldError>();
+        var orderFieldErrors = new List<OrderFieldError>();
 
-        var validSymbol = CheckSymbol(symbol, errors);
-        var validSide = ParseFixSide(side, errors);
-        var validQuantity = CheckQuantity(quantity, errors);
-        var validPrice = CheckPrice(price, errors);
+        var validSymbol = CheckSymbol(symbol, orderFieldErrors);
+        var validSide = ParseFixSide(side, orderFieldErrors);
+        var validQuantity = CheckQuantity(quantity, orderFieldErrors);
+        var validPrice = CheckPrice(price, orderFieldErrors);
 
-        return BuildValidationResult(validSymbol, validSide, validQuantity, validPrice, errors);
+        return BuildValidationResult(validSymbol, validSide, validQuantity, validPrice, orderFieldErrors);
     }
 
     private static OrderValidationResult BuildValidationResult(
-        string? symbol, Side? side, int? quantity, decimal? price, List<FieldError> errors)
+        string? symbol, OrderSide? side, int? quantity, decimal? price, List<OrderFieldError> orderFieldErrors)
     {
-        if (errors.Count > 0)
-            return new OrderValidationResult(null, errors);
+        if (orderFieldErrors.Count > 0)
+            return new OrderValidationResult(null, orderFieldErrors);
 
-        return new OrderValidationResult(new ValidOrder(symbol!, side!.Value, quantity!.Value, price!.Value), errors);
+        return new OrderValidationResult(new ValidOrder(symbol!, side!.Value, quantity!.Value, price!.Value), orderFieldErrors);
     }
 
-    private static string? CheckSymbol(string? symbol, List<FieldError> errors)
+    private static string? CheckSymbol(string? symbol, List<OrderFieldError> orderFieldErrors)
     {
         if (string.IsNullOrEmpty(symbol))
         {
-            errors.Add(new FieldError(OrderFields.Symbol, OrderMessages.SymbolRequired));
+            orderFieldErrors.Add(new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolRequired));
             return null;
         }
 
         if (!OrderRules.Symbols.Contains(symbol))
         {
-            errors.Add(new FieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid));
+            orderFieldErrors.Add(new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid));
             return null;
         }
 
         return symbol;
     }
 
-    private static Side? ParseJsonSide(string? side, List<FieldError> errors) => side switch
+    private static OrderSide? ParseJsonSide(string? side, List<OrderFieldError> orderFieldErrors) => side switch
     {
-        SideCodes.BuyJson => Side.Buy,
-        SideCodes.SellJson => Side.Sell,
-        null or "" => AddFieldError<Side>(errors, OrderFields.Side, OrderMessages.SideRequired),
-        _ => AddFieldError<Side>(errors, OrderFields.Side, OrderMessages.SideInvalid)
+        OrderSideCodes.BuyJson => OrderSide.Buy,
+        OrderSideCodes.SellJson => OrderSide.Sell,
+        null or "" => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.Side, OrderMessages.SideRequired),
+        _ => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.Side, OrderMessages.SideInvalid)
     };
 
-    private static Side? ParseFixSide(char side, List<FieldError> errors) => side switch
+    private static OrderSide? ParseFixSide(char side, List<OrderFieldError> orderFieldErrors) => side switch
     {
-        SideCodes.BuyFix => Side.Buy,
-        SideCodes.SellFix => Side.Sell,
-        _ => AddFieldError<Side>(errors, OrderFields.Side, OrderMessages.SideInvalid)
+        OrderSideCodes.BuyFix => OrderSide.Buy,
+        OrderSideCodes.SellFix => OrderSide.Sell,
+        _ => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.Side, OrderMessages.SideInvalid)
     };
 
-    private static int? ParseQuantity(string? quantity, List<FieldError> errors)
+    private static int? ParseQuantity(string? quantity, List<OrderFieldError> orderFieldErrors)
     {
         if (string.IsNullOrEmpty(quantity))
-            return AddFieldError<int>(errors, OrderFields.Quantity, OrderMessages.QuantityRequired);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityRequired);
 
         if (!decimal.TryParse(quantity, JsonNumberStyle, CultureInfo.InvariantCulture, out var parsedQuantity))
         {
             // Número que nem cabe no decimal é grande demais, não "texto".
             if (IsNumberBeyondDecimal(quantity, out var isNegative))
-                return AddFieldError<int>(errors, OrderFields.Quantity,
+                return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity,
                     isNegative ? OrderMessages.QuantityNotPositive : OrderMessages.QuantityTooLarge);
 
-            return AddFieldError<int>(errors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
         }
 
         if (SignificantDecimalPlaces(quantity) > 0)
-            return AddFieldError<int>(errors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
 
-        return CheckQuantity(parsedQuantity, errors);
+        return CheckQuantity(parsedQuantity, orderFieldErrors);
     }
 
-    private static int? CheckQuantity(decimal quantity, List<FieldError> errors)
+    private static int? CheckQuantity(decimal quantity, List<OrderFieldError> orderFieldErrors)
     {
         if (decimal.Truncate(quantity) != quantity)
-            return AddFieldError<int>(errors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
 
         if (quantity <= 0)
-            return AddFieldError<int>(errors, OrderFields.Quantity, OrderMessages.QuantityNotPositive);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotPositive);
 
         if (quantity >= OrderRules.MaxQuantityExclusive)
-            return AddFieldError<int>(errors, OrderFields.Quantity, OrderMessages.QuantityTooLarge);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityTooLarge);
 
         return (int)quantity;
     }
 
-    private static decimal? ParsePrice(string? price, List<FieldError> errors)
+    private static decimal? ParsePrice(string? price, List<OrderFieldError> orderFieldErrors)
     {
         if (string.IsNullOrEmpty(price))
-            return AddFieldError<decimal>(errors, OrderFields.Price, OrderMessages.PriceRequired);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceRequired);
 
         if (!decimal.TryParse(price, JsonNumberStyle, CultureInfo.InvariantCulture, out var parsedPrice))
         {
             if (IsNumberBeyondDecimal(price, out var isNegative))
-                return AddFieldError<decimal>(errors, OrderFields.Price,
+                return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price,
                     isNegative ? OrderMessages.PriceNotPositive : OrderMessages.PriceTooLarge);
 
-            return AddFieldError<decimal>(errors, OrderFields.Price, OrderMessages.PriceNotNumber);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceNotNumber);
         }
 
-        var checkedPrice = CheckPrice(parsedPrice, errors);
+        var checkedPrice = CheckPrice(parsedPrice, orderFieldErrors);
 
         if (checkedPrice is not null && SignificantDecimalPlaces(price) > OrderRules.PriceTick.Scale)
-            return AddFieldError<decimal>(errors, OrderFields.Price, OrderMessages.PriceOffTick);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceOffTick);
 
         return checkedPrice;
     }
 
-    private static decimal? CheckPrice(decimal price, List<FieldError> errors)
+    private static decimal? CheckPrice(decimal price, List<OrderFieldError> orderFieldErrors)
     {
         if (price <= 0)
-            return AddFieldError<decimal>(errors, OrderFields.Price, OrderMessages.PriceNotPositive);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceNotPositive);
 
         if (price >= OrderRules.MaxPriceExclusive)
-            return AddFieldError<decimal>(errors, OrderFields.Price, OrderMessages.PriceTooLarge);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceTooLarge);
 
         // decimal é exato na base 10, então o resto da divisão diz se está no passo de 0,01.
         if (price % OrderRules.PriceTick != 0)
-            return AddFieldError<decimal>(errors, OrderFields.Price, OrderMessages.PriceOffTick);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceOffTick);
 
         return price;
     }
 
     // Casas decimais que contam (sem zeros à direita), lidas no texto: o decimal arredonda o que
     // passa de 28 dígitos e faria "10.0000000000000000000000000001" virar 10.
-    private static int SignificantDecimalPlaces(string number)
+    private static int SignificantDecimalPlaces(string fieldText)
     {
-        var point = number.IndexOf('.');
-        return point < 0 ? 0 : number[(point + 1)..].TrimEnd('0').Length;
+        var decimalSeparatorPosition = fieldText.IndexOf('.');
+        return decimalSeparatorPosition < 0 ? 0 : fieldText[(decimalSeparatorPosition + 1)..].TrimEnd('0').Length;
     }
 
-    private static bool IsNumberBeyondDecimal(string number, out bool isNegative)
+    private static bool IsNumberBeyondDecimal(string fieldText, out bool isNegative)
     {
-        var isNumber = double.TryParse(number, JsonNumberStyle, CultureInfo.InvariantCulture, out var approximateValue);
+        var isNumber = double.TryParse(fieldText, JsonNumberStyle, CultureInfo.InvariantCulture, out var approximateValue);
         isNegative = approximateValue < 0;
         return isNumber;
     }
 
-    private static T? AddFieldError<T>(List<FieldError> errors, string field, string message) where T : struct
+    private static T? AddOrderFieldError<T>(List<OrderFieldError> orderFieldErrors, string field, string message) where T : struct
     {
-        errors.Add(new FieldError(field, message));
+        orderFieldErrors.Add(new OrderFieldError(field, message));
         return null;
     }
 }

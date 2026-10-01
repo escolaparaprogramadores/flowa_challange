@@ -14,7 +14,7 @@ public class OrderValidatorTests
     {
         Assert.False(validationResult.IsValid);
         Assert.Null(validationResult.Order);
-        Assert.Equal(new FieldError(field, message), Assert.Single(validationResult.Errors));
+        Assert.Equal(new OrderFieldError(field, message), Assert.Single(validationResult.Errors));
     }
 
     // Regra: símbolo
@@ -47,22 +47,22 @@ public class OrderValidatorTests
     // Regra: lado
 
     [Theory]
-    [InlineData("buy", Side.Buy, '1')]
-    [InlineData("sell", Side.Sell, '2')]
-    public void DeveConverterLadoDaTelaParaFix(string side, Side expectedSide, char expectedFix)
+    [InlineData("buy", OrderSide.Buy, '1')]
+    [InlineData("sell", OrderSide.Sell, '2')]
+    public void DeveConverterLadoDaTelaParaFix(string side, OrderSide expectedSide, char expectedFix)
     {
         var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, side, ValidQuantity, ValidPrice);
 
         Assert.True(validationResult.IsValid);
         Assert.Equal(expectedSide, validationResult.Order!.Side);
-        Assert.Equal(expectedFix, validationResult.Order.Side.ToFix());
-        Assert.Equal(side, validationResult.Order.Side.ToJson());
+        Assert.Equal(expectedFix, validationResult.Order.Side.ToFixOrderSide());
+        Assert.Equal(side, validationResult.Order.Side.ToJsonOrderSide());
     }
 
     [Theory]
-    [InlineData('1', Side.Buy)]
-    [InlineData('2', Side.Sell)]
-    public void DeveAceitarLadoFix(char side, Side expectedSide)
+    [InlineData('1', OrderSide.Buy)]
+    [InlineData('2', OrderSide.Sell)]
+    public void DeveAceitarLadoFix(char side, OrderSide expectedSide)
     {
         var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, side, 100m, 10.50m);
 
@@ -138,7 +138,7 @@ public class OrderValidatorTests
     [MemberData(nameof(QuantidadesFixAceitas))]
     public void DeveAceitarQuantidadeFixNasBordas(decimal quantity, int expected)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, SideCodes.BuyFix, quantity, 10.50m);
+        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, quantity, 10.50m);
 
         Assert.True(validationResult.IsValid);
         Assert.Equal(expected, validationResult.Order!.Quantity);
@@ -156,7 +156,7 @@ public class OrderValidatorTests
     [MemberData(nameof(QuantidadesFixRecusadas))]
     public void DeveRecusarQuantidadeFixInvalida(decimal quantity, string expectedMessage)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, SideCodes.BuyFix, quantity, 10.50m);
+        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, quantity, 10.50m);
 
         AssertRejectedWithSingleError(validationResult, OrderFields.Quantity, expectedMessage);
     }
@@ -168,12 +168,15 @@ public class OrderValidatorTests
 
     [Theory]
     [MemberData(nameof(PrecosAceitos))]
-    public void DeveAceitarPrecoNasBordas(string price, decimal expected)
+    public void DeveAceitarPrecoNasBordasNasDuasEntradas(string priceText, decimal price)
     {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, ValidSide, ValidQuantity, price);
+        var jsonValidationResult = OrderValidator.ValidateFromJson(ValidSymbol, ValidSide, ValidQuantity, priceText);
+        var fixValidationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, 100m, price);
 
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(expected, validationResult.Order!.Price);
+        Assert.True(jsonValidationResult.IsValid);
+        Assert.Equal(price, jsonValidationResult.Order!.Price);
+        Assert.True(fixValidationResult.IsValid);
+        Assert.Equal(price, fixValidationResult.Order!.Price);
     }
 
     [Theory]
@@ -196,16 +199,6 @@ public class OrderValidatorTests
         AssertRejectedWithSingleError(validationResult, OrderFields.Price, expectedMessage);
     }
 
-    [Theory]
-    [MemberData(nameof(PrecosAceitos))]
-    public void DeveAceitarPrecoFixNasBordas(string _, decimal price)
-    {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, SideCodes.BuyFix, 100m, price);
-
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(price, validationResult.Order!.Price);
-    }
-
     public static TheoryData<decimal, string> PrecosFixRecusados => new()
     {
         { 0m, OrderMessages.PriceNotPositive },
@@ -218,7 +211,7 @@ public class OrderValidatorTests
     [MemberData(nameof(PrecosFixRecusados))]
     public void DeveRecusarPrecoFixInvalido(decimal price, string expectedMessage)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, SideCodes.BuyFix, 100m, price);
+        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, 100m, price);
 
         AssertRejectedWithSingleError(validationResult, OrderFields.Price, expectedMessage);
     }
@@ -232,7 +225,7 @@ public class OrderValidatorTests
 
         Assert.True(validationResult.IsValid);
         Assert.Empty(validationResult.Errors);
-        Assert.Equal(new ValidOrder("VALE3", Side.Sell, 250, 35.10m), validationResult.Order);
+        Assert.Equal(new ValidOrder("VALE3", OrderSide.Sell, 250, 35.10m), validationResult.Order);
     }
 
     [Fact]
@@ -243,10 +236,10 @@ public class OrderValidatorTests
         Assert.Null(validationResult.Order);
         Assert.Equal(
             [
-                new FieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid),
-                new FieldError(OrderFields.Side, OrderMessages.SideInvalid),
-                new FieldError(OrderFields.Quantity, OrderMessages.QuantityNotPositive),
-                new FieldError(OrderFields.Price, OrderMessages.PriceTooLarge)
+                new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid),
+                new OrderFieldError(OrderFields.Side, OrderMessages.SideInvalid),
+                new OrderFieldError(OrderFields.Quantity, OrderMessages.QuantityNotPositive),
+                new OrderFieldError(OrderFields.Price, OrderMessages.PriceTooLarge)
             ],
             validationResult.Errors);
     }
@@ -254,11 +247,11 @@ public class OrderValidatorTests
     [Fact]
     public void DeveDevolverOrdemTipadaQuandoTudoEstaValidoNoFix()
     {
-        var validationResult = OrderValidator.ValidateFromFix("VIIA4", SideCodes.SellFix, 250m, 35.10m);
+        var validationResult = OrderValidator.ValidateFromFix("VIIA4", OrderSideCodes.SellFix, 250m, 35.10m);
 
         Assert.True(validationResult.IsValid);
         Assert.Empty(validationResult.Errors);
-        Assert.Equal(new ValidOrder("VIIA4", Side.Sell, 250, 35.10m), validationResult.Order);
+        Assert.Equal(new ValidOrder("VIIA4", OrderSide.Sell, 250, 35.10m), validationResult.Order);
     }
 
     [Fact]
@@ -269,10 +262,10 @@ public class OrderValidatorTests
         Assert.Null(validationResult.Order);
         Assert.Equal(
             [
-                new FieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid),
-                new FieldError(OrderFields.Side, OrderMessages.SideInvalid),
-                new FieldError(OrderFields.Quantity, OrderMessages.QuantityNotInteger),
-                new FieldError(OrderFields.Price, OrderMessages.PriceOffTick)
+                new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid),
+                new OrderFieldError(OrderFields.Side, OrderMessages.SideInvalid),
+                new OrderFieldError(OrderFields.Quantity, OrderMessages.QuantityNotInteger),
+                new OrderFieldError(OrderFields.Price, OrderMessages.PriceOffTick)
             ],
             validationResult.Errors);
     }
