@@ -268,3 +268,87 @@ public sealed class DockerBuildContextTests
             dockerignorePatterns);
     }
 }
+
+// Achado do aceite: um clone de um commit novo, subido com o mesmo nome de projeto, reaproveitava
+// a imagem do commit anterior e o /version mentia. O compose agora reconstrói sempre no up.
+[Collection(ComposeCollection.CollectionName)]
+[Trait("Category", "Integration")]
+public sealed class CleanCloneImageCommitTests
+{
+    private const string CloneComposeProjectName = "flowa-it-commit";
+    private const int CloneOrderGeneratorHostPort = 18093;
+    private static readonly TimeSpan CloneComposeUpTimeout = TimeSpan.FromMinutes(15);
+
+    [Fact]
+    public async Task Docker_compose_up_de_um_clone_serve_o_commit_atual_mesmo_com_a_imagem_do_commit_anterior()
+    {
+        var repoRoot = RepoPaths.FindRepoRoot();
+        var cloneDirectory = Path.Combine(Path.GetTempPath(), $"flowa-it-commit-{Guid.NewGuid():N}");
+        var cloneComposeFile = Path.Combine(cloneDirectory, "docker-compose.yml");
+        // Sem SOURCE_REVISION_ID: o clone tem .git de verdade, como o do avaliador.
+        var cloneEnvironmentVariables = new Dictionary<string, string?>
+        {
+            ["FLOWA_HTTP_PORT"] = CloneOrderGeneratorHostPort.ToString(),
+            ["SOURCE_REVISION_ID"] = null,
+            ["GIT_AUTHOR_NAME"] = "flowa-it",
+            ["GIT_AUTHOR_EMAIL"] = "flowa-it@localhost",
+            ["GIT_COMMITTER_NAME"] = "flowa-it",
+            ["GIT_COMMITTER_EMAIL"] = "flowa-it@localhost",
+        };
+        Task<string> RunInCloneAsync(TimeSpan commandTimeout, string commandExecutable, params string[] commandArguments) =>
+            ExternalCommand.CaptureOutputAsync(commandExecutable, commandTimeout, cloneEnvironmentVariables, commandArguments);
+        Task<string> RunCloneComposeAsync(params string[] composeArguments) =>
+            RunInCloneAsync(CloneComposeUpTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
+
+        var repoHeadCommit = (await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
+        try
+        {
+            await RunInCloneAsync(TimeSpan.FromMinutes(2), "git", "clone", "--quiet", "--no-local", repoRoot, cloneDirectory);
+            await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "checkout", "--quiet", repoHeadCommit);
+
+            await RunCloneComposeAsync("up", "-d", "--wait", "--wait-timeout", "300");
+            Assert.Equal(repoHeadCommit, await ReadCloneOrderGeneratorCommitAsync());
+            await RunCloneComposeAsync("down", "-v");
+
+            await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "commit novo do teste");
+            var newCloneCommit = (await RunInCloneAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "rev-parse", "HEAD")).Trim();
+            Assert.NotEqual(repoHeadCommit, newCloneCommit);
+
+            await RunCloneComposeAsync("up", "-d", "--wait", "--wait-timeout", "300");
+            Assert.Equal(newCloneCommit, await ReadCloneOrderGeneratorCommitAsync());
+        }
+        finally
+        {
+            if (File.Exists(cloneComposeFile))
+                await RunCloneComposeAsync("down", "-v", "--rmi", "local");
+            DeleteCloneDirectory(cloneDirectory);
+        }
+    }
+
+    private static async Task<string> ReadCloneOrderGeneratorCommitAsync()
+    {
+        using var cloneOrderGeneratorHttp = new HttpClient { BaseAddress = new Uri($"http://localhost:{CloneOrderGeneratorHostPort}"), Timeout = TimeSpan.FromSeconds(10) };
+        var versionDeadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
+        while (DateTime.UtcNow < versionDeadline)
+        {
+            try
+            {
+                var versionBody = await cloneOrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/version");
+                return versionBody.GetProperty("commit").GetString()!;
+            }
+            catch (HttpRequestException) { }
+            catch (TaskCanceledException) { }
+            await Task.Delay(500);
+        }
+        throw new TimeoutException("o /version do OrderGenerator do clone não respondeu em 2 minutos");
+    }
+
+    // Os objetos do git ficam só leitura no Windows; sem limpar o atributo, o Delete falha.
+    private static void DeleteCloneDirectory(string cloneDirectory)
+    {
+        if (!Directory.Exists(cloneDirectory)) return;
+        foreach (var cloneFile in Directory.EnumerateFiles(cloneDirectory, "*", SearchOption.AllDirectories))
+            File.SetAttributes(cloneFile, FileAttributes.Normal);
+        Directory.Delete(cloneDirectory, recursive: true);
+    }
+}

@@ -141,7 +141,24 @@ public sealed class ComposeFixture : IAsyncLifetime
         Assert.Fail($"/health do OrderGenerator não respondeu em {AppStartTimeout}");
     }
 
-    private async Task<string> CaptureCommandOutputAsync(string commandExecutable, TimeSpan commandTimeout, params string[] commandArguments)
+    private Task<string> CaptureCommandOutputAsync(string commandExecutable, TimeSpan commandTimeout, params string[] commandArguments)
+    {
+        var composeEnvironmentVariables = new Dictionary<string, string?> { ["FLOWA_HTTP_PORT"] = OrderGeneratorHostPort.ToString() };
+        if (sourceRevisionId is not null)
+            composeEnvironmentVariables["SOURCE_REVISION_ID"] = sourceRevisionId;
+        return ExternalCommand.CaptureOutputAsync(commandExecutable, commandTimeout, composeEnvironmentVariables, commandArguments);
+    }
+}
+
+public static class ExternalCommand
+{
+    // Roda um comando e devolve a saída; código de saída diferente de zero ou estouro de tempo viram exceção.
+    // Variável com valor nulo é removida do ambiente do processo filho.
+    public static async Task<string> CaptureOutputAsync(
+        string commandExecutable,
+        TimeSpan commandTimeout,
+        IReadOnlyDictionary<string, string?> environmentVariables,
+        params string[] commandArguments)
     {
         var commandStartInfo = new ProcessStartInfo(commandExecutable)
         {
@@ -151,9 +168,11 @@ public sealed class ComposeFixture : IAsyncLifetime
             StandardErrorEncoding = Encoding.UTF8,
         };
         foreach (var commandArgument in commandArguments) commandStartInfo.ArgumentList.Add(commandArgument);
-        commandStartInfo.Environment["FLOWA_HTTP_PORT"] = OrderGeneratorHostPort.ToString();
-        if (sourceRevisionId is not null)
-            commandStartInfo.Environment["SOURCE_REVISION_ID"] = sourceRevisionId;
+        foreach (var (variableName, variableValue) in environmentVariables)
+        {
+            if (variableValue is null) commandStartInfo.Environment.Remove(variableName);
+            else commandStartInfo.Environment[variableName] = variableValue;
+        }
 
         var commandLine = $"{commandExecutable} {string.Join(' ', commandArguments)}";
         using var commandProcess = Process.Start(commandStartInfo)!;
