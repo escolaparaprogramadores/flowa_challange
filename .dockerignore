@@ -1,4 +1,3 @@
-# Só o código-fonte entra no contexto de build das imagens.
 .vs/
 .vscode/
 .idea/

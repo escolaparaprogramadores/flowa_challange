@@ -26,8 +26,7 @@ services:
       dockerfile: src/OrderAccumulator/Dockerfile
       args:
         SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
-    # Sempre reconstrói no up (com cache): sem isso, uma imagem antiga com o mesmo nome
-    # seria reaproveitada e o app subiria dizendo ser outro commit.
+    # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
     pull_policy: build
     environment:
       ASPNETCORE_HTTP_PORTS: "8081"
@@ -44,8 +43,7 @@ services:
       dockerfile: src/OrderGenerator/Dockerfile
       args:
         SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
-    # Sempre reconstrói no up (com cache): sem isso, uma imagem antiga com o mesmo nome
-    # seria reaproveitada e o app subiria dizendo ser outro commit.
+    # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
     pull_policy: build
     environment:
       ASPNETCORE_HTTP_PORTS: "8080"

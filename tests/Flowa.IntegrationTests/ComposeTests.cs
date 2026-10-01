@@ -5,7 +5,6 @@ using System.Text.RegularExpressions;
 
 namespace Flowa.IntegrationTests;
 
-// Os dois apps em containers separados, falando FIX de verdade pela rede do compose.
 [Collection(ComposeCollection.CollectionName)]
 [Trait("Category", "Integration")]
 public sealed class ComposeTests(ComposeFixture composeUnderTest)
@@ -21,7 +20,6 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal("dotnet OrderGenerator.dll", orderGeneratorContainer.ContainerEntrypoint);
         Assert.Equal("dotnet OrderAccumulator.dll", orderAccumulatorContainer.ContainerEntrypoint);
 
-        // O initiator manda o primeiro Logon, saindo do log do OrderGenerator.
         var generatorFixMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync("ordergenerator"));
         var initiatorLogon = generatorFixMessages.First(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERGENERATOR");
         Assert.Equal(initiatorLogon, generatorFixMessages.First(fixMessage => fixMessage.ReadFixTagValue(35) == "A"));
@@ -29,7 +27,6 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal("ORDERACCUMULATOR", initiatorLogon.ReadFixTagValue(56));
         Assert.Equal("30", initiatorLogon.ReadFixTagValue(108));
 
-        // O acceptor responde o Logon com os CompIDs trocados, saindo do log do OrderAccumulator.
         var accumulatorFixMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync("orderaccumulator"));
         var acceptorLogon = accumulatorFixMessages.First(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERACCUMULATOR");
         Assert.Equal("FIX.4.4", acceptorLogon.ReadFixTagValue(8));
@@ -185,7 +182,6 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         return await createOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    // A mensagem do ClOrdID no log de quem a enviou; tem de existir uma só.
     private async Task<FixMessage> FindSingleFixMessageAsync(string serviceName, string fixMsgType, string clOrdId, string senderCompId)
     {
         var matchingFixMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync(serviceName))
@@ -244,8 +240,7 @@ public sealed class ExposureLimitOutsideConfigTests
     }
 }
 
-// Roda sem Docker: o contexto de build deixa de fora só lixo de build e arquivos locais,
-// e mantém o .git (o build lê o commit dele) e tudo o que os Dockerfiles copiam.
+// Roda sem Docker. O .git fica no contexto de propósito: o build lê o commit dele.
 public sealed class DockerBuildContextTests
 {
     [Fact]
@@ -277,7 +272,7 @@ public sealed class CleanCloneImageCommitTests
 {
     private const string CloneComposeProjectName = "flowa-it-commit";
     private const int CloneOrderGeneratorHostPort = 18093;
-    private static readonly TimeSpan CloneComposeCommandTimeout = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan CloneComposeUpTimeout = TimeSpan.FromMinutes(15);
 
     [Fact]
     public async Task Docker_compose_up_de_um_clone_serve_o_commit_atual_mesmo_com_a_imagem_do_commit_anterior()
@@ -288,40 +283,42 @@ public sealed class CleanCloneImageCommitTests
         // Sem SOURCE_REVISION_ID: o clone tem .git de verdade, como o do avaliador.
         var cloneEnvironmentVariables = new Dictionary<string, string?>
         {
-            ["FLOWA_HTTP_PORT"] = CloneOrderGeneratorHostPort.ToString(),
-            ["SOURCE_REVISION_ID"] = null,
-            ["GIT_AUTHOR_NAME"] = "flowa-it",
-            ["GIT_AUTHOR_EMAIL"] = "flowa-it@localhost",
-            ["GIT_COMMITTER_NAME"] = "flowa-it",
-            ["GIT_COMMITTER_EMAIL"] = "flowa-it@localhost",
+            ["FLOWA_HTTP_PORT"] = CloneOrderGeneratorHostPort.ToString(), ["SOURCE_REVISION_ID"] = null,
+            ["GIT_AUTHOR_NAME"] = "flowa-it", ["GIT_AUTHOR_EMAIL"] = "flowa-it@localhost",
+            ["GIT_COMMITTER_NAME"] = "flowa-it", ["GIT_COMMITTER_EMAIL"] = "flowa-it@localhost",
         };
         Task<string> RunWithCloneEnvironmentAsync(TimeSpan commandTimeout, string commandExecutable, params string[] commandArguments) =>
             ExternalCommand.CaptureOutputAsync(commandExecutable, commandTimeout, cloneEnvironmentVariables, commandArguments);
-        Task<string> RunCloneComposeAsync(params string[] composeArguments) =>
-            RunWithCloneEnvironmentAsync(CloneComposeCommandTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
+        Task<string> RunCloneComposeAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
+            RunWithCloneEnvironmentAsync(commandTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
 
-        // A 8081 do OrderAccumulator não sai da rede do compose: o GET /version é feito de dentro do
-        // próprio container, pelo /dev/tcp do bash (a imagem aspnet não tem curl).
-        async Task<string> ReadCloneOrderAccumulatorCommitAsync()
+        // O GET /version sai de dentro de cada container, pelo /dev/tcp do bash: a imagem aspnet não tem
+        // curl e a 8081 do OrderAccumulator nem sai da rede do compose.
+        async Task<string> ReadCloneServiceCommitAsync(string serviceName, int containerHttpPort)
         {
-            var versionDeadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
+            var lastVersionFailure = "nenhuma resposta";
+            var versionDeadline = DateTime.UtcNow.AddMinutes(2);
             while (DateTime.UtcNow < versionDeadline)
             {
                 try
                 {
-                    var accumulatorVersionHttpResponse = await RunCloneComposeAsync("exec", "-T", "orderaccumulator", "bash", "-c",
-                        "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /version HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && cat <&3");
-                    var versionJsonStart = accumulatorVersionHttpResponse.IndexOf('{');
+                    var versionHttpResponse = await RunCloneComposeAsync(TimeSpan.FromSeconds(20), "exec", "-T", serviceName, "bash", "-c",
+                        $"exec 3<>/dev/tcp/127.0.0.1/{containerHttpPort} && printf 'GET /version HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && cat <&3");
+                    var versionJsonStart = versionHttpResponse.IndexOf('{');
                     if (versionJsonStart >= 0)
                     {
-                        using var accumulatorVersionDocument = JsonDocument.Parse(accumulatorVersionHttpResponse[versionJsonStart..]);
-                        return accumulatorVersionDocument.RootElement.GetProperty("commit").GetString()!;
+                        using var versionDocument = JsonDocument.Parse(versionHttpResponse[versionJsonStart..]);
+                        return versionDocument.RootElement.GetProperty("commit").GetString()!;
                     }
+                    lastVersionFailure = versionHttpResponse;
                 }
-                catch (InvalidOperationException) { }
+                catch (Exception versionFailure) when (versionFailure is InvalidOperationException or TimeoutException)
+                {
+                    lastVersionFailure = versionFailure.Message;
+                }
                 await Task.Delay(500);
             }
-            throw new TimeoutException("o /version do OrderAccumulator do clone não respondeu em 2 minutos");
+            throw new TimeoutException($"o /version de {serviceName} não respondeu em 2 minutos; última falha: {lastVersionFailure}");
         }
 
         var repoHeadCommit = (await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
@@ -331,18 +328,18 @@ public sealed class CleanCloneImageCommitTests
             await RunWithCloneEnvironmentAsync(TimeSpan.FromMinutes(2), "git", "clone", "--quiet", "--no-local", repoRoot, cloneDirectory);
             await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "checkout", "--quiet", repoHeadCommit);
 
-            await RunCloneComposeAsync("up", "-d", "--wait", "--wait-timeout", "300");
-            Assert.Equal(repoHeadCommit, await ReadCloneOrderGeneratorCommitAsync());
-            Assert.Equal(repoHeadCommit, await ReadCloneOrderAccumulatorCommitAsync());
-            await RunCloneComposeAsync("down", "-v");
+            await RunCloneComposeAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
+            Assert.Equal(repoHeadCommit, await ReadCloneServiceCommitAsync("ordergenerator", 8080));
+            Assert.Equal(repoHeadCommit, await ReadCloneServiceCommitAsync("orderaccumulator", 8081));
+            await RunCloneComposeAsync(TimeSpan.FromMinutes(2), "down", "-v");
 
             await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "commit novo do teste");
             var newCloneCommit = (await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "rev-parse", "HEAD")).Trim();
             Assert.NotEqual(repoHeadCommit, newCloneCommit);
 
-            await RunCloneComposeAsync("up", "-d", "--wait", "--wait-timeout", "300");
-            Assert.Equal(newCloneCommit, await ReadCloneOrderGeneratorCommitAsync());
-            Assert.Equal(newCloneCommit, await ReadCloneOrderAccumulatorCommitAsync());
+            await RunCloneComposeAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
+            Assert.Equal(newCloneCommit, await ReadCloneServiceCommitAsync("ordergenerator", 8080));
+            Assert.Equal(newCloneCommit, await ReadCloneServiceCommitAsync("orderaccumulator", 8081));
         }
         catch
         {
@@ -351,36 +348,22 @@ public sealed class CleanCloneImageCommitTests
         }
         finally
         {
-            try
+            // Todo passo da limpeza roda; com o teste já reprovado, falha de limpeza só vai para o log.
+            Func<Task>[] cloneCleanupSteps =
+            [
+                async () => { if (File.Exists(cloneComposeFile)) await RunCloneComposeAsync(TimeSpan.FromMinutes(2), "down", "-v", "--rmi", "local"); },
+                () => { DeleteCloneDirectory(cloneDirectory); return Task.CompletedTask; },
+            ];
+            var cloneCleanupFailures = new List<Exception>();
+            foreach (var cloneCleanupStep in cloneCleanupSteps)
             {
-                if (File.Exists(cloneComposeFile))
-                    await RunCloneComposeAsync("down", "-v", "--rmi", "local");
+                try { await cloneCleanupStep(); }
+                catch (Exception cloneCleanupFailure) { cloneCleanupFailures.Add(cloneCleanupFailure); }
             }
-            // Com o teste já reprovado, a falha do down não pode tomar o lugar da falha original.
-            catch (Exception) when (cloneTestFailed) { }
-            finally
-            {
-                DeleteCloneDirectory(cloneDirectory);
-            }
+            if (cloneCleanupFailures.Count > 0 && !cloneTestFailed) throw new AggregateException("a limpeza do clone falhou", cloneCleanupFailures);
+            foreach (var cloneCleanupFailure in cloneCleanupFailures)
+                Console.Error.WriteLine($"limpeza do clone falhou depois da reprovação: {cloneCleanupFailure.Message}");
         }
-    }
-
-    private static async Task<string> ReadCloneOrderGeneratorCommitAsync()
-    {
-        using var cloneOrderGeneratorHttp = new HttpClient { BaseAddress = new Uri($"http://localhost:{CloneOrderGeneratorHostPort}"), Timeout = TimeSpan.FromSeconds(10) };
-        var versionDeadline = DateTime.UtcNow + TimeSpan.FromMinutes(2);
-        while (DateTime.UtcNow < versionDeadline)
-        {
-            try
-            {
-                var versionBody = await cloneOrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/version");
-                return versionBody.GetProperty("commit").GetString()!;
-            }
-            catch (HttpRequestException) { }
-            catch (TaskCanceledException) { }
-            await Task.Delay(500);
-        }
-        throw new TimeoutException("o /version do OrderGenerator do clone não respondeu em 2 minutos");
     }
 
     // Os objetos do git ficam só leitura no Windows; sem limpar o atributo, o Delete falha.

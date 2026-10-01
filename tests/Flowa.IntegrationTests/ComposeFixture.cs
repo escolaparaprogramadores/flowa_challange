@@ -37,8 +37,7 @@ public sealed class ComposeFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        // Guarda o log FIX dos dois lados para a prova antes de apagar os containers. O down fica no
-        // finally: falhar ao gravar o log não pode deixar o compose de teste de pé.
+        // O down fica no finally: falhar ao gravar o log FIX da prova não pode deixar o compose de pé.
         try
         {
             var fixLogFolder = Environment.GetEnvironmentVariable("FLOWA_IT_LOG_DIR");
@@ -72,8 +71,7 @@ public sealed class ComposeFixture : IAsyncLifetime
         var serviceContainer = containerInspectDocument.RootElement[0];
         var containerState = serviceContainer.GetProperty("State");
 
-        // Só as portas com ligação no host contam como publicadas; as outras ficam na rede do compose.
-        // Guardamos cada ligação, para uma segunda ligação da mesma porta não sumir da comparação.
+        // Uma entrada por ligação no host: uma segunda ligação da mesma porta não pode sumir da comparação.
         var publishedPortBindings = new List<string>();
         foreach (var exposedContainerPort in serviceContainer.GetProperty("NetworkSettings").GetProperty("Ports").EnumerateObject())
         {
@@ -95,11 +93,9 @@ public sealed class ComposeFixture : IAsyncLifetime
                 .ToList());
     }
 
-    // O uid de quem roda o processo dentro do container, lido no próprio container.
     public async Task<string> ReadContainerProcessUserIdAsync(string serviceName) =>
         (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", serviceName, "id", "-u")).Trim();
 
-    // A configuração que o compose de fato vai usar, já com variáveis resolvidas.
     public async Task<JsonDocument> ReadResolvedComposeConfigAsync() =>
         JsonDocument.Parse(await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "config", "--format", "json"));
 
@@ -152,7 +148,6 @@ public sealed class ComposeFixture : IAsyncLifetime
 
 public static class ExternalCommand
 {
-    // Roda um comando e devolve a saída; código de saída diferente de zero ou estouro de tempo viram exceção.
     // Variável com valor nulo é removida do ambiente do processo filho.
     public static async Task<string> CaptureOutputAsync(
         string commandExecutable,
