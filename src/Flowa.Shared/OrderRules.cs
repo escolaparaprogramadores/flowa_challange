@@ -4,11 +4,11 @@ namespace Flowa.Shared;
 // O limite de exposição não mora aqui: é constante do OrderAccumulator.
 public static class OrderRules
 {
-    public static readonly IReadOnlyList<string> Symbols = ["PETR4", "VALE3", "VIIA4"];
+    public static readonly IReadOnlyList<string> AllowedOrderSymbols = ["PETR4", "VALE3", "VIIA4"];
 
-    public const int MaxQuantityExclusive = 100_000;
-    public const decimal MaxPriceExclusive = 1_000m;
-    public const decimal PriceTick = 0.01m;
+    public const int MaxOrderQuantityExclusive = 100_000;
+    public const decimal MaxOrderPriceExclusive = 1_000m;
+    public const decimal OrderPriceTick = 0.01m;
 }
 
 public enum OrderSide
@@ -19,40 +19,40 @@ public enum OrderSide
 
 public static class OrderSideCodes
 {
-    public const string BuyJson = "buy";
-    public const string SellJson = "sell";
-    public const char BuyFix = '1';
-    public const char SellFix = '2';
+    public const string BuyOrderSideJsonCode = "buy";
+    public const string SellOrderSideJsonCode = "sell";
+    public const char BuyOrderSideFixCode = '1';
+    public const char SellOrderSideFixCode = '2';
 
-    public static char ToFixOrderSide(this OrderSide orderSide) => orderSide == OrderSide.Buy ? BuyFix : SellFix;
+    public static char ToFixOrderSide(this OrderSide orderSide) => orderSide == OrderSide.Buy ? BuyOrderSideFixCode : SellOrderSideFixCode;
 
-    public static string ToJsonOrderSide(this OrderSide orderSide) => orderSide == OrderSide.Buy ? BuyJson : SellJson;
+    public static string ToJsonOrderSide(this OrderSide orderSide) => orderSide == OrderSide.Buy ? BuyOrderSideJsonCode : SellOrderSideJsonCode;
 }
 
 public static class OrderFields
 {
-    public const string Symbol = "symbol";
-    public const string Side = "side";
-    public const string Quantity = "quantity";
-    public const string Price = "price";
+    public const string OrderSymbolFieldName = "symbol";
+    public const string OrderSideFieldName = "side";
+    public const string OrderQuantityFieldName = "quantity";
+    public const string OrderPriceFieldName = "price";
 }
 
 public static class OrderMessages
 {
-    public const string SymbolRequired = "Informe o símbolo.";
-    public const string SymbolInvalid = "Símbolo inválido. Use PETR4, VALE3 ou VIIA4.";
+    public const string OrderSymbolRequiredMessage = "Informe o símbolo.";
+    public const string OrderSymbolInvalidMessage = "Símbolo inválido. Use PETR4, VALE3 ou VIIA4.";
 
-    public const string SideRequired = "Informe o lado da ordem.";
-    public const string SideInvalid = "Lado inválido. Use compra ou venda.";
+    public const string OrderSideRequiredMessage = "Informe o lado da ordem.";
+    public const string OrderSideInvalidMessage = "Lado inválido. Use compra ou venda.";
 
-    public const string QuantityRequired = "Informe a quantidade.";
-    public const string QuantityNotInteger = "A quantidade deve ser um número inteiro.";
-    public const string QuantityNotPositive = "A quantidade deve ser maior que zero.";
-    public const string QuantityTooLarge = "A quantidade deve ser menor que 100.000.";
+    public const string OrderQuantityRequiredMessage = "Informe a quantidade.";
+    public const string OrderQuantityNotIntegerMessage = "A quantidade deve ser um número inteiro.";
+    public const string OrderQuantityNotPositiveMessage = "A quantidade deve ser maior que zero.";
+    public const string OrderQuantityTooLargeMessage = "A quantidade deve ser menor que 100.000.";
 
-    public const string PriceRequired = "Informe o preço.";
-    public const string PriceNotNumber = "O preço deve ser um número.";
-    public const string PriceNotPositive = "O preço deve ser maior que zero.";
-    public const string PriceTooLarge = "O preço deve ser menor que 1.000,00.";
-    public const string PriceOffTick = "O preço deve ser múltiplo de 0,01.";
+    public const string OrderPriceRequiredMessage = "Informe o preço.";
+    public const string OrderPriceNotNumberMessage = "O preço deve ser um número.";
+    public const string OrderPriceNotPositiveMessage = "O preço deve ser maior que zero.";
+    public const string OrderPriceTooLargeMessage = "O preço deve ser menor que 1.000,00.";
+    public const string OrderPriceOffTickMessage = "O preço deve ser múltiplo de 0,01.";
 }

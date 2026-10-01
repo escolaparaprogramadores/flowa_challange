@@ -2,13 +2,13 @@ using System.Globalization;
 
 namespace Flowa.Shared;
 
-public sealed record OrderFieldError(string Field, string Message);
+public sealed record OrderFieldError(string OrderField, string OrderFieldErrorMessage);
 
-public sealed record ValidOrder(string Symbol, OrderSide Side, int Quantity, decimal Price);
+public sealed record ValidOrder(string OrderSymbol, OrderSide OrderSide, int OrderQuantity, decimal OrderPrice);
 
-public sealed record OrderValidationResult(ValidOrder? Order, IReadOnlyList<OrderFieldError> Errors)
+public sealed record OrderValidationResult(ValidOrder? ValidatedOrder, IReadOnlyList<OrderFieldError> OrderFieldErrors)
 {
-    public bool IsValid => Errors.Count == 0;
+    public bool IsOrderValid => OrderFieldErrors.Count == 0;
 }
 
 public static class OrderValidator
@@ -55,13 +55,13 @@ public static class OrderValidator
     {
         if (string.IsNullOrEmpty(orderSymbol))
         {
-            orderFieldErrors.Add(new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolRequired));
+            orderFieldErrors.Add(new OrderFieldError(OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolRequiredMessage));
             return null;
         }
 
-        if (!OrderRules.Symbols.Contains(orderSymbol))
+        if (!OrderRules.AllowedOrderSymbols.Contains(orderSymbol))
         {
-            orderFieldErrors.Add(new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid));
+            orderFieldErrors.Add(new OrderFieldError(OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolInvalidMessage));
             return null;
         }
 
@@ -70,36 +70,36 @@ public static class OrderValidator
 
     private static OrderSide? ParseJsonOrderSide(string? orderSide, List<OrderFieldError> orderFieldErrors) => orderSide switch
     {
-        OrderSideCodes.BuyJson => OrderSide.Buy,
-        OrderSideCodes.SellJson => OrderSide.Sell,
-        null or "" => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.Side, OrderMessages.SideRequired),
-        _ => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.Side, OrderMessages.SideInvalid)
+        OrderSideCodes.BuyOrderSideJsonCode => OrderSide.Buy,
+        OrderSideCodes.SellOrderSideJsonCode => OrderSide.Sell,
+        null or "" => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.OrderSideFieldName, OrderMessages.OrderSideRequiredMessage),
+        _ => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.OrderSideFieldName, OrderMessages.OrderSideInvalidMessage)
     };
 
     private static OrderSide? ParseFixOrderSide(char orderSide, List<OrderFieldError> orderFieldErrors) => orderSide switch
     {
-        OrderSideCodes.BuyFix => OrderSide.Buy,
-        OrderSideCodes.SellFix => OrderSide.Sell,
-        _ => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.Side, OrderMessages.SideInvalid)
+        OrderSideCodes.BuyOrderSideFixCode => OrderSide.Buy,
+        OrderSideCodes.SellOrderSideFixCode => OrderSide.Sell,
+        _ => AddOrderFieldError<OrderSide>(orderFieldErrors, OrderFields.OrderSideFieldName, OrderMessages.OrderSideInvalidMessage)
     };
 
     private static int? ParseOrderQuantity(string? orderQuantity, List<OrderFieldError> orderFieldErrors)
     {
         if (string.IsNullOrEmpty(orderQuantity))
-            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityRequired);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityRequiredMessage);
 
         if (!decimal.TryParse(orderQuantity, OrderFieldJsonNumberStyle, CultureInfo.InvariantCulture, out var parsedOrderQuantity))
         {
             // Número que nem cabe no decimal é grande demais, não "texto".
             if (IsOrderFieldNumberBeyondDecimal(orderQuantity, out var isNegativeOrderFieldNumber))
-                return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity,
-                    isNegativeOrderFieldNumber ? OrderMessages.QuantityNotPositive : OrderMessages.QuantityTooLarge);
+                return AddOrderFieldError<int>(orderFieldErrors, OrderFields.OrderQuantityFieldName,
+                    isNegativeOrderFieldNumber ? OrderMessages.OrderQuantityNotPositiveMessage : OrderMessages.OrderQuantityTooLargeMessage);
 
-            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotIntegerMessage);
         }
 
         if (SignificantDecimalPlacesInOrderFieldText(orderQuantity) > 0)
-            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotIntegerMessage);
 
         return CheckOrderQuantity(parsedOrderQuantity, orderFieldErrors);
     }
@@ -107,13 +107,13 @@ public static class OrderValidator
     private static int? CheckOrderQuantity(decimal orderQuantity, List<OrderFieldError> orderFieldErrors)
     {
         if (decimal.Truncate(orderQuantity) != orderQuantity)
-            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotIntegerMessage);
 
         if (orderQuantity <= 0)
-            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityNotPositive);
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotPositiveMessage);
 
-        if (orderQuantity >= OrderRules.MaxQuantityExclusive)
-            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.Quantity, OrderMessages.QuantityTooLarge);
+        if (orderQuantity >= OrderRules.MaxOrderQuantityExclusive)
+            return AddOrderFieldError<int>(orderFieldErrors, OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityTooLargeMessage);
 
         return (int)orderQuantity;
     }
@@ -121,21 +121,21 @@ public static class OrderValidator
     private static decimal? ParseOrderPrice(string? orderPrice, List<OrderFieldError> orderFieldErrors)
     {
         if (string.IsNullOrEmpty(orderPrice))
-            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceRequired);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceRequiredMessage);
 
         if (!decimal.TryParse(orderPrice, OrderFieldJsonNumberStyle, CultureInfo.InvariantCulture, out var parsedOrderPrice))
         {
             if (IsOrderFieldNumberBeyondDecimal(orderPrice, out var isNegativeOrderFieldNumber))
-                return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price,
-                    isNegativeOrderFieldNumber ? OrderMessages.PriceNotPositive : OrderMessages.PriceTooLarge);
+                return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.OrderPriceFieldName,
+                    isNegativeOrderFieldNumber ? OrderMessages.OrderPriceNotPositiveMessage : OrderMessages.OrderPriceTooLargeMessage);
 
-            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceNotNumber);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotNumberMessage);
         }
 
         var checkedOrderPrice = CheckOrderPrice(parsedOrderPrice, orderFieldErrors);
 
-        if (checkedOrderPrice is not null && SignificantDecimalPlacesInOrderFieldText(orderPrice) > OrderRules.PriceTick.Scale)
-            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceOffTick);
+        if (checkedOrderPrice is not null && SignificantDecimalPlacesInOrderFieldText(orderPrice) > OrderRules.OrderPriceTick.Scale)
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceOffTickMessage);
 
         return checkedOrderPrice;
     }
@@ -143,14 +143,14 @@ public static class OrderValidator
     private static decimal? CheckOrderPrice(decimal orderPrice, List<OrderFieldError> orderFieldErrors)
     {
         if (orderPrice <= 0)
-            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceNotPositive);
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotPositiveMessage);
 
-        if (orderPrice >= OrderRules.MaxPriceExclusive)
-            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceTooLarge);
+        if (orderPrice >= OrderRules.MaxOrderPriceExclusive)
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceTooLargeMessage);
 
         // decimal é exato na base 10, então o resto da divisão diz se está no passo de 0,01.
-        if (orderPrice % OrderRules.PriceTick != 0)
-            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.Price, OrderMessages.PriceOffTick);
+        if (orderPrice % OrderRules.OrderPriceTick != 0)
+            return AddOrderFieldError<decimal>(orderFieldErrors, OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceOffTickMessage);
 
         return orderPrice;
     }
@@ -159,8 +159,8 @@ public static class OrderValidator
     // passa de 28 dígitos e faria "10.0000000000000000000000000001" virar 10.
     private static int SignificantDecimalPlacesInOrderFieldText(string orderFieldText)
     {
-        var decimalSeparatorPosition = orderFieldText.IndexOf('.');
-        return decimalSeparatorPosition < 0 ? 0 : orderFieldText[(decimalSeparatorPosition + 1)..].TrimEnd('0').Length;
+        var orderFieldDecimalSeparatorPosition = orderFieldText.IndexOf('.');
+        return orderFieldDecimalSeparatorPosition < 0 ? 0 : orderFieldText[(orderFieldDecimalSeparatorPosition + 1)..].TrimEnd('0').Length;
     }
 
     private static bool IsOrderFieldNumberBeyondDecimal(string orderFieldText, out bool isNegativeOrderFieldNumber)
@@ -170,7 +170,7 @@ public static class OrderValidator
         return isOrderFieldNumber;
     }
 
-    private static T? AddOrderFieldError<T>(List<OrderFieldError> orderFieldErrors, string orderField, string orderFieldErrorMessage) where T : struct
+    private static TOrderFieldValue? AddOrderFieldError<TOrderFieldValue>(List<OrderFieldError> orderFieldErrors, string orderField, string orderFieldErrorMessage) where TOrderFieldValue : struct
     {
         orderFieldErrors.Add(new OrderFieldError(orderField, orderFieldErrorMessage));
         return null;
