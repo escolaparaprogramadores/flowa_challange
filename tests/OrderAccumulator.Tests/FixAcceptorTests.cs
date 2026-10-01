@@ -17,17 +17,17 @@ using Xunit.Abstractions;
 namespace OrderAccumulator.Tests;
 
 // CA-8, CA-9, CA-13, CA-18 e CA-19 da F3: as duas pontas QuickFIX/n de verdade, com o PostgreSQL do container.
-[Collection(PostgresCollection.Name)]
-public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper output) : IAsyncLifetime
+[Collection(OrderAccumulatorPostgresCollection.Name)]
+public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper output) : IAsyncLifetime
 {
-    public Task InitializeAsync() => db.ResetAsync();
+    public Task InitializeAsync() => orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
 
     public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
     public async Task Accepted_order_gets_execution_report_new_with_every_contract_tag()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
         var acceptedOrder = TestInitiator.NewOrder("aceita-ca8", "PETR4", '1', 100, 10.50m);
 
@@ -37,13 +37,13 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
         Assert.Equal(
             $"35=8|37={storedAnswer.OrderId}|17={storedAnswer.ExecId}|150=0|39=0|11=aceita-ca8|55=PETR4|54=1|151=100|14=0|6=0|58=",
             FormatContractTags(executionReport));
-        Assert.Equal(1_050.00m, await db.ExposureOfAsync("PETR4"));
+        Assert.Equal(1_050.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     [Fact]
     public async Task Order_over_the_limit_gets_execution_report_rejected_with_the_reason()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
         // 2 × 50.000 × 999,99 = 99.999.000; mais 2.000 × 1,00 passaria de 100.000.000.
         await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewBuyOrder("VALE3", 50_000, 999.99m));
@@ -57,7 +57,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
             $"35=8|37={storedAnswer.OrderId}|17={storedAnswer.ExecId}|150=8|39=8|11=estoura-ca9-compra|55=VALE3|54=1|151=0|14=0|6=0" +
             "|58=Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.",
             FormatContractTags(executionReport));
-        Assert.Equal(99_999_000.00m, await db.ExposureOfAsync("VALE3"));
+        Assert.Equal(99_999_000.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
     }
 
     public static TheoryData<string, char, string, string, string> InvalidOrders => new()
@@ -78,7 +78,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     public async Task Invalid_order_sent_straight_by_fix_is_rejected_and_leaves_exposure_untouched(
         string symbol, char side, string quantity, string price, string expectedText)
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
         var invalidOrder = TestInitiator.NewOrder("invalida-ca13", symbol, side,
             decimal.Parse(quantity, CultureInfo.InvariantCulture), decimal.Parse(price, CultureInfo.InvariantCulture));
@@ -97,7 +97,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     [Fact]
     public async Task Repeated_cl_ord_id_returns_the_original_report_and_counts_once()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
 
         var firstReport = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("repetida", "VIIA4", '1', 10, 5.00m));
@@ -105,8 +105,8 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
 
         Assert.Equal(FormatContractTags(firstReport), FormatContractTags(repeatedReport));
         Assert.Equal(ExecType.NEW, repeatedReport.ExecType.Value);
-        Assert.Equal(50.00m, await db.ExposureOfAsync("VIIA4"));
-        Assert.Equal(1, await db.CountOrdersAsync("repetida"));
+        Assert.Equal(50.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("repetida"));
         Assert.Single(app.Logs.Lines, logLine =>
             logLine == "Information OrderAccumulator.Fix.OrderFixApplication: ClOrdID repetida repetido: devolvendo a resposta original.");
     }
@@ -114,7 +114,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     [Fact]
     public async Task Repeated_rejected_order_returns_the_same_rejection_text()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
 
         var firstReport = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("repetida-invalida", "PETR4", '1', 100, 1000m));
@@ -122,7 +122,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
 
         Assert.Equal(FormatContractTags(firstReport), FormatContractTags(repeatedReport));
         Assert.Equal("O preço deve ser menor que 1.000,00.", repeatedReport.Text.Value);
-        Assert.Equal(1, await db.CountOrdersAsync("repetida-invalida"));
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("repetida-invalida"));
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     {
         ExecutionReport reportBeforeRestart;
         int fixPort;
-        await using (var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor())
+        await using (var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
         using (var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort))
         {
             fixPort = app.FixPort;
@@ -138,7 +138,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
         }
 
         // Volta na MESMA porta: só sobe se a parada anterior fechou o acceptor.
-        await using var restartedApp = new AccumulatorApp(db.ConnectionString, fixPort).StartWithFixAcceptor();
+        await using var restartedApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, fixPort).StartWithFixAcceptor();
         var exposuresResponse = await restartedApp.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
         Assert.Equal(1_000.00m, exposuresResponse!.Exposures.Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
 
@@ -146,8 +146,8 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
         var resentReport = await initiatorAfterRestart.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("antes-do-reinicio", "VALE3", '1', 100, 10.00m));
 
         Assert.Equal(FormatContractTags(reportBeforeRestart), FormatContractTags(resentReport));
-        Assert.Equal(1_000.00m, await db.ExposureOfAsync("VALE3"));
-        Assert.Equal(1, await db.CountOrdersAsync("antes-do-reinicio"));
+        Assert.Equal(1_000.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("antes-do-reinicio"));
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
         Console.SetOut(TextWriter.Synchronized(capturedStdout));
         try
         {
-            await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+            await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
             using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
             await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("log-ca19", "PETR4", '2', 5, 20.00m));
         }
@@ -182,7 +182,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     [Fact]
     public async Task Database_failure_sends_no_report_logs_the_order_and_keeps_the_session_up()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString, replaceServices: testServices =>
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceServices: testServices =>
             testServices.AddSingleton<IOrderProcessor>(serviceProvider =>
                 new ProcessorFailingForClOrdId("falha-banco", new PostgresOrderProcessor(serviceProvider.GetRequiredService<NpgsqlDataSource>())))).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
@@ -193,7 +193,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
         Assert.Equal(ExecType.NEW, reportAfterFailure.ExecType.Value);
         Assert.Single(app.Logs.Lines, logLine =>
             logLine == "Error OrderAccumulator.Fix.OrderFixApplication: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
-        Assert.Equal(10.00m, await db.ExposureOfAsync("PETR4"));
+        Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     [Fact]
@@ -228,7 +228,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     [Fact]
     public async Task Test_app_listens_for_fix_only_on_loopback()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
 
         var fixListeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners()
             .Where(tcpListenerEndpoint => tcpListenerEndpoint.Port == app.FixPort)
@@ -240,7 +240,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     [Fact]
     public async Task Order_without_price_gets_business_reject_and_is_not_recorded()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
         var orderWithoutPrice = TestInitiator.NewOrder("sem-preco", "PETR4", '1', 10, 1.00m);
         orderWithoutPrice.RemoveField(Tags.Price);
@@ -253,15 +253,15 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
         Assert.Equal("Conditionally Required Field Missing", businessReject.Text.Value);
         Assert.Equal(BusinessRejectReason.CONDITIONALLY_REQUIRED_FIELD_MISSING, businessReject.BusinessRejectReason.Value);
         Assert.Equal(ExecType.NEW, reportAfterReject.ExecType.Value);
-        Assert.Equal(0, await db.CountOrdersAsync("sem-preco"));
-        Assert.Equal(10.00m, await db.ExposureOfAsync("PETR4"));
+        Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("sem-preco"));
+        Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     [Fact]
     public async Task Report_that_cannot_be_sent_is_logged_and_the_order_stays_recorded()
     {
         // Sessão do acceptor criada, mas ninguém logado: o SendToTarget devolve false.
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         var orderFixApplication = app.Services.GetRequiredService<OrderFixApplication>();
         var acceptorSessionId = new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR");
 
@@ -269,8 +269,8 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
 
         Assert.Single(app.Logs.Lines, logLine =>
             logLine == "Warning OrderAccumulator.Fix.OrderFixApplication: ExecutionReport da ordem sem-sessao não foi enviado: a sessão FIX não está logada.");
-        Assert.Equal(1, await db.CountOrdersAsync("sem-sessao"));
-        Assert.Equal(20.00m, await db.ExposureOfAsync("VIIA4"));
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("sem-sessao"));
+        Assert.Equal(20.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
     }
 
     [Fact]
@@ -305,7 +305,7 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
 
     private async Task<(string OrderId, string ExecId)> ReadStoredAnswerAsync(string clOrdId)
     {
-        await using var connection = await db.DataSource.OpenConnectionAsync();
+        await using var connection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
         return await connection.QuerySingleAsync<(string, string)>(
             "SELECT order_id, exec_id FROM orders WHERE cl_ord_id = @ClOrdId", new { ClOrdId = clOrdId });
     }
@@ -313,9 +313,9 @@ public sealed class FixAcceptorTests(PostgresFixture db, ITestOutputHelper outpu
     // Processador que simula o banco fora do ar para um ClOrdID e repassa o resto ao de verdade.
     private sealed class ProcessorFailingForClOrdId(string clOrdId, IOrderProcessor realProcessor) : IOrderProcessor
     {
-        public Task<OrderOutcome> ProcessAsync(IncomingOrder order, CancellationToken cancellationToken = default) =>
-            order.ClOrdId == clOrdId
+        public Task<OrderOutcome> ProcessIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default) =>
+            incomingOrder.ClOrdId == clOrdId
                 ? throw new NpgsqlException("banco fora do ar (simulado no teste)")
-                : realProcessor.ProcessAsync(order, cancellationToken);
+                : realProcessor.ProcessIncomingOrderAsync(incomingOrder, cancellationToken);
     }
 }

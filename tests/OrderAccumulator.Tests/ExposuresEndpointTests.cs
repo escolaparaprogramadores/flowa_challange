@@ -4,17 +4,17 @@ using System.Text.Json;
 namespace OrderAccumulator.Tests;
 
 // CA-17 (parte da F3): o GET /api/exposures no formato do contrato, antes e depois de ordens pelo FIX.
-[Collection(PostgresCollection.Name)]
-public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
+[Collection(OrderAccumulatorPostgresCollection.Name)]
+public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
-    public Task InitializeAsync() => db.ResetAsync();
+    public Task InitializeAsync() => orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
 
     public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
     public async Task Get_returns_the_three_symbols_in_contract_order_with_limit_and_remaining()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
 
         var exposuresJson = await GetExposuresJsonAsync(app);
 
@@ -27,7 +27,7 @@ public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
     [Fact]
     public async Task Accepted_orders_move_the_values_and_a_rejected_one_does_not()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
 
         await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("compra-petr4", "PETR4", '1', 100, 10.50m));

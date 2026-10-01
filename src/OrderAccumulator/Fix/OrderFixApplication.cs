@@ -23,7 +23,7 @@ public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<
         OrderOutcome orderOutcome;
         try
         {
-            orderOutcome = orderProcessor.ProcessAsync(incomingOrder).GetAwaiter().GetResult();
+            orderOutcome = orderProcessor.ProcessIncomingOrderAsync(incomingOrder).GetAwaiter().GetResult();
         }
         catch (Exception exception)
         {
