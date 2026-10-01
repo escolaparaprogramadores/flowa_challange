@@ -42,15 +42,15 @@ public static class ApiEndpoints
     private static async Task<IResult> PostOrder(HttpRequest request, FixOrderClient fix)
     {
         var fields = await ReadRawFields(request);
-        var validation = OrderValidator.ValidateFromJson(fields.Symbol, fields.Side, fields.Quantity, fields.Price);
-        if (!validation.IsValid)
+        var validation = OrderValidator.ValidateOrderFromJson(fields.Symbol, fields.Side, fields.Quantity, fields.Price);
+        if (!validation.IsOrderValid)
         {
             return Results.Json(
-                new { status = "validation_error", message = InvalidOrderMessage, errors = validation.Errors },
+                new { status = "validation_error", message = InvalidOrderMessage, errors = validation.OrderFieldErrors },
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
-        var order = validation.Order!;
+        var order = validation.ValidatedOrder!;
         var result = await fix.SendAsync(order);
 
         return result.Outcome switch
@@ -94,10 +94,10 @@ public static class ApiEndpoints
         clOrdId = result.ClOrdId,
         orderId = result.OrderId,
         execId = result.ExecId,
-        symbol = order.Symbol,
-        side = order.Side.ToJsonOrderSide(),
-        quantity = order.Quantity,
-        price = order.Price,
+        symbol = order.OrderSymbol,
+        side = order.OrderSide.ToJsonOrderSide(),
+        quantity = order.OrderQuantity,
+        price = order.OrderPrice,
         message
     };
 
@@ -121,8 +121,8 @@ public static class ApiEndpoints
             if (root.ValueKind != JsonValueKind.Object)
                 return default;
 
-            return (RawText(root, OrderFields.Symbol), RawText(root, OrderFields.Side),
-                RawText(root, OrderFields.Quantity), RawText(root, OrderFields.Price));
+            return (RawText(root, OrderFields.OrderSymbolFieldName), RawText(root, OrderFields.OrderSideFieldName),
+                RawText(root, OrderFields.OrderQuantityFieldName), RawText(root, OrderFields.OrderPriceFieldName));
         }
     }
 

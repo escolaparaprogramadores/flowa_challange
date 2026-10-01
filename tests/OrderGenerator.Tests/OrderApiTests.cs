@@ -45,25 +45,25 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     public static TheoryData<string, string, string> InvalidFields => new()
     {
         // CA-1
-        { """{"symbol":"XPTO3","side":"buy","quantity":100,"price":10.50}""", OrderFields.Symbol, OrderMessages.SymbolInvalid },
-        { """{"symbol":"petr4","side":"buy","quantity":100,"price":10.50}""", OrderFields.Symbol, OrderMessages.SymbolInvalid },
-        { """{"side":"buy","quantity":100,"price":10.50}""", OrderFields.Symbol, OrderMessages.SymbolRequired },
+        { """{"symbol":"XPTO3","side":"buy","quantity":100,"price":10.50}""", OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolInvalidMessage },
+        { """{"symbol":"petr4","side":"buy","quantity":100,"price":10.50}""", OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolInvalidMessage },
+        { """{"side":"buy","quantity":100,"price":10.50}""", OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolRequiredMessage },
         // CA-2
-        { """{"symbol":"PETR4","side":"compra","quantity":100,"price":10.50}""", OrderFields.Side, OrderMessages.SideInvalid },
-        { """{"symbol":"PETR4","side":"BUY","quantity":100,"price":10.50}""", OrderFields.Side, OrderMessages.SideInvalid },
-        { """{"symbol":"PETR4","quantity":100,"price":10.50}""", OrderFields.Side, OrderMessages.SideRequired },
+        { """{"symbol":"PETR4","side":"compra","quantity":100,"price":10.50}""", OrderFields.OrderSideFieldName, OrderMessages.OrderSideInvalidMessage },
+        { """{"symbol":"PETR4","side":"BUY","quantity":100,"price":10.50}""", OrderFields.OrderSideFieldName, OrderMessages.OrderSideInvalidMessage },
+        { """{"symbol":"PETR4","quantity":100,"price":10.50}""", OrderFields.OrderSideFieldName, OrderMessages.OrderSideRequiredMessage },
         // CA-3
-        { """{"symbol":"PETR4","side":"buy","quantity":0,"price":10.50}""", OrderFields.Quantity, OrderMessages.QuantityNotPositive },
-        { """{"symbol":"PETR4","side":"buy","quantity":-1,"price":10.50}""", OrderFields.Quantity, OrderMessages.QuantityNotPositive },
-        { """{"symbol":"PETR4","side":"buy","quantity":1.5,"price":10.50}""", OrderFields.Quantity, OrderMessages.QuantityNotInteger },
-        { """{"symbol":"PETR4","side":"buy","quantity":"abc","price":10.50}""", OrderFields.Quantity, OrderMessages.QuantityNotInteger },
-        { """{"symbol":"PETR4","side":"buy","quantity":100000,"price":10.50}""", OrderFields.Quantity, OrderMessages.QuantityTooLarge },
+        { """{"symbol":"PETR4","side":"buy","quantity":0,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotPositiveMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":-1,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotPositiveMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":1.5,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotIntegerMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":"abc","price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotIntegerMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":100000,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityTooLargeMessage },
         // CA-4
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":0}""", OrderFields.Price, OrderMessages.PriceNotPositive },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":-1}""", OrderFields.Price, OrderMessages.PriceNotPositive },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":1000}""", OrderFields.Price, OrderMessages.PriceTooLarge },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.005}""", OrderFields.Price, OrderMessages.PriceOffTick },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":"abc"}""", OrderFields.Price, OrderMessages.PriceNotNumber },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":0}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotPositiveMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":-1}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotPositiveMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":1000}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceTooLargeMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.005}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceOffTickMessage },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":"abc"}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotNumberMessage },
     };
 
     [Theory]
@@ -93,10 +93,10 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
             .ToList();
         Assert.Equal(
             [
-                (OrderFields.Symbol, OrderMessages.SymbolRequired),
-                (OrderFields.Side, OrderMessages.SideRequired),
-                (OrderFields.Quantity, OrderMessages.QuantityRequired),
-                (OrderFields.Price, OrderMessages.PriceRequired)
+                (OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolRequiredMessage),
+                (OrderFields.OrderSideFieldName, OrderMessages.OrderSideRequiredMessage),
+                (OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityRequiredMessage),
+                (OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceRequiredMessage)
             ],
             errors);
         Assert.Empty(_generator.Acceptor.ReceivedOrders);
