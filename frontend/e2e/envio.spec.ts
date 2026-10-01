@@ -1,0 +1,107 @@
+import { expect, test, type Page } from '@playwright/test';
+import { ROTA_DAS_EXPOSICOES, ROTA_DE_CRIACAO_DE_ORDEM } from '../src/ordensService';
+
+// Estes cenários falam com o OrderGenerator e o OrderAccumulator de verdade.
+// Os valores de exposição são lidos antes e depois de cada ordem, então o teste
+// não depende do banco estar vazio.
+
+const LIMITE = 100_000_000;
+
+type OrdemDoTeste = { simbolo: string; lado: 'Compra' | 'Venda'; quantidade: string; preco: string };
+
+async function enviarOrdemPelaBoleta(page: Page, ordem: OrdemDoTeste) {
+  await page.getByLabel('Símbolo').selectOption(ordem.simbolo);
+  await page.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: ordem.lado }).click();
+  await page.getByLabel(/^Quantidade de/).fill(ordem.quantidade);
+  await page.getByLabel('Preço por ação (R$)').fill(ordem.preco);
+  const respostaDaCriacao = page.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
+  await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+  await respostaDaCriacao;
+  await expect(page.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
+}
+
+type ExposicaoNoServidor = { symbol: string; exposure: number; remaining: number };
+
+async function lerExposicaoNoServidor(page: Page, simbolo: string): Promise<ExposicaoNoServidor> {
+  const respostaDasExposicoes = await page.request.get(ROTA_DAS_EXPOSICOES);
+  expect(respostaDasExposicoes.status()).toBe(200);
+  const corpoDasExposicoes = (await respostaDasExposicoes.json()) as { exposures: ExposicaoNoServidor[] };
+  const exposicaoDoSimbolo = corpoDasExposicoes.exposures.find((exposicao) => exposicao.symbol === simbolo);
+  if (!exposicaoDoSimbolo) throw new Error('Símbolo ' + simbolo + ' ausente em /api/exposures');
+  return exposicaoDoSimbolo;
+}
+
+const formatadorDeReais = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+
+async function conferirPainelDeExposicao(page: Page, simbolo: string, exposicao: number, restante: number) {
+  const linhaDoSimbolo = page.getByTestId('exposicao-' + simbolo);
+  await expect(linhaDoSimbolo.getByTestId('exposicao-atual')).toHaveText(formatadorDeReais.format(exposicao));
+  await expect(linhaDoSimbolo.getByTestId('exposicao-restante')).toHaveText(formatadorDeReais.format(restante));
+}
+
+function celulaDaResposta(page: Page, rotulo: string) {
+  return page
+    .locator('.resposta-celula')
+    .filter({ has: page.locator('dt', { hasText: new RegExp('^' + rotulo + '$') }) })
+    .locator('dd');
+}
+
+async function conferirDadosDaResposta(page: Page, respostaEsperada: { ativo: string; lado: string; quantidade: string; preco: string }) {
+  await expect(celulaDaResposta(page, 'Ativo')).toHaveText(respostaEsperada.ativo);
+  await expect(celulaDaResposta(page, 'Lado')).toHaveText(respostaEsperada.lado);
+  await expect(celulaDaResposta(page, 'Quantidade')).toHaveText(respostaEsperada.quantidade);
+  await expect(celulaDaResposta(page, 'Preço')).toHaveText(respostaEsperada.preco);
+  await expect(celulaDaResposta(page, 'Identificador do envio')).toHaveText(/^[0-9a-f]{32}$/i);
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+});
+
+test('CA-14: compra válida é enviada e a tela mostra a resposta aceita', async ({ page }) => {
+  await enviarOrdemPelaBoleta(page, { simbolo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: '10,00' });
+  await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await expect(page.getByTestId('mensagem-da-ordem')).toHaveText('Ordem aceita.');
+  await conferirDadosDaResposta(page, { ativo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: formatadorDeReais.format(10) });
+});
+
+test('CA-14: venda válida é enviada e a tela mostra a resposta aceita', async ({ page }) => {
+  await enviarOrdemPelaBoleta(page, { simbolo: 'VALE3', lado: 'Venda', quantidade: '200', preco: '55,30' });
+  await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await expect(page.getByTestId('mensagem-da-ordem')).toHaveText('Ordem aceita.');
+  await conferirDadosDaResposta(page, { ativo: 'VALE3', lado: 'Venda', quantidade: '200', preco: formatadorDeReais.format(55.3) });
+});
+
+test('CA-17: o painel mostra os três ativos e muda depois de uma ordem aceita', async ({ page }) => {
+  for (const simbolo of ['PETR4', 'VALE3', 'VIIA4']) {
+    const exposicaoAtual = await lerExposicaoNoServidor(page, simbolo);
+    await conferirPainelDeExposicao(page, simbolo, exposicaoAtual.exposure, exposicaoAtual.remaining);
+  }
+  const exposicaoAntes = await lerExposicaoNoServidor(page, 'PETR4');
+  await enviarOrdemPelaBoleta(page, { simbolo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: '10,00' });
+  await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  const exposicaoEsperada = exposicaoAntes.exposure + 10_000;
+  await conferirPainelDeExposicao(page, 'PETR4', exposicaoEsperada, LIMITE - Math.abs(exposicaoEsperada));
+});
+
+test('CA-16 e CA-17: ordem que estoura o limite aparece rejeitada com o motivo e não muda a exposição', async ({ page }) => {
+  // Leva VIIA4 até perto do limite com ordens válidas e grandes; a primeira que
+  // não couber mais é a rejeição que o cenário quer ver.
+  let houveRejeicao = false;
+  for (let tentativa = 0; tentativa < 6 && !houveRejeicao; tentativa++) {
+    const exposicaoAntes = await lerExposicaoNoServidor(page, 'VIIA4');
+    await enviarOrdemPelaBoleta(page, { simbolo: 'VIIA4', lado: 'Compra', quantidade: '99.999', preco: '999,99' });
+    const situacaoNaTela = await page.getByTestId('status-da-ordem').textContent();
+    if (situacaoNaTela === 'Rejeitada') {
+      houveRejeicao = true;
+      await expect(page.getByTestId('mensagem-da-ordem')).toHaveText(
+        'Ordem rejeitada: a exposição de VIIA4 passaria do limite de 100.000.000,00.',
+      );
+      await conferirPainelDeExposicao(page, 'VIIA4', exposicaoAntes.exposure, exposicaoAntes.remaining);
+      expect(await lerExposicaoNoServidor(page, 'VIIA4')).toEqual(exposicaoAntes);
+    } else {
+      expect(situacaoNaTela).toBe('Aceita');
+    }
+  }
+  expect(houveRejeicao).toBe(true);
+});
