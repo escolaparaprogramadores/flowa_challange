@@ -8,7 +8,7 @@ const PASTA_DA_TELA = fileURLToPath(new URL('../src/', import.meta.url));
 const PROPRIEDADES_DE_COR = /^(color|background(-color)?|border(-(top|right|bottom|left))?(-color)?|outline(-color)?|fill|stroke|(box|text)-shadow|caret-color|accent-color|text-decoration-color)$/;
 const PALAVRAS_SEM_COR = new Set(['transparent', 'currentcolor', 'inherit', 'initial', 'unset', 'none', 'solid', 'dashed', 'dotted', 'double', 'inset']);
 const PROPRIEDADES_DE_ESPACO_E_LETRA = /^(padding|margin|gap|row-gap|column-gap|font-size|letter-spacing|grid-template-columns)(-(top|right|bottom|left))?$/;
-const JSX_COM_VALOR_CRU = /\b(color|background(Color)?|borderColor|fontFamily|font|borderRadius|boxShadow)\s*:/;
+const JSX_COM_VALOR_CRU = /\b(color|background(Color)?|borderColor|fontFamily|font|fontSize|letterSpacing|borderRadius|boxShadow|padding\w*|margin\w*|gap|rowGap|columnGap)\s*:/;
 
 function valorSemVariaveis(valorDaDeclaracao) {
   return valorDaDeclaracao.replace(/var\(--[\w-]+\)/g, '').trim();
@@ -24,7 +24,7 @@ function motivoDoValorCruNoCss(propriedade, valorDaDeclaracao) {
   }
   if ((propriedade === 'font-family' || propriedade === 'font') && valorSemTokens !== '' && valorSemTokens !== 'inherit') return 'fonte escrita direto';
   if (/^border(-(top|bottom)-(left|right))?-radius$/.test(propriedade) && valorSemTokens !== '' && valorSemTokens !== '0') return 'raio escrito direto';
-  if (PROPRIEDADES_DE_ESPACO_E_LETRA.test(propriedade) && /\b(?!1px\b)\d+(\.\d+)?px\b/.test(valorSemTokens)) return 'espaço ou tamanho de letra escrito direto';
+  if (PROPRIEDADES_DE_ESPACO_E_LETRA.test(propriedade) && /(^|[\s(,-])\d*\.?\d+(px|rem|em|vw|vh|%)(?![\w-])/.test(valorSemTokens)) return 'espaço ou tamanho de letra escrito direto';
   return undefined;
 }
 
@@ -63,6 +63,12 @@ const AMOSTRAS_QUE_DEVEM_SER_RECUSADAS = [
   ['amostra.css', '.x { padding: 18px var(--espaco-5); }'],
   ['amostra.css', '.x { font-size: 15px; }'],
   ['amostra.css', '.grade { grid-template-columns: 260px minmax(0, 1fr); }'],
+  ['amostra.css', '.x { font-size: 0.95rem; }'],
+  ['amostra.css', '.x { gap: 1.5em; }'],
+  ['amostra.css', '.x { padding: 5% 0; }'],
+  ['amostra.css', '.x { padding: 1px; }'],
+  ['amostra.css', '.x { letter-spacing: -0.03em; }'],
+  ['amostra.tsx', 'export const Bloco = () => <div style={{ padding: 18, fontSize: 15 }} />;'],
   ['amostra.tsx', 'export const Cartao = () => <div style={{ borderRadius: 4 }} />;'],
   ['amostra.tsx', "export const Aviso = () => <p style={{ color: 'red' }} />;"],
 ];

@@ -94,8 +94,8 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
       errosDeCampo: (corpoDaResposta.errors ?? []).map((erroDeCampo) => erroDeCampo.message),
     };
   }
-  // 503 (sem sessão FIX ou sem resposta em 5 s) e corpo que não chegou são falta de resposta; outro 5xx é erro do servidor.
-  const servidorFalhouAoResponder = respostaHttp.status >= 500 && respostaHttp.status !== 503;
+  // 503 (sem sessão FIX ou sem resposta em 5 s) e corpo que não chegou são falta de resposta; outro status de erro é resposta com erro.
+  const servidorFalhouAoResponder = respostaHttp.status >= 400 && respostaHttp.status !== 503;
   return {
     situacao: 'falha-de-comunicacao',
     mensagemDoServidor: servidorFalhouAoResponder ? MENSAGEM_DE_ERRO_INESPERADO_NO_SERVIDOR : MENSAGEM_DE_ORDEM_NAO_CONFIRMADA,

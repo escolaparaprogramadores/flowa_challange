@@ -52,6 +52,14 @@ describe('enviarOrdem', () => {
     });
   });
 
+  it('RF-23: 404 fora do contrato também é resposta com erro, não "não respondeu"', async () => {
+    responderComJson(404, {});
+    expect(await enviarOrdem(ordemDeCompra)).toEqual({
+      situacao: 'falha-de-comunicacao',
+      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
+    });
+  });
+
   it('RF-23: 500 do contrato vira "erro inesperado", porque o servidor respondeu', async () => {
     responderComJson(500, { status: 'error', message: 'Erro inesperado ao processar a ordem.' });
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
