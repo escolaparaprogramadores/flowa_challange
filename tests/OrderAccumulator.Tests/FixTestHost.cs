@@ -19,14 +19,14 @@ namespace OrderAccumulator.Tests;
 
 // O OrderAccumulator inteiro (Program.cs), com o acceptor FIX em 127.0.0.1 numa porta livre
 // (ou na porta pedida) e o banco do container.
-public sealed class AccumulatorApp : WebApplicationFactory<Program>
+public sealed class OrderAccumulatorFixTestHost : WebApplicationFactory<Program>
 {
     public const string FixAcceptorLoopbackBindHost = "127.0.0.1";
 
     private readonly string orderDatabaseConnectionString;
     private readonly Action<IServiceCollection>? replaceOrderAccumulatorServices;
 
-    public AccumulatorApp(string orderDatabaseConnectionString, int? fixAcceptorPort = null, Action<IServiceCollection>? replaceOrderAccumulatorServices = null)
+    public OrderAccumulatorFixTestHost(string orderDatabaseConnectionString, int? fixAcceptorPort = null, Action<IServiceCollection>? replaceOrderAccumulatorServices = null)
     {
         this.orderDatabaseConnectionString = orderDatabaseConnectionString;
         this.replaceOrderAccumulatorServices = replaceOrderAccumulatorServices;
@@ -37,18 +37,18 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
 
     public OrderAccumulatorCapturedLogs CapturedOrderAccumulatorLogs { get; } = new();
 
-    protected override void ConfigureWebHost(IWebHostBuilder webHostBuilder)
+    protected override void ConfigureWebHost(IWebHostBuilder orderAccumulatorWebHostBuilder)
     {
-        webHostBuilder.UseSetting("ConnectionStrings:Flowa", orderDatabaseConnectionString);
-        webHostBuilder.UseSetting("Fix:AcceptorPort", FixAcceptorPort.ToString());
-        webHostBuilder.UseSetting("Fix:AcceptorBindHost", FixAcceptorLoopbackBindHost);
-        webHostBuilder.ConfigureLogging(loggingBuilder => loggingBuilder.AddProvider(CapturedOrderAccumulatorLogs));
+        orderAccumulatorWebHostBuilder.UseSetting("ConnectionStrings:Flowa", orderDatabaseConnectionString);
+        orderAccumulatorWebHostBuilder.UseSetting("Fix:AcceptorPort", FixAcceptorPort.ToString());
+        orderAccumulatorWebHostBuilder.UseSetting("Fix:AcceptorBindHost", FixAcceptorLoopbackBindHost);
+        orderAccumulatorWebHostBuilder.ConfigureLogging(orderAccumulatorLoggingBuilder => orderAccumulatorLoggingBuilder.AddProvider(CapturedOrderAccumulatorLogs));
         if (replaceOrderAccumulatorServices is not null)
-            webHostBuilder.ConfigureTestServices(replaceOrderAccumulatorServices);
+            orderAccumulatorWebHostBuilder.ConfigureTestServices(replaceOrderAccumulatorServices);
     }
 
     // Força a subida do host (e do acceptor) sem precisar de uma chamada HTTP antes.
-    public AccumulatorApp StartWithFixAcceptor()
+    public OrderAccumulatorFixTestHost StartWithFixAcceptor()
     {
         _ = Services;
         return this;

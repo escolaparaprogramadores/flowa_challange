@@ -29,7 +29,7 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
                 .UseSetting("ConnectionStrings:Flowa", emptyOrderAccumulatorDatabaseConnectionString)
                 // O acceptor FIX sobe junto: porta livre e só no loopback, sem disputar a 9876 nem abrir para a rede.
                 .UseSetting("Fix:AcceptorPort", "0")
-                .UseSetting("Fix:AcceptorBindHost", AccumulatorApp.FixAcceptorLoopbackBindHost));
+                .UseSetting("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost));
     }
 
     public async Task DisposeAsync() => await orderAccumulatorApp.DisposeAsync();

@@ -14,7 +14,7 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
     [Fact]
     public async Task Get_exposures_returns_the_three_symbols_in_contract_order_with_limit_and_remaining()
     {
-        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
 
         var exposuresJson = await GetExposuresJsonAsync(orderAccumulatorTestApp);
 
@@ -27,7 +27,7 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
     [Fact]
     public async Task Accepted_orders_move_the_exposures_and_a_rejected_one_does_not()
     {
-        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
         await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("compra-petr4", "PETR4", '1', 100, 10.50m));
@@ -45,7 +45,7 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
         Assert.Equal(exposuresAfterAccepted, exposuresAfterRejected);
     }
 
-    private static async Task<JsonElement> GetExposuresJsonAsync(AccumulatorApp orderAccumulatorTestApp)
+    private static async Task<JsonElement> GetExposuresJsonAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp)
     {
         var exposuresHttpResponse = await orderAccumulatorTestApp.CreateClient().GetAsync("/api/exposures");
         Assert.Equal(HttpStatusCode.OK, exposuresHttpResponse.StatusCode);
