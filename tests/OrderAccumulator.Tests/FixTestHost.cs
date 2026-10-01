@@ -139,7 +139,7 @@ public sealed class TestInitiator : IApplication, IDisposable
         };
 
     public static NewOrderSingle NewBuyOrder(string symbol, decimal quantity, decimal price) =>
-        NewOrder(Guid.NewGuid().ToString("N"), symbol, OrderSideCodes.BuyFix, quantity, price);
+        NewOrder(Guid.NewGuid().ToString("N"), symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price);
 
     // Manda a ordem e devolve o ExecutionReport que voltou para ela.
     public async Task<ExecutionReport> SendExpectingExecutionReportAsync(NewOrderSingle order)
