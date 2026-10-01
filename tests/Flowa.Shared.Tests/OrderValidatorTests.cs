@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Flowa.Shared;
 
 namespace Flowa.Shared.Tests;
@@ -268,6 +269,22 @@ public class OrderValidatorTests
                 new OrderFieldError(OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceOffTickMessage)
             ],
             orderValidationResult.OrderFieldErrors);
+    }
+
+    // A resposta de erro da API serializa este registro direto: os nomes do contrato não podem mudar.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DeveSerializarErroDeCampoDaOrdemComOsNomesDoContrato(bool useWebJsonOptions)
+    {
+        var orderFieldError = new OrderFieldError(OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceOffTickMessage);
+        var orderJsonOptions = useWebJsonOptions ? JsonSerializerOptions.Web : JsonSerializerOptions.Default;
+
+        using var orderFieldErrorJson = JsonDocument.Parse(JsonSerializer.Serialize(orderFieldError, orderJsonOptions));
+
+        Assert.Equal(["field", "message"], orderFieldErrorJson.RootElement.EnumerateObject().Select(jsonProperty => jsonProperty.Name));
+        Assert.Equal("price", orderFieldErrorJson.RootElement.GetProperty("field").GetString());
+        Assert.Equal("O preço deve ser múltiplo de 0,01.", orderFieldErrorJson.RootElement.GetProperty("message").GetString());
     }
 
     [Fact]

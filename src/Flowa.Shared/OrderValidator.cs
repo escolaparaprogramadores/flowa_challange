@@ -1,8 +1,12 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 
 namespace Flowa.Shared;
 
-public sealed record OrderFieldError(string OrderField, string OrderFieldErrorMessage);
+// O erro vai direto na resposta HTTP; o contrato promete os campos "field" e "message".
+public sealed record OrderFieldError(
+    [property: JsonPropertyName("field")] string OrderField,
+    [property: JsonPropertyName("message")] string OrderFieldErrorMessage);
 
 public sealed record ValidOrder(string OrderSymbol, OrderSide OrderSide, int OrderQuantity, decimal OrderPrice);
 
