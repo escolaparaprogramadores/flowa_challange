@@ -71,10 +71,11 @@ Se o OrderAccumulator não responder em 5 s ou estiver fora do ar, devolve `503`
 `communication_error` da ordem, trocando a mensagem por
 `"Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes."`.
 
-### Os dois apps — `GET /health`
+### Os dois apps — `GET /health` e `GET /version`
 
-Responde `200` com o texto `Healthy` quando o processo está de pé. Serve para o compose saber que
-o app subiu. Não depende da sessão FIX nem do banco.
+`/health` responde `200` com o texto `Healthy` quando o processo está de pé, sem depender da sessão
+FIX nem do banco. `/version` responde `200` com `{"commit":"<sha completo, 40 caracteres>"}`: o commit
+do código que está rodando, gravado no build, para conferir que a versão no ar é a que foi revisada.
 
 ## 2. Mensagens FIX 4.4
 
@@ -144,8 +145,8 @@ sozinho.
 
 | Processo | Porta | Para quê |
 |---|---|---|
-| OrderGenerator | 8080 (HTTP) | página e `/api/*` |
-| OrderAccumulator | 8081 (HTTP) | `GET /api/exposures` e `/health` |
+| OrderGenerator | 8080 (HTTP); 8443 (HTTPS, só fora do compose) | página, `/api/*`, `/health`, `/version` |
+| OrderAccumulator | 8081 (HTTP); 8444 (HTTPS, só fora do compose) | `GET /api/exposures`, `/health`, `/version` |
 | OrderAccumulator | 9876 (TCP) | acceptor FIX |
 | PostgreSQL | 5432 | banco do OrderAccumulator |
 
@@ -156,6 +157,7 @@ compose" é o padrão para rodar na máquina, sem Docker.
 |---|---|---|---|
 | `ASPNETCORE_HTTP_PORTS` | OrderGenerator | `8080` | `8080` |
 | `ASPNETCORE_HTTP_PORTS` | OrderAccumulator | `8081` | `8081` |
+| `ASPNETCORE_HTTPS_PORTS` | OrderGenerator / OrderAccumulator | `8443` / `8444`, certificado de desenvolvimento do .NET (`dotnet dev-certs https`) | não usa |
 | `Fix__AcceptorHost` | OrderGenerator | `localhost` | `orderaccumulator` |
 | `Fix__AcceptorPort` | os dois | `9876` | `9876` |
 | `OrderAccumulator__BaseUrl` | OrderGenerator | `http://localhost:8081` | `http://orderaccumulator:8081` |
