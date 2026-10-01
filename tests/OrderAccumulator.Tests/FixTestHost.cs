@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
-using SideCodes = Flowa.Shared.SideCodes;
+using OrderSideCodes = Flowa.Shared.OrderSideCodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -67,15 +67,15 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
 // Guarda o que o app escreveu no log, para conferir o log FIX (D-34).
 public sealed class CapturedLogs : ILoggerProvider
 {
-    private readonly ConcurrentQueue<string> lines = new();
+    private readonly ConcurrentQueue<string> capturedLines = new();
 
-    public IReadOnlyList<string> Lines => lines.ToList();
+    public IReadOnlyList<string> Lines => capturedLines.ToList();
 
-    public ILogger CreateLogger(string categoryName) => new Collector(categoryName, lines);
+    public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, capturedLines);
 
     public void Dispose() { }
 
-    private sealed class Collector(string category, ConcurrentQueue<string> lines) : ILogger
+    private sealed class CapturingLogger(string category, ConcurrentQueue<string> capturedLines) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -83,23 +83,24 @@ public sealed class CapturedLogs : ILoggerProvider
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter) =>
-            lines.Enqueue($"{logLevel} {category}: {formatter(state, exception)}");
+            capturedLines.Enqueue($"{logLevel} {category}: {formatter(state, exception)}");
     }
 }
 
 // A ponta initiator usada só nos testes: faz o papel do OrderGenerator sem depender dele.
 public sealed class TestInitiator : IApplication, IDisposable
 {
-    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
 
     private readonly SocketInitiator initiator;
     private readonly TaskCompletionSource loggedOn = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Channel<ExecutionReport> reports = Channel.CreateUnbounded<ExecutionReport>();
-    private SessionID? session;
+    private readonly Channel<ExecutionReport> executionReports = Channel.CreateUnbounded<ExecutionReport>();
+    private readonly Channel<BusinessMessageReject> businessRejects = Channel.CreateUnbounded<BusinessMessageReject>();
+    private SessionID? sessionId;
 
     private TestInitiator(int port)
     {
-        var settings = new SessionSettings(new StringReader($"""
+        var initiatorSettings = new SessionSettings(new StringReader($"""
             [DEFAULT]
             ConnectionType=initiator
             ReconnectInterval=1
@@ -119,57 +120,66 @@ public sealed class TestInitiator : IApplication, IDisposable
             SocketConnectHost=127.0.0.1
             SocketConnectPort={port}
             """));
-        initiator = new SocketInitiator(this, new MemoryStoreFactory(), settings, (ILoggerFactory?)null, null);
+        initiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, (ILoggerFactory?)null, null);
     }
 
     public static async Task<TestInitiator> ConnectAsync(int port)
     {
         var testInitiator = new TestInitiator(port);
         testInitiator.initiator.Start();
-        await testInitiator.loggedOn.Task.WaitAsync(Wait);
+        await testInitiator.loggedOn.Task.WaitAsync(ReportTimeout);
         return testInitiator;
     }
 
-    public static NewOrderSingle Order(string clOrdId, string symbol, char side, decimal quantity, decimal price) =>
+    public static NewOrderSingle NewOrder(string clOrdId, string symbol, char side, decimal quantity, decimal price) =>
         new(new ClOrdID(clOrdId), new Symbol(symbol), new Side(side), new TransactTime(DateTime.UtcNow), new OrdType(OrdType.LIMIT))
         {
             OrderQty = new OrderQty(quantity),
             Price = new Price(price)
         };
 
-    public static NewOrderSingle Buy(string symbol, decimal quantity, decimal price) =>
-        Order(Guid.NewGuid().ToString("N"), symbol, SideCodes.BuyFix, quantity, price);
+    public static NewOrderSingle NewBuyOrder(string symbol, decimal quantity, decimal price) =>
+        NewOrder(Guid.NewGuid().ToString("N"), symbol, OrderSideCodes.BuyFix, quantity, price);
 
     // Manda a ordem e devolve o ExecutionReport que voltou para ela.
     public async Task<ExecutionReport> SendAsync(NewOrderSingle order)
     {
-        Assert.True(Session.SendToTarget(order, session!));
-        var report = await reports.Reader.ReadAsync().AsTask().WaitAsync(Wait);
-        Assert.Equal(order.ClOrdID.Value, report.ClOrdID.Value);
-        return report;
+        Assert.True(Session.SendToTarget(order, sessionId!));
+        var executionReport = await executionReports.Reader.ReadAsync().AsTask().WaitAsync(ReportTimeout);
+        Assert.Equal(order.ClOrdID.Value, executionReport.ClOrdID.Value);
+        return executionReport;
     }
 
     // Manda a ordem e confere que nenhum ExecutionReport volta dentro do prazo.
     public async Task ExpectNoAnswerAsync(NewOrderSingle order, TimeSpan wait)
     {
-        Assert.True(Session.SendToTarget(order, session!));
+        Assert.True(Session.SendToTarget(order, sessionId!));
         // Leitura cancelável: um ReadAsync pendurado depois do prazo engoliria o próximo relatório.
         using var timeout = new CancellationTokenSource(wait);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reports.Reader.ReadAsync(timeout.Token).AsTask());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executionReports.Reader.ReadAsync(timeout.Token).AsTask());
+    }
+
+    // Manda uma mensagem que a aplicação do acceptor não aceita e devolve a recusa (35=j) que voltou.
+    public async Task<BusinessMessageReject> SendExpectingBusinessRejectAsync(NewOrderSingle order)
+    {
+        Assert.True(Session.SendToTarget(order, sessionId!));
+        return await businessRejects.Reader.ReadAsync().AsTask().WaitAsync(ReportTimeout);
     }
 
     public void Dispose() => initiator.Dispose();
 
     public void OnLogon(SessionID sessionId)
     {
-        session = sessionId;
+        this.sessionId = sessionId;
         loggedOn.TrySetResult();
     }
 
     public void FromApp(Message message, SessionID sessionId)
     {
-        if (message is ExecutionReport report)
-            reports.Writer.TryWrite(report);
+        if (message is ExecutionReport executionReport)
+            executionReports.Writer.TryWrite(executionReport);
+        else if (message is BusinessMessageReject businessReject)
+            businessRejects.Writer.TryWrite(businessReject);
     }
 
     public void OnCreate(SessionID sessionId) { }

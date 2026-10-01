@@ -16,35 +16,35 @@ public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
     {
         await using var app = new AccumulatorApp(db.ConnectionString).Start();
 
-        var body = await ReadJsonAsync(app);
+        var exposuresJson = await GetExposuresJsonAsync(app);
 
-        Assert.Equal(100_000_000m, body.GetProperty("limit").GetDecimal());
+        Assert.Equal(100_000_000m, exposuresJson.GetProperty("limit").GetDecimal());
         Assert.Equal(
             [("PETR4", 0m, 100_000_000m), ("VALE3", 0m, 100_000_000m), ("VIIA4", 0m, 100_000_000m)],
-            Items(body));
+            ReadExposureEntries(exposuresJson));
     }
 
     [Fact]
     public async Task Accepted_orders_move_the_values_and_a_rejected_one_does_not()
     {
         await using var app = new AccumulatorApp(db.ConnectionString).Start();
-        using var fix = await TestInitiator.ConnectAsync(app.FixPort);
+        using var testInitiator = await TestInitiator.ConnectAsync(app.FixPort);
 
-        await fix.SendAsync(TestInitiator.Order("compra-petr4", "PETR4", '1', 100, 10.50m));
-        await fix.SendAsync(TestInitiator.Order("venda-vale3", "VALE3", '2', 20, 25.00m));
-        var afterAccepted = Items(await ReadJsonAsync(app));
+        await testInitiator.SendAsync(TestInitiator.NewOrder("compra-petr4", "PETR4", '1', 100, 10.50m));
+        await testInitiator.SendAsync(TestInitiator.NewOrder("venda-vale3", "VALE3", '2', 20, 25.00m));
+        var afterAccepted = ReadExposureEntries(await GetExposuresJsonAsync(app));
 
-        var rejected = await fix.SendAsync(TestInitiator.Order("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
-        var afterRejected = Items(await ReadJsonAsync(app));
+        var rejectedReport = await testInitiator.SendAsync(TestInitiator.NewOrder("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
+        var afterRejected = ReadExposureEntries(await GetExposuresJsonAsync(app));
 
         Assert.Equal(
             [("PETR4", 1_050.00m, 99_998_950.00m), ("VALE3", -500.00m, 99_999_500.00m), ("VIIA4", 0m, 100_000_000m)],
             afterAccepted);
-        Assert.Equal(QuickFix.Fields.ExecType.REJECTED, rejected.ExecType.Value);
+        Assert.Equal(QuickFix.Fields.ExecType.REJECTED, rejectedReport.ExecType.Value);
         Assert.Equal(afterAccepted, afterRejected);
     }
 
-    private static async Task<JsonElement> ReadJsonAsync(AccumulatorApp app)
+    private static async Task<JsonElement> GetExposuresJsonAsync(AccumulatorApp app)
     {
         var response = await app.CreateClient().GetAsync("/api/exposures");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -53,11 +53,11 @@ public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
     }
 
     // Lê pelos nomes do contrato (camelCase), não pelo tipo C#: um nome trocado aqui quebra o teste.
-    private static List<(string Symbol, decimal Exposure, decimal Remaining)> Items(JsonElement body) =>
-        body.GetProperty("exposures").EnumerateArray()
-            .Select(item => (
-                item.GetProperty("symbol").GetString()!,
-                item.GetProperty("exposure").GetDecimal(),
-                item.GetProperty("remaining").GetDecimal()))
+    private static List<(string Symbol, decimal Exposure, decimal Remaining)> ReadExposureEntries(JsonElement exposuresJson) =>
+        exposuresJson.GetProperty("exposures").EnumerateArray()
+            .Select(exposureEntry => (
+                exposureEntry.GetProperty("symbol").GetString()!,
+                exposureEntry.GetProperty("exposure").GetDecimal(),
+                exposureEntry.GetProperty("remaining").GetDecimal()))
             .ToList();
 }

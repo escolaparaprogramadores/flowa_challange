@@ -17,7 +17,7 @@ public sealed class FixAcceptorService(
     {
         // O log FIX vai para o ILoggerFactory do app, que escreve no stdout (D-34).
         acceptor = new ThreadedSocketAcceptor(
-            application, new MemoryStoreFactory(), LoadSettings(configuration), loggerFactory,
+            application, new MemoryStoreFactory(), LoadSessionSettings(configuration), loggerFactory,
             new DefaultMessageFactory([typeof(QuickFix.FIX44.NewOrderSingle).Assembly], string.Empty));
         acceptor.Start();
         return Task.CompletedTask;
@@ -35,22 +35,22 @@ public sealed class FixAcceptorService(
     // é procurado ao lado do executável, para não depender da pasta de onde o app foi iniciado.
     // Fix__AcceptorBindHost é opcional: sem ele o acceptor escuta em todas as interfaces, como o
     // compose precisa; os testes usam 127.0.0.1 para não abrir a porta para a rede.
-    public static SessionSettings LoadSettings(IConfiguration configuration)
+    public static SessionSettings LoadSessionSettings(IConfiguration configuration)
     {
         var port = configuration.GetValue<int?>("Fix:AcceptorPort")
             ?? throw new InvalidOperationException("Defina a porta do acceptor FIX em Fix__AcceptorPort.");
         var bindHost = configuration["Fix:AcceptorBindHost"];
 
-        var settings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, SettingsFile));
-        foreach (var sessionId in settings.GetSessions())
+        var acceptorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, SettingsFile));
+        foreach (var sessionId in acceptorSettings.GetSessions())
         {
-            var session = settings.Get(sessionId);
-            session.SetLong("SocketAcceptPort", port);
-            session.SetString("DataDictionary", Path.Combine(AppContext.BaseDirectory, DictionaryFile));
+            var sessionSettings = acceptorSettings.Get(sessionId);
+            sessionSettings.SetLong("SocketAcceptPort", port);
+            sessionSettings.SetString("DataDictionary", Path.Combine(AppContext.BaseDirectory, DictionaryFile));
             if (!string.IsNullOrWhiteSpace(bindHost))
-                session.SetString("SocketAcceptHost", bindHost);
+                sessionSettings.SetString("SocketAcceptHost", bindHost);
         }
 
-        return settings;
+        return acceptorSettings;
     }
 }
