@@ -10,13 +10,13 @@ const PALAVRAS_SEM_COR = new Set(['transparent', 'currentcolor', 'inherit', 'ini
 const PROPRIEDADES_DE_ESPACO_E_LETRA = /^(padding|margin|gap|row-gap|column-gap|font-size|letter-spacing|grid-template-columns)(-(top|right|bottom|left))?$/;
 const JSX_COM_VALOR_CRU = /\b(color|background(Color)?|borderColor|fontFamily|font|fontSize|letterSpacing|borderRadius|boxShadow|padding\w*|margin\w*|gap|rowGap|columnGap)\s*:/;
 
-function valorSemVariaveis(valorDaDeclaracao) {
+function removerTokensCssDoValorDaDeclaracao(valorDaDeclaracao) {
   return valorDaDeclaracao.replace(/var\(--[\w-]+\)/g, '').trim();
 }
 
 // Devolve o motivo quando a declaração CSS "propriedade: valor" traz cor, fonte, raio, espaço ou letra escritos direto.
 function motivoDoValorCruNoCss(propriedadeDaDeclaracao, valorDaDeclaracao) {
-  const valorSemTokens = valorSemVariaveis(valorDaDeclaracao);
+  const valorSemTokens = removerTokensCssDoValorDaDeclaracao(valorDaDeclaracao);
   if (/#[0-9a-f]{3,8}\b|\b(rgb|hsl|hwb|lab|lch|oklab|oklch)a?\(/i.test(valorSemTokens)) return 'cor escrita direto';
   if (PROPRIEDADES_DE_COR.test(propriedadeDaDeclaracao)) {
     const palavraDeCor = (valorSemTokens.match(/[a-z]+/gi) ?? []).find((palavra) => !PALAVRAS_SEM_COR.has(palavra.toLowerCase()) && !/^(px|em|rem|s|ms|deg)$/i.test(palavra));
