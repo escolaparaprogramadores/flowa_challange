@@ -83,7 +83,14 @@ public static class OrderValidator
             return FailValue<int>(errors, OrderFields.Quantity, OrderMessages.QuantityRequired);
 
         if (!decimal.TryParse(quantity, NumberFormat, CultureInfo.InvariantCulture, out var value))
+        {
+            // Número que nem cabe no decimal é grande demais, não "texto".
+            if (IsNumberBeyondDecimal(quantity, out var negative))
+                return FailValue<int>(errors, OrderFields.Quantity,
+                    negative ? OrderMessages.QuantityNotPositive : OrderMessages.QuantityTooLarge);
+
             return FailValue<int>(errors, OrderFields.Quantity, OrderMessages.QuantityNotInteger);
+        }
 
         return CheckQuantity(value, errors);
     }
@@ -108,7 +115,13 @@ public static class OrderValidator
             return FailValue<decimal>(errors, OrderFields.Price, OrderMessages.PriceRequired);
 
         if (!decimal.TryParse(price, NumberFormat, CultureInfo.InvariantCulture, out var value))
+        {
+            if (IsNumberBeyondDecimal(price, out var negative))
+                return FailValue<decimal>(errors, OrderFields.Price,
+                    negative ? OrderMessages.PriceNotPositive : OrderMessages.PriceTooLarge);
+
             return FailValue<decimal>(errors, OrderFields.Price, OrderMessages.PriceNotNumber);
+        }
 
         return CheckPrice(value, errors);
     }
@@ -126,6 +139,13 @@ public static class OrderValidator
             return FailValue<decimal>(errors, OrderFields.Price, OrderMessages.PriceOffTick);
 
         return price;
+    }
+
+    private static bool IsNumberBeyondDecimal(string text, out bool negative)
+    {
+        var isNumber = double.TryParse(text, NumberFormat, CultureInfo.InvariantCulture, out var value);
+        negative = value < 0;
+        return isNumber;
     }
 
     private static T? Fail<T>(List<FieldError> errors, string field, string message) where T : class

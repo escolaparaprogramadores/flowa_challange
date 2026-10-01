@@ -121,9 +121,12 @@ public class OrderValidatorTests
 
     // CA-3 — quantidade
 
+    // "100.0" e "+5" têm valor inteiro: o número JSON 100.0 é o mesmo que 100.
     [Theory]
     [InlineData("1", 1)]
     [InlineData("99999", 99999)]
+    [InlineData("100.0", 100)]
+    [InlineData("+5", 5)]
     public void DeveAceitarQuantidadeNasBordas(string quantity, int expected)
     {
         var result = OrderValidator.Validate(ValidSymbol, ValidSide, quantity, ValidPrice);
@@ -138,6 +141,11 @@ public class OrderValidatorTests
     [InlineData("1.5", OrderMessages.QuantityNotInteger)]
     [InlineData("abc", OrderMessages.QuantityNotInteger)]
     [InlineData("100000", OrderMessages.QuantityTooLarge)]
+    [InlineData("99999999999999999999999999999999", OrderMessages.QuantityTooLarge)]
+    [InlineData("-99999999999999999999999999999999", OrderMessages.QuantityNotPositive)]
+    [InlineData(" 100", OrderMessages.QuantityNotInteger)]
+    [InlineData("100 ", OrderMessages.QuantityNotInteger)]
+    [InlineData("1e3", OrderMessages.QuantityNotInteger)]
     [InlineData("", OrderMessages.QuantityRequired)]
     [InlineData(null, OrderMessages.QuantityRequired)]
     public void DeveRecusarQuantidadeInvalida(string? quantity, string expectedMessage)
@@ -197,6 +205,9 @@ public class OrderValidatorTests
     [InlineData("10.005", OrderMessages.PriceOffTick)]
     [InlineData("abc", OrderMessages.PriceNotNumber)]
     [InlineData("10,005", OrderMessages.PriceNotNumber)]
+    [InlineData(" 10.50", OrderMessages.PriceNotNumber)]
+    [InlineData("99999999999999999999999999999999", OrderMessages.PriceTooLarge)]
+    [InlineData("-99999999999999999999999999999999", OrderMessages.PriceNotPositive)]
     [InlineData("", OrderMessages.PriceRequired)]
     [InlineData(null, OrderMessages.PriceRequired)]
     public void DeveRecusarPrecoInvalido(string? price, string expectedMessage)
@@ -257,6 +268,32 @@ public class OrderValidatorTests
                 new FieldError(OrderFields.Side, OrderMessages.SideInvalid),
                 new FieldError(OrderFields.Quantity, OrderMessages.QuantityNotPositive),
                 new FieldError(OrderFields.Price, OrderMessages.PriceTooLarge)
+            ],
+            result.Errors);
+    }
+
+    [Fact]
+    public void DeveDevolverOrdemTipadaQuandoTudoEstaValidoNoFix()
+    {
+        var result = OrderValidator.Validate("VIIA4", SideCodes.SellFix, 250m, 35.10m);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Errors);
+        Assert.Equal(new ValidOrder("VIIA4", Side.Sell, 250, 35.10m), result.Order);
+    }
+
+    [Fact]
+    public void DeveListarUmErroPorCampoQuandoTudoEstaInvalidoNoFix()
+    {
+        var result = OrderValidator.Validate("XPTO", '9', 1.5m, 10.005m);
+
+        Assert.Null(result.Order);
+        Assert.Equal(
+            [
+                new FieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid),
+                new FieldError(OrderFields.Side, OrderMessages.SideInvalid),
+                new FieldError(OrderFields.Quantity, OrderMessages.QuantityNotInteger),
+                new FieldError(OrderFields.Price, OrderMessages.PriceOffTick)
             ],
             result.Errors);
     }
