@@ -8,7 +8,7 @@ namespace OrderAccumulator.Fix;
 
 // Recebe a NewOrderSingle, entrega ao processador da exposição e responde com o ExecutionReport.
 // A validação de campo (D-13), o limite e a ordem repetida (D-11) ficam no IOrderProcessor.
-public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<OrderFixApplication> logger)
+public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<OrderFixApplication> orderFixLogger)
     : MessageCracker, IApplication
 {
     public void FromApp(Message message, SessionID sessionId) => Crack(message, sessionId);
@@ -25,22 +25,22 @@ public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<
         {
             orderOutcome = orderProcessor.ProcessIncomingOrderAsync(incomingOrder).GetAwaiter().GetResult();
         }
-        catch (Exception exception)
+        catch (Exception orderProcessingException)
         {
             // Ponto único de erro desta entrada. Sem resposta, o OrderGenerator desiste em 5 s e mostra
             // communication_error (contrato, seção 3). O processador grava numa transação só
             // (PostgresOrderProcessor), então a falha não deixa ordem pela metade; a sessão FIX segue de pé.
-            logger.LogError(exception, "Falha ao processar a ordem {ClOrdId}; nenhum ExecutionReport enviado.", incomingOrder.ClOrdId);
+            orderFixLogger.LogError(orderProcessingException, "Falha ao processar a ordem {ClOrdId}; nenhum ExecutionReport enviado.", incomingOrder.ClOrdId);
             return;
         }
 
         if (orderOutcome.IsRepeat)
-            logger.LogInformation("ClOrdID {ClOrdId} repetido: devolvendo a resposta original.", orderOutcome.ClOrdId);
+            orderFixLogger.LogInformation("ClOrdID {ClOrdId} repetido: devolvendo a resposta original.", orderOutcome.ClOrdId);
 
         // A ordem já está gravada. Se a sessão caiu antes da resposta, reenviar o mesmo ClOrdID devolve
         // a resposta gravada (D-11); o aviso deixa o caso visível no log.
         if (!Session.SendToTarget(BuildExecutionReport(orderOutcome), sessionId))
-            logger.LogWarning("ExecutionReport da ordem {ClOrdId} não foi enviado: a sessão FIX não está logada.", orderOutcome.ClOrdId);
+            orderFixLogger.LogWarning("ExecutionReport da ordem {ClOrdId} não foi enviado: a sessão FIX não está logada.", orderOutcome.ClOrdId);
     }
 
     // Tags e valores da tabela do ExecutionReport em docs/contracts/contracts.md, seção 2.

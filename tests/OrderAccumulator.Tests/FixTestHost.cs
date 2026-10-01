@@ -21,30 +21,30 @@ namespace OrderAccumulator.Tests;
 // (ou na porta pedida) e o banco do container.
 public sealed class AccumulatorApp : WebApplicationFactory<Program>
 {
-    public const string LoopbackBindHost = "127.0.0.1";
+    public const string FixAcceptorLoopbackBindHost = "127.0.0.1";
 
-    private readonly string connectionString;
-    private readonly Action<IServiceCollection>? replaceServices;
+    private readonly string orderDatabaseConnectionString;
+    private readonly Action<IServiceCollection>? replaceOrderAccumulatorServices;
 
-    public AccumulatorApp(string connectionString, int? fixPort = null, Action<IServiceCollection>? replaceServices = null)
+    public AccumulatorApp(string orderDatabaseConnectionString, int? fixPort = null, Action<IServiceCollection>? replaceOrderAccumulatorServices = null)
     {
-        this.connectionString = connectionString;
-        this.replaceServices = replaceServices;
-        FixPort = fixPort ?? FindFreeTcpPort();
+        this.orderDatabaseConnectionString = orderDatabaseConnectionString;
+        this.replaceOrderAccumulatorServices = replaceOrderAccumulatorServices;
+        FixAcceptorPort = fixPort ?? FindFreeFixAcceptorTcpPort();
     }
 
-    public int FixPort { get; }
+    public int FixAcceptorPort { get; }
 
-    public CapturedLogs Logs { get; } = new();
+    public OrderAccumulatorCapturedLogs CapturedOrderAccumulatorLogs { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder webHostBuilder)
     {
-        webHostBuilder.UseSetting("ConnectionStrings:Flowa", connectionString);
-        webHostBuilder.UseSetting("Fix:AcceptorPort", FixPort.ToString());
-        webHostBuilder.UseSetting("Fix:AcceptorBindHost", LoopbackBindHost);
-        webHostBuilder.ConfigureLogging(loggingBuilder => loggingBuilder.AddProvider(Logs));
-        if (replaceServices is not null)
-            webHostBuilder.ConfigureTestServices(replaceServices);
+        webHostBuilder.UseSetting("ConnectionStrings:Flowa", orderDatabaseConnectionString);
+        webHostBuilder.UseSetting("Fix:AcceptorPort", FixAcceptorPort.ToString());
+        webHostBuilder.UseSetting("Fix:AcceptorBindHost", FixAcceptorLoopbackBindHost);
+        webHostBuilder.ConfigureLogging(loggingBuilder => loggingBuilder.AddProvider(CapturedOrderAccumulatorLogs));
+        if (replaceOrderAccumulatorServices is not null)
+            webHostBuilder.ConfigureTestServices(replaceOrderAccumulatorServices);
     }
 
     // Força a subida do host (e do acceptor) sem precisar de uma chamada HTTP antes.
@@ -54,7 +54,7 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
         return this;
     }
 
-    private static int FindFreeTcpPort()
+    private static int FindFreeFixAcceptorTcpPort()
     {
         var portProbe = new TcpListener(IPAddress.Loopback, 0);
         portProbe.Start();
@@ -65,17 +65,17 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
 }
 
 // Guarda o que o app escreveu no log, para conferir o log FIX (D-34).
-public sealed class CapturedLogs : ILoggerProvider
+public sealed class OrderAccumulatorCapturedLogs : ILoggerProvider
 {
     private readonly ConcurrentQueue<string> capturedLines = new();
 
-    public IReadOnlyList<string> Lines => capturedLines.ToList();
+    public IReadOnlyList<string> CapturedLogLines => capturedLines.ToList();
 
-    public ILogger CreateLogger(string categoryName) => new CapturingLogger(categoryName, capturedLines);
+    public ILogger CreateLogger(string categoryName) => new OrderAccumulatorLogCaptureLogger(categoryName, capturedLines);
 
     public void Dispose() { }
 
-    private sealed class CapturingLogger(string categoryName, ConcurrentQueue<string> capturedLines) : ILogger
+    private sealed class OrderAccumulatorLogCaptureLogger(string categoryName, ConcurrentQueue<string> capturedLines) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -88,17 +88,17 @@ public sealed class CapturedLogs : ILoggerProvider
 }
 
 // A ponta initiator usada só nos testes: faz o papel do OrderGenerator sem depender dele.
-public sealed class TestInitiator : IApplication, IDisposable
+public sealed class FixTestInitiator : IApplication, IDisposable
 {
     private static readonly TimeSpan FixAnswerTimeout = TimeSpan.FromSeconds(10);
 
-    private readonly SocketInitiator initiator;
-    private readonly TaskCompletionSource loggedOn = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly SocketInitiator fixTestSocketInitiator;
+    private readonly TaskCompletionSource fixSessionLoggedOn = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Channel<ExecutionReport> executionReports = Channel.CreateUnbounded<ExecutionReport>();
     private readonly Channel<BusinessMessageReject> businessRejects = Channel.CreateUnbounded<BusinessMessageReject>();
     private SessionID? sessionId;
 
-    private TestInitiator(int port)
+    private FixTestInitiator(int fixAcceptorPort)
     {
         var initiatorSettings = new SessionSettings(new StringReader($"""
             [DEFAULT]
@@ -118,17 +118,17 @@ public sealed class TestInitiator : IApplication, IDisposable
             SenderCompID=ORDERGENERATOR
             TargetCompID=ORDERACCUMULATOR
             SocketConnectHost=127.0.0.1
-            SocketConnectPort={port}
+            SocketConnectPort={fixAcceptorPort}
             """));
-        initiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, (ILoggerFactory?)null, null);
+        fixTestSocketInitiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, (ILoggerFactory?)null, null);
     }
 
-    public static async Task<TestInitiator> LogOnToAcceptorAsync(int port)
+    public static async Task<FixTestInitiator> LogOnToAcceptorAsync(int fixAcceptorPort)
     {
-        var testInitiator = new TestInitiator(port);
-        testInitiator.initiator.Start();
-        await testInitiator.loggedOn.Task.WaitAsync(FixAnswerTimeout);
-        return testInitiator;
+        var fixTestInitiator = new FixTestInitiator(fixAcceptorPort);
+        fixTestInitiator.fixTestSocketInitiator.Start();
+        await fixTestInitiator.fixSessionLoggedOn.Task.WaitAsync(FixAnswerTimeout);
+        return fixTestInitiator;
     }
 
     public static NewOrderSingle NewOrder(string clOrdId, string symbol, char side, decimal quantity, decimal price) =>
@@ -142,37 +142,37 @@ public sealed class TestInitiator : IApplication, IDisposable
         NewOrder(Guid.NewGuid().ToString("N"), symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price);
 
     // Manda a ordem e devolve o ExecutionReport que voltou para ela.
-    public async Task<ExecutionReport> SendExpectingExecutionReportAsync(NewOrderSingle order)
+    public async Task<ExecutionReport> SendExpectingExecutionReportAsync(NewOrderSingle newOrderSingle)
     {
-        Assert.True(Session.SendToTarget(order, sessionId!));
+        Assert.True(Session.SendToTarget(newOrderSingle, sessionId!));
         var executionReport = await executionReports.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
-        Assert.Equal(order.ClOrdID.Value, executionReport.ClOrdID.Value);
+        Assert.Equal(newOrderSingle.ClOrdID.Value, executionReport.ClOrdID.Value);
         return executionReport;
     }
 
     // Manda a ordem e confere que nada volta dentro do prazo: nem ExecutionReport, nem BusinessMessageReject.
-    public async Task ExpectNoAnswerAsync(NewOrderSingle order, TimeSpan noAnswerWindow)
+    public async Task ExpectNoAnswerAsync(NewOrderSingle newOrderSingle, TimeSpan noAnswerWindow)
     {
-        Assert.True(Session.SendToTarget(order, sessionId!));
+        Assert.True(Session.SendToTarget(newOrderSingle, sessionId!));
         // Leitura cancelável: um ReadAsync pendurado depois do prazo engoliria o próximo relatório.
-        using var timeout = new CancellationTokenSource(noAnswerWindow);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executionReports.Reader.ReadAsync(timeout.Token).AsTask());
+        using var noAnswerTimeout = new CancellationTokenSource(noAnswerWindow);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executionReports.Reader.ReadAsync(noAnswerTimeout.Token).AsTask());
         Assert.False(businessRejects.Reader.TryRead(out _), "Veio um BusinessMessageReject onde não devia vir resposta nenhuma.");
     }
 
     // Manda uma mensagem que a aplicação do acceptor não aceita e devolve a recusa (35=j) que voltou.
-    public async Task<BusinessMessageReject> SendExpectingBusinessRejectAsync(NewOrderSingle order)
+    public async Task<BusinessMessageReject> SendExpectingBusinessRejectAsync(NewOrderSingle newOrderSingle)
     {
-        Assert.True(Session.SendToTarget(order, sessionId!));
+        Assert.True(Session.SendToTarget(newOrderSingle, sessionId!));
         return await businessRejects.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
     }
 
-    public void Dispose() => initiator.Dispose();
+    public void Dispose() => fixTestSocketInitiator.Dispose();
 
     public void OnLogon(SessionID sessionId)
     {
         this.sessionId = sessionId;
-        loggedOn.TrySetResult();
+        fixSessionLoggedOn.TrySetResult();
     }
 
     public void FromApp(Message message, SessionID sessionId)

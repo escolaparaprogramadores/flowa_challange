@@ -27,11 +27,11 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public async Task Accepted_order_gets_execution_report_new_with_every_contract_tag()
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
-        var acceptedOrder = TestInitiator.NewOrder("aceita-ca8", "PETR4", '1', 100, 10.50m);
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+        var acceptedOrder = FixTestInitiator.NewOrder("aceita-ca8", "PETR4", '1', 100, 10.50m);
 
-        var executionReport = await testInitiator.SendExpectingExecutionReportAsync(acceptedOrder);
+        var executionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(acceptedOrder);
 
         var storedAnswer = await ReadStoredAnswerAsync("aceita-ca8");
         Assert.Equal(
@@ -43,14 +43,14 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public async Task Order_over_the_limit_gets_execution_report_rejected_with_the_reason()
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         // 2 × 50.000 × 999,99 = 99.999.000; mais 2.000 × 1,00 passaria de 100.000.000.
-        await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewBuyOrder("VALE3", 50_000, 999.99m));
-        await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewBuyOrder("VALE3", 50_000, 999.99m));
-        var overLimitOrder = TestInitiator.NewOrder("estoura-ca9-compra", "VALE3", '1', 2_000, 1.00m);
+        await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewBuyOrder("VALE3", 50_000, 999.99m));
+        await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewBuyOrder("VALE3", 50_000, 999.99m));
+        var overLimitOrder = FixTestInitiator.NewOrder("estoura-ca9-compra", "VALE3", '1', 2_000, 1.00m);
 
-        var executionReport = await testInitiator.SendExpectingExecutionReportAsync(overLimitOrder);
+        var executionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(overLimitOrder);
 
         var storedAnswer = await ReadStoredAnswerAsync("estoura-ca9-compra");
         Assert.Equal(
@@ -60,7 +60,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Assert.Equal(99_999_000.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
     }
 
-    public static TheoryData<string, char, string, string, string> InvalidOrders => new()
+    public static TheoryData<string, char, string, string, string> InvalidOrdersSentByFix => new()
     {
         { "ABCD3", '1', "100", "10.00", "Símbolo inválido. Use PETR4, VALE3 ou VIIA4." },
         { "PETR4", '3', "100", "10.00", "Lado inválido. Use compra ou venda." },
@@ -74,51 +74,51 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     };
 
     [Theory]
-    [MemberData(nameof(InvalidOrders))]
+    [MemberData(nameof(InvalidOrdersSentByFix))]
     public async Task Invalid_order_sent_straight_by_fix_is_rejected_and_leaves_exposure_untouched(
-        string symbol, char side, string quantity, string price, string expectedText)
+        string symbol, char side, string quantity, string price, string expectedRejectionText)
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
-        var invalidOrder = TestInitiator.NewOrder("invalida-ca13", symbol, side,
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+        var invalidOrder = FixTestInitiator.NewOrder("invalida-ca13", symbol, side,
             decimal.Parse(quantity, CultureInfo.InvariantCulture), decimal.Parse(price, CultureInfo.InvariantCulture));
 
-        var executionReport = await testInitiator.SendExpectingExecutionReportAsync(invalidOrder);
+        var executionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(invalidOrder);
 
         var storedAnswer = await ReadStoredAnswerAsync("invalida-ca13");
         Assert.Equal(
-            $"35=8|37={storedAnswer.OrderId}|17={storedAnswer.ExecId}|150=8|39=8|11=invalida-ca13|55={symbol}|54={side}|151=0|14=0|6=0|58={expectedText}",
+            $"35=8|37={storedAnswer.OrderId}|17={storedAnswer.ExecId}|150=8|39=8|11=invalida-ca13|55={symbol}|54={side}|151=0|14=0|6=0|58={expectedRejectionText}",
             FormatContractTags(executionReport));
 
-        var exposuresResponse = await app.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
+        var exposuresResponse = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
         Assert.Equal([0m, 0m, 0m], exposuresResponse!.Exposures.Select(symbolExposure => symbolExposure.Exposure));
     }
 
     [Fact]
     public async Task Repeated_cl_ord_id_returns_the_original_report_and_counts_once()
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
-        var firstReport = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("repetida", "VIIA4", '1', 10, 5.00m));
-        var repeatedReport = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("repetida", "VIIA4", '1', 10, 5.00m));
+        var firstReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("repetida", "VIIA4", '1', 10, 5.00m));
+        var repeatedReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("repetida", "VIIA4", '1', 10, 5.00m));
 
         Assert.Equal(FormatContractTags(firstReport), FormatContractTags(repeatedReport));
         Assert.Equal(ExecType.NEW, repeatedReport.ExecType.Value);
         Assert.Equal(50.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("repetida"));
-        Assert.Single(app.Logs.Lines, logLine =>
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine =>
             logLine == "Information OrderAccumulator.Fix.OrderFixApplication: ClOrdID repetida repetido: devolvendo a resposta original.");
     }
 
     [Fact]
     public async Task Repeated_rejected_order_returns_the_same_rejection_text()
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
-        var firstReport = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("repetida-invalida", "PETR4", '1', 100, 1000m));
-        var repeatedReport = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("repetida-invalida", "PETR4", '1', 100, 1000m));
+        var firstReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("repetida-invalida", "PETR4", '1', 100, 1000m));
+        var repeatedReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("repetida-invalida", "PETR4", '1', 100, 1000m));
 
         Assert.Equal(FormatContractTags(firstReport), FormatContractTags(repeatedReport));
         Assert.Equal("O preço deve ser menor que 1.000,00.", repeatedReport.Text.Value);
@@ -130,20 +130,20 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     {
         ExecutionReport reportBeforeRestart;
         int fixPort;
-        await using (var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
-        using (var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort))
+        await using (var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        using (var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort))
         {
-            fixPort = app.FixPort;
-            reportBeforeRestart = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("antes-do-reinicio", "VALE3", '1', 100, 10.00m));
+            fixPort = orderAccumulatorTestApp.FixAcceptorPort;
+            reportBeforeRestart = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("antes-do-reinicio", "VALE3", '1', 100, 10.00m));
         }
 
         // Volta na MESMA porta: só sobe se a parada anterior fechou o acceptor.
-        await using var restartedApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, fixPort).StartWithFixAcceptor();
-        var exposuresResponse = await restartedApp.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
+        await using var restartedOrderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, fixPort).StartWithFixAcceptor();
+        var exposuresResponse = await restartedOrderAccumulatorTestApp.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
         Assert.Equal(1_000.00m, exposuresResponse!.Exposures.Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
 
-        using var initiatorAfterRestart = await TestInitiator.LogOnToAcceptorAsync(restartedApp.FixPort);
-        var resentReport = await initiatorAfterRestart.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("antes-do-reinicio", "VALE3", '1', 100, 10.00m));
+        using var initiatorAfterRestart = await FixTestInitiator.LogOnToAcceptorAsync(restartedOrderAccumulatorTestApp.FixAcceptorPort);
+        var resentReport = await initiatorAfterRestart.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("antes-do-reinicio", "VALE3", '1', 100, 10.00m));
 
         Assert.Equal(FormatContractTags(reportBeforeRestart), FormatContractTags(resentReport));
         Assert.Equal(1_000.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
@@ -159,9 +159,9 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Console.SetOut(TextWriter.Synchronized(capturedStdout));
         try
         {
-            await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-            using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
-            await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("log-ca19", "PETR4", '2', 5, 20.00m));
+            await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+            using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+            await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("log-ca19", "PETR4", '2', 5, 20.00m));
         }
         finally
         {
@@ -182,16 +182,16 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public async Task Database_failure_sends_no_report_logs_the_order_and_keeps_the_session_up()
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceServices: testServices =>
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: testServices =>
             testServices.AddSingleton<IOrderProcessor>(serviceProvider =>
-                new ProcessorFailingForClOrdId("falha-banco", new PostgresOrderProcessor(serviceProvider.GetRequiredService<NpgsqlDataSource>())))).StartWithFixAcceptor();
-        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
+                new OrderProcessorFailingForClOrdId("falha-banco", new PostgresOrderProcessor(serviceProvider.GetRequiredService<NpgsqlDataSource>())))).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
-        await testInitiator.ExpectNoAnswerAsync(TestInitiator.NewOrder("falha-banco", "PETR4", '1', 10, 1.00m), TimeSpan.FromSeconds(2));
-        var reportAfterFailure = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("depois-da-falha", "PETR4", '1', 10, 1.00m));
+        await fixTestInitiator.ExpectNoAnswerAsync(FixTestInitiator.NewOrder("falha-banco", "PETR4", '1', 10, 1.00m), TimeSpan.FromSeconds(2));
+        var reportAfterFailure = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("depois-da-falha", "PETR4", '1', 10, 1.00m));
 
         Assert.Equal(ExecType.NEW, reportAfterFailure.ExecType.Value);
-        Assert.Single(app.Logs.Lines, logLine =>
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine =>
             logLine == "Error OrderAccumulator.Fix.OrderFixApplication: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
         Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
@@ -199,7 +199,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Acceptor_session_is_fix44_with_ephemeral_store_reset_on_every_reconnect()
     {
-        var acceptorSettings = FixAcceptorService.LoadSessionSettings(BuildConfiguration(("Fix:AcceptorPort", "19876")));
+        var acceptorSettings = FixAcceptorService.LoadFixAcceptorSessionSettings(BuildConfiguration(("Fix:AcceptorPort", "19876")));
 
         var sessionId = Assert.Single(acceptorSettings.GetSessions());
         Assert.Equal(new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR"), sessionId);
@@ -219,7 +219,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Bind_host_from_configuration_limits_the_acceptor_to_that_address()
     {
-        var acceptorSettings = FixAcceptorService.LoadSessionSettings(
+        var acceptorSettings = FixAcceptorService.LoadFixAcceptorSessionSettings(
             BuildConfiguration(("Fix:AcceptorPort", "19876"), ("Fix:AcceptorBindHost", "127.0.0.1")));
 
         Assert.Equal("127.0.0.1", acceptorSettings.Get(acceptorSettings.GetSessions().Single()).GetString("SocketAcceptHost"));
@@ -228,25 +228,25 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public async Task Test_app_listens_for_fix_only_on_loopback()
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
 
         var fixListeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners()
-            .Where(tcpListenerEndpoint => tcpListenerEndpoint.Port == app.FixPort)
+            .Where(tcpListenerEndpoint => tcpListenerEndpoint.Port == orderAccumulatorTestApp.FixAcceptorPort)
             .ToList();
 
-        Assert.Equal([new IPEndPoint(IPAddress.Loopback, app.FixPort)], fixListeners);
+        Assert.Equal([new IPEndPoint(IPAddress.Loopback, orderAccumulatorTestApp.FixAcceptorPort)], fixListeners);
     }
 
     [Fact]
     public async Task Order_without_price_gets_business_reject_and_is_not_recorded()
     {
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
-        var orderWithoutPrice = TestInitiator.NewOrder("sem-preco", "PETR4", '1', 10, 1.00m);
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+        var orderWithoutPrice = FixTestInitiator.NewOrder("sem-preco", "PETR4", '1', 10, 1.00m);
         orderWithoutPrice.RemoveField(Tags.Price);
 
-        var businessReject = await testInitiator.SendExpectingBusinessRejectAsync(orderWithoutPrice);
-        var reportAfterReject = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("depois-sem-preco", "PETR4", '1', 10, 1.00m));
+        var businessReject = await fixTestInitiator.SendExpectingBusinessRejectAsync(orderWithoutPrice);
+        var reportAfterReject = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("depois-sem-preco", "PETR4", '1', 10, 1.00m));
 
         Assert.Equal("D", businessReject.RefMsgType.Value);
         // O QuickFIX/n 1.14.1 não preenche RefTagID (371); o motivo vai em 380 e 58.
@@ -261,13 +261,13 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     public async Task Report_that_cannot_be_sent_is_logged_and_the_order_stays_recorded()
     {
         // Sessão do acceptor criada, mas ninguém logado: o SendToTarget devolve false.
-        await using var app = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var orderFixApplication = app.Services.GetRequiredService<OrderFixApplication>();
+        await using var orderAccumulatorTestApp = new AccumulatorApp(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        var orderFixApplication = orderAccumulatorTestApp.Services.GetRequiredService<OrderFixApplication>();
         var acceptorSessionId = new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR");
 
-        orderFixApplication.OnMessage(TestInitiator.NewOrder("sem-sessao", "VIIA4", '1', 10, 2.00m), acceptorSessionId);
+        orderFixApplication.OnMessage(FixTestInitiator.NewOrder("sem-sessao", "VIIA4", '1', 10, 2.00m), acceptorSessionId);
 
-        Assert.Single(app.Logs.Lines, logLine =>
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, logLine =>
             logLine == "Warning OrderAccumulator.Fix.OrderFixApplication: ExecutionReport da ordem sem-sessao não foi enviado: a sessão FIX não está logada.");
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("sem-sessao"));
         Assert.Equal(20.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
@@ -286,7 +286,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Missing_acceptor_port_stops_the_startup_with_a_clear_message()
     {
-        var startupError = Assert.Throws<InvalidOperationException>(() => FixAcceptorService.LoadSessionSettings(BuildConfiguration()));
+        var startupError = Assert.Throws<InvalidOperationException>(() => FixAcceptorService.LoadFixAcceptorSessionSettings(BuildConfiguration()));
 
         Assert.Equal("Defina a porta do acceptor FIX em Fix__AcceptorPort.", startupError.Message);
     }
@@ -311,11 +311,11 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     }
 
     // Processador que simula o banco fora do ar para um ClOrdID e repassa o resto ao de verdade.
-    private sealed class ProcessorFailingForClOrdId(string clOrdId, IOrderProcessor realProcessor) : IOrderProcessor
+    private sealed class OrderProcessorFailingForClOrdId(string failingClOrdId, IOrderProcessor postgresOrderProcessor) : IOrderProcessor
     {
         public Task<OrderOutcome> ProcessIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default) =>
-            incomingOrder.ClOrdId == clOrdId
+            incomingOrder.ClOrdId == failingClOrdId
                 ? throw new NpgsqlException("banco fora do ar (simulado no teste)")
-                : realProcessor.ProcessIncomingOrderAsync(incomingOrder, cancellationToken);
+                : postgresOrderProcessor.ProcessIncomingOrderAsync(incomingOrder, cancellationToken);
     }
 }

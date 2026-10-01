@@ -33,7 +33,7 @@ orderAccumulatorApp.MapGet("/api/exposures", async (IExposureReader exposureRead
     var symbolExposures = await exposureReader.GetSymbolExposuresAsync(cancellationToken);
     return new ExposuresResponse(
         ExposureLimit.PerSymbol,
-        symbolExposures.Select(symbolExposure => new ExposureItem(
+        symbolExposures.Select(symbolExposure => new SymbolExposureResponse(
             symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)).ToList());
 });
 
@@ -48,8 +48,8 @@ static string? ReadBuildCommitSha()
 }
 
 // Corpo do GET /api/exposures (docs/contracts/contracts.md, seção 1). Remaining vira "remaining" no JSON.
-public sealed record ExposuresResponse(decimal Limit, IReadOnlyList<ExposureItem> Exposures);
+public sealed record ExposuresResponse(decimal Limit, IReadOnlyList<SymbolExposureResponse> Exposures);
 
-public sealed record ExposureItem(string Symbol, decimal Exposure, decimal Remaining);
+public sealed record SymbolExposureResponse(string Symbol, decimal Exposure, decimal Remaining);
 
 public partial class Program;
