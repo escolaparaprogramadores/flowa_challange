@@ -18,12 +18,12 @@ http://localhost:8080 (só nesta máquina). `Ctrl+C` para; `docker compose down 
 A senha do PostgreSQL vem de `POSTGRES_PASSWORD`; sem ela, o compose usa `flowa_dev`, valor só de
 desenvolvimento local (o banco não sai da rede do compose). Com a 8080 ocupada, use `FLOWA_HTTP_PORT=9080`.
 
-Para compilar e testar (precisa do .NET 10 SDK e do Docker de pé):
+Para compilar e testar (precisa do .NET 10 SDK; os testes também pedem o Docker de pé):
 
 ```bash
 dotnet build Flowa.sln
 dotnet test Flowa.sln --filter "Category!=Integration"
 ```
 
-O filtro deixa de fora os testes de integração, que sobem o compose inteiro em projetos separados e
+O filtro deixa de fora os testes de integração, que sobem o compose em projetos separados (18080, 18093) e
 conferem a ida e volta FIX entre os containers e a religação depois de recriar o OrderAccumulator.
