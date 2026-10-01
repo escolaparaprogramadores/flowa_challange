@@ -183,5 +183,22 @@ public sealed class PageTests : IDisposable
         Assert.Equal("Healthy", await response.Content.ReadAsStringAsync());
     }
 
+    [Fact]
+    public async Task Version_responde_o_commit_gravado_no_build()
+    {
+        await using var factory = TestHost.Generator(TestHost.FreePort(), webRoot: _webRoot);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/version");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var commit = (await OrderApiTests.ReadJson(response)).GetProperty("commit").GetString();
+        Assert.Matches("^[0-9a-f]{40}$", commit);
+        var informational = typeof(Program).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .Cast<System.Reflection.AssemblyInformationalVersionAttribute>().Single().InformationalVersion;
+        Assert.EndsWith("+" + commit, informational);
+    }
+
     public void Dispose() => Directory.Delete(_webRoot, recursive: true);
 }

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using Flowa.Shared;
 
@@ -21,9 +22,18 @@ public static class ApiEndpoints
         app.MapPost("/api/orders", PostOrder);
         app.MapGet("/api/exposures", GetExposures);
         app.MapGet("/health", () => Results.Text("Healthy"));
+        app.MapGet("/version", () => Results.Json(new { commit = BuildCommit() }));
 
         // Caminho de API que não existe responde 404; nunca cai no index.html da tela.
         app.Map("/api/{**rest}", () => Results.NotFound());
+    }
+
+    // O SDK grava o commit na versão informativa do assembly ("1.0.0+<sha>") quando compila dentro do git.
+    public static string? BuildCommit()
+    {
+        var version = typeof(ApiEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+        var plus = version?.IndexOf('+') ?? -1;
+        return plus < 0 ? null : version![(plus + 1)..];
     }
 
     public static IResult UnexpectedError() =>
