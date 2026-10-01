@@ -23,7 +23,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
     private TaskCompletionSource _acceptorLogon = NewFixLogonSignal();
     private int _executionReportNumber;
 
-    public FixTestAcceptor(int port) => AcceptorPort = port;
+    public FixTestAcceptor(int fixAcceptorPort) => AcceptorPort = fixAcceptorPort;
 
     public int AcceptorPort { get; }
 
@@ -118,45 +118,45 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
         return executionReport;
     }
 
-    public void FromApp(Message message, SessionID sessionID)
+    public void FromApp(Message receivedFixApplicationMessage, SessionID orderGeneratorFixSessionId)
     {
-        if (message.Header.GetString(Tags.MsgType) != MsgType.NEW_ORDER_D)
+        if (receivedFixApplicationMessage.Header.GetString(Tags.MsgType) != MsgType.NEW_ORDER_D)
             return;
 
-        ReceivedOrders.Enqueue(message);
-        var strayExecutionReport = StrayExecutionReport(message);
+        ReceivedOrders.Enqueue(receivedFixApplicationMessage);
+        var strayExecutionReport = StrayExecutionReport(receivedFixApplicationMessage);
         if (strayExecutionReport is not null)
-            SendExecutionReport(strayExecutionReport, sessionID);
+            SendExecutionReport(strayExecutionReport, orderGeneratorFixSessionId);
 
-        var executionReport = ExecutionReportResponder(message);
+        var executionReport = ExecutionReportResponder(receivedFixApplicationMessage);
         if (executionReport is null)
             return;
 
-        var executionReportDelay = ExecutionReportDelay(message);
+        var executionReportDelay = ExecutionReportDelay(receivedFixApplicationMessage);
         if (executionReportDelay == TimeSpan.Zero)
-            SendExecutionReport(executionReport, sessionID);
+            SendExecutionReport(executionReport, orderGeneratorFixSessionId);
         else
             // Fora da thread da sessão, para as outras ordens seguirem chegando enquanto esta espera.
-            _ = Task.Delay(executionReportDelay).ContinueWith(_ => SendExecutionReport(executionReport, sessionID), TaskScheduler.Default);
+            _ = Task.Delay(executionReportDelay).ContinueWith(_ => SendExecutionReport(executionReport, orderGeneratorFixSessionId), TaskScheduler.Default);
     }
 
-    private void SendExecutionReport(Message executionReport, SessionID sessionID)
+    private void SendExecutionReport(Message executionReport, SessionID orderGeneratorFixSessionId)
     {
         SentExecutionReports[executionReport.GetString(Tags.ClOrdID)] = executionReport;
-        Session.SendToTarget(executionReport, sessionID);
+        Session.SendToTarget(executionReport, orderGeneratorFixSessionId);
     }
 
-    public void OnLogon(SessionID sessionID) => _acceptorLogon.TrySetResult();
+    public void OnLogon(SessionID orderGeneratorFixSessionId) => _acceptorLogon.TrySetResult();
 
-    public void OnCreate(SessionID sessionID) { }
+    public void OnCreate(SessionID orderGeneratorFixSessionId) { }
 
-    public void OnLogout(SessionID sessionID) { }
+    public void OnLogout(SessionID orderGeneratorFixSessionId) { }
 
-    public void ToAdmin(Message message, SessionID sessionID) { }
+    public void ToAdmin(Message outgoingFixAdminMessage, SessionID orderGeneratorFixSessionId) { }
 
-    public void FromAdmin(Message message, SessionID sessionID) { }
+    public void FromAdmin(Message incomingFixAdminMessage, SessionID orderGeneratorFixSessionId) { }
 
-    public void ToApp(Message message, SessionID sessionID) { }
+    public void ToApp(Message outgoingFixApplicationMessage, SessionID orderGeneratorFixSessionId) { }
 
     public void Dispose() => StopFixTestAcceptor();
 

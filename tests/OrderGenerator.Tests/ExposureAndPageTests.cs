@@ -103,7 +103,7 @@ public sealed class ExposureProxyTests
     {
         public const string InternalErrorDetail = "detalhe-interno-que-nao-pode-vazar";
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage accumulatorExposuresRequest, CancellationToken accumulatorRequestCancellation) =>
             throw new InvalidOperationException(InternalErrorDetail);
     }
 

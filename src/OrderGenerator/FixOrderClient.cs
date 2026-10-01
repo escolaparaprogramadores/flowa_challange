@@ -114,35 +114,35 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         };
     }
 
-    public void FromApp(Message message, SessionID sessionID)
+    public void FromApp(Message incomingFixApplicationMessage, SessionID orderAccumulatorFixSessionId)
     {
-        if (message.Header.GetString(Tags.MsgType) != MsgType.EXECUTION_REPORT || !message.IsSetField(Tags.ClOrdID))
+        if (incomingFixApplicationMessage.Header.GetString(Tags.MsgType) != MsgType.EXECUTION_REPORT || !incomingFixApplicationMessage.IsSetField(Tags.ClOrdID))
             return;
 
         // Resposta que chega depois dos 5 s não acha mais quem esperava e é descartada.
-        if (_ordersAwaitingExecutionReport.TryGetValue(message.GetString(Tags.ClOrdID), out var executionReportWaiter))
-            executionReportWaiter.TrySetResult(message);
+        if (_ordersAwaitingExecutionReport.TryGetValue(incomingFixApplicationMessage.GetString(Tags.ClOrdID), out var executionReportWaiter))
+            executionReportWaiter.TrySetResult(incomingFixApplicationMessage);
     }
 
-    public void OnCreate(SessionID sessionID) => _initiatorSessionId = sessionID;
+    public void OnCreate(SessionID orderAccumulatorFixSessionId) => _initiatorSessionId = orderAccumulatorFixSessionId;
 
-    public void OnLogon(SessionID sessionID) { }
+    public void OnLogon(SessionID orderAccumulatorFixSessionId) { }
 
-    public void OnLogout(SessionID sessionID) { }
+    public void OnLogout(SessionID orderAccumulatorFixSessionId) { }
 
-    public void ToAdmin(Message message, SessionID sessionID) { }
+    public void ToAdmin(Message outgoingFixAdminMessage, SessionID orderAccumulatorFixSessionId) { }
 
-    public void FromAdmin(Message message, SessionID sessionID) { }
+    public void FromAdmin(Message incomingFixAdminMessage, SessionID orderAccumulatorFixSessionId) { }
 
-    public void ToApp(Message message, SessionID sessionID) { }
+    public void ToApp(Message outgoingFixApplicationMessage, SessionID orderAccumulatorFixSessionId) { }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken hostStartCancellation)
     {
         _fixSocketInitiator.Start();
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public Task StopAsync(CancellationToken hostStopCancellation)
     {
         _fixSocketInitiator.Stop();
         return Task.CompletedTask;

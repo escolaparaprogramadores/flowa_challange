@@ -335,8 +335,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     private Task<HttpResponseMessage> PostOrderJson(string orderJson) =>
         _loggedOnOrderGenerator.OrderGeneratorClient.PostAsync("/api/orders", new StringContent(orderJson, Encoding.UTF8, "application/json"));
 
-    internal static async Task<JsonElement> ReadOrderGeneratorResponseJson(HttpResponseMessage httpResponse) =>
-        JsonDocument.Parse(await httpResponse.Content.ReadAsStringAsync()).RootElement;
+    internal static async Task<JsonElement> ReadOrderGeneratorResponseJson(HttpResponseMessage orderGeneratorHttpResponse) =>
+        JsonDocument.Parse(await orderGeneratorHttpResponse.Content.ReadAsStringAsync()).RootElement;
 }
 
 // CA-19: sem a outra ponta, ou com ela muda, a API responde em português dentro do prazo e não segura nada.
