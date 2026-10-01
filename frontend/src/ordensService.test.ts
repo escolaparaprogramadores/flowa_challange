@@ -44,11 +44,19 @@ describe('enviarOrdem', () => {
     });
   });
 
-  it('RF-23: corpo que não é JSON vira falha de comunicação com a mensagem padrão', async () => {
+  it('RF-23: 502 de proxy com corpo HTML vira "erro inesperado", não "não respondeu"', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Bad Gateway</html>', { status: 502 })));
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
-      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
+      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
+    });
+  });
+
+  it('RF-23: 500 do contrato vira "erro inesperado", porque o servidor respondeu', async () => {
+    responderComJson(500, { status: 'error', message: 'Erro inesperado ao processar a ordem.' });
+    expect(await enviarOrdem(ordemDeCompra)).toEqual({
+      situacao: 'falha-de-comunicacao',
+      mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
     });
   });
 

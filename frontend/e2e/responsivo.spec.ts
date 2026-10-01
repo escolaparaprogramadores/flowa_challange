@@ -14,6 +14,19 @@ const LARGURAS_DO_CA_23 = [390, 860, 1280];
 const COR_DO_ACENTO = 'rgb(79, 227, 176)';
 const COR_DO_TEXTO_APAGADO = 'rgb(157, 176, 174)';
 
+// Razão de contraste da WCAG 2 entre duas cores "rgb(r, g, b)" (luminância relativa).
+function calcularContrasteWcag(corDoTexto: string, corDoFundo: string) {
+  const luminanciaDaCor = (corRgb: string) => {
+    const [vermelho, verde, azul] = (corRgb.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number).map((canalDe0a255) => {
+      const canalDe0a1 = canalDe0a255 / 255;
+      return canalDe0a1 <= 0.03928 ? canalDe0a1 / 12.92 : ((canalDe0a1 + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * vermelho + 0.7152 * verde + 0.0722 * azul;
+  };
+  const [luminanciaMaior, luminanciaMenor] = [luminanciaDaCor(corDoTexto), luminanciaDaCor(corDoFundo)].sort((luminanciaDaPrimeira, luminanciaDaSegunda) => luminanciaDaSegunda - luminanciaDaPrimeira);
+  return (luminanciaMaior + 0.05) / (luminanciaMenor + 0.05);
+}
+
 async function contarColunasDaGrade(page: Page) {
   return page.locator('.grade').evaluate((grade) => getComputedStyle(grade).gridTemplateColumns.split(' ').length);
 }
@@ -85,11 +98,12 @@ test('RNF-05: o foco pelo teclado é visível em cada controle da boleta, na cor
     await expect
       .poll(
         () =>
-          controle.evaluate((elemento) => {
-            const estilo = getComputedStyle(elemento);
-            const moldura = elemento.closest('.quantidade');
-            const contorno = estilo.outlineStyle === 'solid' ? estilo.outlineColor : '';
-            return [contorno, (moldura ? getComputedStyle(moldura) : estilo).borderTopColor];
+          controle.evaluate((controleNaPagina) => {
+            const estiloDoControle = getComputedStyle(controleNaPagina);
+            const molduraDaQuantidade = controleNaPagina.closest('.quantidade');
+            const corDoContornoDeFoco = estiloDoControle.outlineStyle === 'solid' ? estiloDoControle.outlineColor : '';
+            const corDaBordaDeFoco = (molduraDaQuantidade ? getComputedStyle(molduraDaQuantidade) : estiloDoControle).borderTopColor;
+            return [corDoContornoDeFoco, corDaBordaDeFoco];
           }),
         { message: nomeDoControle },
       )
@@ -99,8 +113,13 @@ test('RNF-05: o foco pelo teclado é visível em cada controle da boleta, na cor
 
 test('RNF-04: o texto de exemplo do preço usa a cor apagada do tema, com contraste de pelo menos 4,5:1', async ({ page }) => {
   await page.goto('/');
-  const corDoExemplo = await page.getByLabel('Preço por ação (R$)').evaluate((campo) => getComputedStyle(campo, '::placeholder').color);
-  expect(corDoExemplo).toBe(COR_DO_TEXTO_APAGADO);
+  const campoDoPreco = page.getByLabel('Preço por ação (R$)');
+  const coresDoExemplo = await campoDoPreco.evaluate((campoNaPagina) => ({
+    corDoTexto: getComputedStyle(campoNaPagina, '::placeholder').color,
+    corDoFundo: getComputedStyle(campoNaPagina).backgroundColor,
+  }));
+  expect(coresDoExemplo.corDoTexto).toBe(COR_DO_TEXTO_APAGADO);
+  expect(calcularContrasteWcag(coresDoExemplo.corDoTexto, coresDoExemplo.corDoFundo)).toBeGreaterThanOrEqual(4.5);
 });
 
 test('RNF-01: a página declara o esquema escuro, para seleção, rolagem e controles nativos seguirem o tema', async ({ page }) => {
@@ -118,7 +137,7 @@ for (const largura of [390, 1024, 1179, 1280]) {
         await expect(rotuloDoSimbolo).toHaveCount(1);
         // Uma linha mede menos que duas vezes o tamanho da letra; quebrado em duas, passa disso.
         const cabeEmUmaLinha = await rotuloDoSimbolo.evaluate(
-          (elemento) => elemento.getBoundingClientRect().height < parseFloat(getComputedStyle(elemento).fontSize) * 2,
+          (rotuloNaPagina) => rotuloNaPagina.getBoundingClientRect().height < parseFloat(getComputedStyle(rotuloNaPagina).fontSize) * 2,
         );
         expect(cabeEmUmaLinha, `${simbolo} / ${rotulo}`).toBe(true);
       }

@@ -103,19 +103,19 @@ test('CA-3/CA-4: limites válidos (1 e 99.999; 0,01 e 999,99) viram valor aceito
   }
 });
 
-const passosDaQuantidade: Array<{ partida: string; botao: string; esperado: string }> = [
-  { partida: '100', botao: 'Aumentar quantidade', esperado: '101' },
-  { partida: '100', botao: 'Diminuir quantidade', esperado: '99' },
-  { partida: '1', botao: 'Diminuir quantidade', esperado: '1' },
-  { partida: '99.999', botao: 'Aumentar quantidade', esperado: '99999' },
-  { partida: '100.000', botao: 'Diminuir quantidade', esperado: '99999' },
-  { partida: 'abc', botao: 'Aumentar quantidade', esperado: '1' },
+const passosDaQuantidade: Array<{ quantidadeDigitadaAntes: string; nomeDoBotao: string; quantidadeEsperada: string }> = [
+  { quantidadeDigitadaAntes: '100', nomeDoBotao: 'Aumentar quantidade', quantidadeEsperada: '101' },
+  { quantidadeDigitadaAntes: '100', nomeDoBotao: 'Diminuir quantidade', quantidadeEsperada: '99' },
+  { quantidadeDigitadaAntes: '1', nomeDoBotao: 'Diminuir quantidade', quantidadeEsperada: '1' },
+  { quantidadeDigitadaAntes: '99.999', nomeDoBotao: 'Aumentar quantidade', quantidadeEsperada: '99999' },
+  { quantidadeDigitadaAntes: '100.000', nomeDoBotao: 'Diminuir quantidade', quantidadeEsperada: '99999' },
+  { quantidadeDigitadaAntes: 'abc', nomeDoBotao: 'Aumentar quantidade', quantidadeEsperada: '1' },
 ];
 
-for (const { partida, botao, esperado } of passosDaQuantidade) {
-  test(`RF-16: com "${partida}" digitado, "${botao}" leva a ${esperado}, sem sair da faixa`, async ({ page }) => {
-    await page.getByLabel(/^Quantidade de/).fill(partida);
-    await page.getByRole('button', { name: botao }).click();
-    await expect(page.getByLabel(/^Quantidade de/)).toHaveValue(esperado);
+for (const { quantidadeDigitadaAntes, nomeDoBotao, quantidadeEsperada } of passosDaQuantidade) {
+  test(`RF-16: com "${quantidadeDigitadaAntes}" digitado, "${nomeDoBotao}" leva a ${quantidadeEsperada}, sem sair da faixa`, async ({ page }) => {
+    await page.getByLabel(/^Quantidade de/).fill(quantidadeDigitadaAntes);
+    await page.getByRole('button', { name: nomeDoBotao }).click();
+    await expect(page.getByLabel(/^Quantidade de/)).toHaveValue(quantidadeEsperada);
   });
 }

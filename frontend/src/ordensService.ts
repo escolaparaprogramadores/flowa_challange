@@ -10,6 +10,7 @@ export const PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS = 6_000;
 
 // Sem resposta confirmada, a tela não sabe se a ordem chegou: diz só o que é certo, sem nome de serviço interno.
 export const MENSAGEM_DE_ORDEM_NAO_CONFIRMADA = 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.';
+export const MENSAGEM_DE_ERRO_INESPERADO_NO_SERVIDOR = 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.';
 export const MENSAGEM_DE_EXPOSICAO_INDISPONIVEL = 'Não foi possível ler a exposição agora. Tente de novo em instantes.';
 
 export type OrdemParaEnviar = {
@@ -93,7 +94,12 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
       errosDeCampo: (corpoDaResposta.errors ?? []).map((erroDeCampo) => erroDeCampo.message),
     };
   }
-  return { situacao: 'falha-de-comunicacao', mensagemDoServidor: MENSAGEM_DE_ORDEM_NAO_CONFIRMADA };
+  // 503 (sem sessão FIX ou sem resposta em 5 s) e corpo que não chegou são falta de resposta; outro 5xx é erro do servidor.
+  const servidorFalhouAoResponder = respostaHttp.status >= 500 && respostaHttp.status !== 503;
+  return {
+    situacao: 'falha-de-comunicacao',
+    mensagemDoServidor: servidorFalhouAoResponder ? MENSAGEM_DE_ERRO_INESPERADO_NO_SERVIDOR : MENSAGEM_DE_ORDEM_NAO_CONFIRMADA,
+  };
 }
 
 export async function lerExposicoes(): Promise<ExposicaoDoSimbolo[]> {
