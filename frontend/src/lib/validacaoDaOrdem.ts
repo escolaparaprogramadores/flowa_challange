@@ -43,10 +43,10 @@ export function validarQuantidade(quantidadeDigitada: string): ValidacaoDaQuanti
     return { mensagemDeErro: 'A quantidade deve ser um número inteiro.' };
   }
   if (leituraDaQuantidade.casasDecimais !== '') return { mensagemDeErro: 'A quantidade deve ser um número inteiro.' };
-  const quantidade = Number(leituraDaQuantidade.parteInteira) * (leituraDaQuantidade.negativo ? -1 : 1);
-  if (quantidade <= 0) return { mensagemDeErro: 'A quantidade deve ser maior que zero.' };
-  if (quantidade >= QUANTIDADE_MAXIMA_EXCLUSIVA) return { mensagemDeErro: 'A quantidade deve ser menor que 100.000.' };
-  return { quantidadeAceita: quantidade };
+  const quantidadeDaOrdemValidada = Number(leituraDaQuantidade.parteInteira) * (leituraDaQuantidade.negativo ? -1 : 1);
+  if (quantidadeDaOrdemValidada <= 0) return { mensagemDeErro: 'A quantidade deve ser maior que zero.' };
+  if (quantidadeDaOrdemValidada >= QUANTIDADE_MAXIMA_EXCLUSIVA) return { mensagemDeErro: 'A quantidade deve ser menor que 100.000.' };
+  return { quantidadeAceita: quantidadeDaOrdemValidada };
 }
 
 export type ValidacaoDoPreco =
@@ -78,6 +78,6 @@ export function formatarReais(valorEmReais: number): string {
   return formatadorDeReais.format(valorEmReais);
 }
 
-export function formatarQuantidade(quantidade: number): string {
-  return formatadorDeQuantidade.format(quantidade);
+export function formatarQuantidade(quantidadeDeAcoes: number): string {
+  return formatadorDeQuantidade.format(quantidadeDeAcoes);
 }

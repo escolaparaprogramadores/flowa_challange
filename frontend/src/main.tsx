@@ -8,10 +8,10 @@ import '@fontsource/manrope/latin-600.css';
 import '@fontsource/manrope/latin-700.css';
 import '@fontsource/manrope/latin-800.css';
 import './tema-base.css';
-import { App } from './App';
+import { PaginaDaBoletaEExposicao } from './App';
 
 createRoot(document.getElementById('raiz')!).render(
   <StrictMode>
-    <App />
+    <PaginaDaBoletaEExposicao />
   </StrictMode>,
 );

@@ -34,9 +34,9 @@ export function Boleta({ enviando, aoEnviarOrdem }: PropsDaBoleta) {
       ? (quantidadeAceita * precoAceitoEmCentavos) / 100
       : undefined;
 
-  function ajustarQuantidadeEm(passo: number) {
+  function ajustarQuantidadeEm(passoDaQuantidadeDaOrdem: number) {
     const quantidadeAtual = lerQuantidadeInteiraDigitada(quantidadeDigitada) ?? 0;
-    const proximaQuantidade = Math.min(Math.max(quantidadeAtual + passo, 1), QUANTIDADE_MAXIMA_EXCLUSIVA - 1);
+    const proximaQuantidade = Math.min(Math.max(quantidadeAtual + passoDaQuantidadeDaOrdem, 1), QUANTIDADE_MAXIMA_EXCLUSIVA - 1);
     setQuantidadeDigitada(String(proximaQuantidade));
     setErrosDaBoleta((errosAnteriores) => ({ ...errosAnteriores, erroDaQuantidade: undefined }));
   }

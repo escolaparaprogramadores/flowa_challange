@@ -29,25 +29,25 @@ function motivoDoValorCruNoCss(propriedade, valorDaDeclaracao) {
 }
 
 function acharValoresCrus(nomeDoArquivo, conteudoDoArquivo) {
-  const achados = [];
+  const achadosDeValoresCrusDaTela = [];
   if (/\.tsx?$/.test(nomeDoArquivo)) {
     conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indice) => {
-      if (JSX_COM_VALOR_CRU.test(linhaDoArquivo)) achados.push(`${nomeDoArquivo}:${indice + 1}: estilo com cor, fonte, raio, espaço ou letra no componente`);
-      if (/#[0-9a-f]{3,8}\b|\brgba?\(/i.test(linhaDoArquivo)) achados.push(`${nomeDoArquivo}:${indice + 1}: cor escrita direto no componente`);
+      if (JSX_COM_VALOR_CRU.test(linhaDoArquivo)) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indice + 1}: estilo com cor, fonte, raio, espaço ou letra no componente`);
+      if (/#[0-9a-f]{3,8}\b|\brgba?\(/i.test(linhaDoArquivo)) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indice + 1}: cor escrita direto no componente`);
     });
-    return achados;
+    return achadosDeValoresCrusDaTela;
   }
   let dentroDoRoot = false;
   conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indice) => {
     if (/^:root\s*\{/.test(linhaDoArquivo)) dentroDoRoot = true;
     for (const [, propriedade, valorDaDeclaracao] of linhaDoArquivo.matchAll(/([a-z-]+)\s*:\s*([^;{}]+)/gi)) {
       if (dentroDoRoot && propriedade.startsWith('--')) continue;
-      const motivo = motivoDoValorCruNoCss(propriedade.toLowerCase(), valorDaDeclaracao);
-      if (motivo) achados.push(`${nomeDoArquivo}:${indice + 1}: ${motivo}: ${linhaDoArquivo.trim()}`);
+      const motivoDoValorCruNaDeclaracaoCss = motivoDoValorCruNoCss(propriedade.toLowerCase(), valorDaDeclaracao);
+      if (motivoDoValorCruNaDeclaracaoCss) achadosDeValoresCrusDaTela.push(`${nomeDoArquivo}:${indice + 1}: ${motivoDoValorCruNaDeclaracaoCss}: ${linhaDoArquivo.trim()}`);
     }
     if (dentroDoRoot && /^\}/.test(linhaDoArquivo)) dentroDoRoot = false;
   });
-  return achados;
+  return achadosDeValoresCrusDaTela;
 }
 
 const AMOSTRAS_QUE_DEVEM_SER_RECUSADAS = [

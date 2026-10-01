@@ -14,7 +14,7 @@ type EstadoDasExposicoes =
   | { situacao: 'erro'; mensagemDeErro: string }
   | { situacao: 'pronto'; exposicoesPorSimbolo: ExposicaoDoSimbolo[] };
 
-export function App() {
+export function PaginaDaBoletaEExposicao() {
   const [estadoDasExposicoes, setEstadoDasExposicoes] = useState<EstadoDasExposicoes>({ situacao: 'carregando' });
   const [enviando, setEnviando] = useState(false);
   const [respostaDaUltimaOrdem, setRespostaDaUltimaOrdem] = useState<RespostaDaOrdem>();
