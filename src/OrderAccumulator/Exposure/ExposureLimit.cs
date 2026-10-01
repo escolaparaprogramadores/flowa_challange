@@ -10,7 +10,7 @@ public static class ExposureLimit
     public const decimal PerSymbol = 100_000_000m;
 
     // Formato brasileiro fixo, sem depender da cultura instalada no container.
-    private static readonly NumberFormatInfo BrazilianNumber = new()
+    private static readonly NumberFormatInfo BrazilianMoneyFormat = new()
     {
         NumberGroupSeparator = ".",
         NumberDecimalSeparator = ",",
@@ -22,9 +22,9 @@ public static class ExposureLimit
         orderSide == OrderSide.Buy ? orderPrice * orderQuantity : -(orderPrice * orderQuantity);
 
     // Quanto ainda cabe antes de estourar, para qualquer lado.
-    public static decimal Remaining(decimal exposure) => PerSymbol - Math.Abs(exposure);
+    public static decimal RemainingExposureCapacity(decimal symbolExposure) => PerSymbol - Math.Abs(symbolExposure);
 
     // Texto da tag 58 combinado no contrato.
-    public static string RejectionText(string orderSymbol) =>
-        $"Ordem rejeitada: a exposição de {orderSymbol} passaria do limite de {PerSymbol.ToString("N", BrazilianNumber)}.";
+    public static string ExposureLimitRejectionText(string orderSymbol) =>
+        $"Ordem rejeitada: a exposição de {orderSymbol} passaria do limite de {PerSymbol.ToString("N", BrazilianMoneyFormat)}.";
 }

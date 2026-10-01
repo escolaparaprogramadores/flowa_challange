@@ -19,7 +19,7 @@ public sealed record OrderOutcome(
 
 public sealed record SymbolExposure(string Symbol, decimal Exposure)
 {
-    public decimal Remaining => ExposureLimit.Remaining(Exposure);
+    public decimal RemainingExposureCapacity => ExposureLimit.RemainingExposureCapacity(Exposure);
 }
 
 public interface IOrderProcessor

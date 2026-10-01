@@ -8,15 +8,15 @@ using Testcontainers.PostgreSql;
 namespace OrderAccumulator.Tests;
 
 // Um PostgreSQL de verdade, em container, compartilhado pelos testes de banco.
-public sealed class PostgresFixture : IAsyncLifetime
+public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
 {
     // max_connections acima do padrão (100) para o teste de concorrência abrir 200 conexões de uma vez.
     private readonly PostgreSqlContainer postgresContainer = new PostgreSqlBuilder("postgres:17")
         .WithCommand("-c", "max_connections=300")
         .Build();
 
-    public string ConnectionString { get; private set; } = null!;
-    public NpgsqlDataSource DataSource { get; private set; } = null!;
+    public string OrderDatabaseConnectionString { get; private set; } = null!;
+    public NpgsqlDataSource OrderDatabaseDataSource { get; private set; } = null!;
     public IOrderProcessor OrderProcessor { get; private set; } = null!;
     public IExposureReader ExposureReader { get; private set; } = null!;
 
@@ -24,30 +24,30 @@ public sealed class PostgresFixture : IAsyncLifetime
     {
         await postgresContainer.StartAsync();
 
-        ConnectionString = new NpgsqlConnectionStringBuilder(postgresContainer.GetConnectionString())
+        OrderDatabaseConnectionString = new NpgsqlConnectionStringBuilder(postgresContainer.GetConnectionString())
         {
             MaxPoolSize = 250
         }.ConnectionString;
-        DataSource = NpgsqlDataSource.Create(ConnectionString);
-        await DataSource.ApplySchemaAsync();
+        OrderDatabaseDataSource = NpgsqlDataSource.Create(OrderDatabaseConnectionString);
+        await OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();
 
-        OrderProcessor = new PostgresOrderProcessor(DataSource);
-        ExposureReader = new PostgresExposureReader(DataSource);
+        OrderProcessor = new PostgresOrderProcessor(OrderDatabaseDataSource);
+        ExposureReader = new PostgresExposureReader(OrderDatabaseDataSource);
     }
 
     public async Task DisposeAsync()
     {
-        await DataSource.DisposeAsync();
+        await OrderDatabaseDataSource.DisposeAsync();
         await postgresContainer.DisposeAsync();
     }
 
     // Cada teste começa do zero: nenhuma ordem e os três símbolos zerados pela própria migração.
     public async Task ResetOrdersAndExposuresAsync()
     {
-        await using (var connection = await DataSource.OpenConnectionAsync())
-            await connection.ExecuteAsync("TRUNCATE orders, exposures");
+        await using (var orderDatabaseConnection = await OrderDatabaseDataSource.OpenConnectionAsync())
+            await orderDatabaseConnection.ExecuteAsync("TRUNCATE orders, exposures");
 
-        await DataSource.ApplySchemaAsync();
+        await OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();
     }
 
     public async Task<decimal> ReadExposureOfSymbolAsync(string symbol) =>
@@ -55,8 +55,8 @@ public sealed class PostgresFixture : IAsyncLifetime
 
     public async Task<long> CountStoredOrdersAsync(string? clOrdId = null)
     {
-        await using var connection = await DataSource.OpenConnectionAsync();
-        return await connection.ExecuteScalarAsync<long>(
+        await using var orderDatabaseConnection = await OrderDatabaseDataSource.OpenConnectionAsync();
+        return await orderDatabaseConnection.ExecuteScalarAsync<long>(
             "SELECT count(*) FROM orders WHERE @ClOrdId::text IS NULL OR cl_ord_id = @ClOrdId",
             new { ClOrdId = clOrdId });
     }
@@ -64,8 +64,8 @@ public sealed class PostgresFixture : IAsyncLifetime
     // Soma, direto da tabela de ordens, preço × quantidade das aceitas (compra soma, venda subtrai).
     public async Task<decimal> SumAcceptedOrdersExposureAsync(string symbol)
     {
-        await using var connection = await DataSource.OpenConnectionAsync();
-        return await connection.ExecuteScalarAsync<decimal>(
+        await using var orderDatabaseConnection = await OrderDatabaseDataSource.OpenConnectionAsync();
+        return await orderDatabaseConnection.ExecuteScalarAsync<decimal>(
             """
             SELECT coalesce(sum(CASE WHEN side = @Buy THEN price * quantity ELSE -(price * quantity) END), 0)
             FROM orders
@@ -76,9 +76,9 @@ public sealed class PostgresFixture : IAsyncLifetime
 }
 
 [CollectionDefinition(Name)]
-public sealed class PostgresCollection : ICollectionFixture<PostgresFixture>
+public sealed class OrderAccumulatorPostgresCollection : ICollectionFixture<OrderAccumulatorPostgresFixture>
 {
-    public const string Name = "postgres";
+    public const string Name = "orderAccumulatorDatabase";
 }
 
 public static class TestOrders

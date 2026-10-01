@@ -22,7 +22,7 @@ public sealed class ExposureLimitTests
     [InlineData(-1_000)]
     public void Remaining_is_the_limit_minus_the_absolute_exposure(int symbolExposure)
     {
-        Assert.Equal(ExposureLimit.PerSymbol - 1_000m, ExposureLimit.Remaining(symbolExposure));
+        Assert.Equal(ExposureLimit.PerSymbol - 1_000m, ExposureLimit.RemainingExposureCapacity(symbolExposure));
     }
 
     [Fact]
@@ -31,6 +31,6 @@ public sealed class ExposureLimitTests
         // Texto da tag 58 em docs/contracts/contracts.md, seção 2.
         Assert.Equal(
             "Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.",
-            ExposureLimit.RejectionText("VALE3"));
+            ExposureLimit.ExposureLimitRejectionText("VALE3"));
     }
 }

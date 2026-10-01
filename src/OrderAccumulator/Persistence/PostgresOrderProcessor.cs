@@ -5,7 +5,7 @@ using OrderAccumulator.Exposure;
 
 namespace OrderAccumulator.Persistence;
 
-public sealed class PostgresOrderProcessor(NpgsqlDataSource dataSource) : IOrderProcessor
+public sealed class PostgresOrderProcessor(NpgsqlDataSource orderDatabaseDataSource) : IOrderProcessor
 {
     // O limite é garantido aqui, no banco, e não em memória: o UPDATE só move a exposição se o
     // novo valor couber. Duas ordens no mesmo símbolo ao mesmo tempo disputam o lock da linha, e a
@@ -37,44 +37,44 @@ public sealed class PostgresOrderProcessor(NpgsqlDataSource dataSource) : IOrder
         // Sem ClOrdID não há como reconhecer a repetição: ordens diferentes colidiriam na mesma chave.
         ArgumentException.ThrowIfNullOrWhiteSpace(incomingOrder.ClOrdId);
 
-        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var orderDatabaseConnection = await orderDatabaseDataSource.OpenConnectionAsync(cancellationToken);
 
         // Repetição já gravada volta direto, sem disputar o lock da linha do símbolo com ordens novas.
-        var storedOutcome = await TryReadStoredOrderOutcomeAsync(connection, incomingOrder.ClOrdId, cancellationToken);
+        var storedOutcome = await TryReadStoredOrderOutcomeAsync(orderDatabaseConnection, incomingOrder.ClOrdId, cancellationToken);
         if (storedOutcome is not null)
             return storedOutcome;
 
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var orderDatabaseTransaction = await orderDatabaseConnection.BeginTransactionAsync(cancellationToken);
 
         var orderValidation = OrderValidator.ValidateOrderFromFix(
             incomingOrder.Symbol, incomingOrder.Side, incomingOrder.Quantity, incomingOrder.Price);
-        var (accepted, rejectReason) = orderValidation.IsOrderValid
-            ? await TryMoveExposureAsync(connection, transaction, orderValidation.ValidatedOrder!, cancellationToken)
+        var (orderAccepted, orderRejectReason) = orderValidation.IsOrderValid
+            ? await TryMoveExposureAsync(orderDatabaseConnection, orderDatabaseTransaction, orderValidation.ValidatedOrder!, cancellationToken)
             : (false, string.Join(' ', orderValidation.OrderFieldErrors.Select(fieldError => fieldError.OrderFieldErrorMessage)));
 
         var orderOutcome = new OrderOutcome(
             incomingOrder.ClOrdId, NewOrderOrExecId(), NewOrderOrExecId(),
             incomingOrder.Symbol, incomingOrder.Side, incomingOrder.Quantity, incomingOrder.Price,
-            accepted, rejectReason, IsRepeat: false);
+            orderAccepted, orderRejectReason, IsRepeat: false);
 
-        var insertedOrders = await connection.ExecuteAsync(new CommandDefinition(
-            InsertOrderSql, ToOrderInsertParameters(orderOutcome), transaction, cancellationToken: cancellationToken));
+        var insertedOrders = await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
+            InsertOrderSql, ToOrderInsertParameters(orderOutcome), orderDatabaseTransaction, cancellationToken: cancellationToken));
 
         if (insertedOrders == 1)
         {
-            await transaction.CommitAsync(cancellationToken);
+            await orderDatabaseTransaction.CommitAsync(cancellationToken);
             return orderOutcome;
         }
 
         // A mesma ordem chegou em paralelo e a outra gravou primeiro: o rollback desfaz o que esta
         // tentativa mexeu na exposição.
-        await transaction.RollbackAsync(cancellationToken);
-        return await TryReadStoredOrderOutcomeAsync(connection, incomingOrder.ClOrdId, cancellationToken)
+        await orderDatabaseTransaction.RollbackAsync(cancellationToken);
+        return await TryReadStoredOrderOutcomeAsync(orderDatabaseConnection, incomingOrder.ClOrdId, cancellationToken)
             ?? throw new InvalidOperationException($"A ordem {incomingOrder.ClOrdId} colidiu na chave, mas não foi encontrada.");
     }
 
     private static async Task<(bool Accepted, string? RejectReason)> TryMoveExposureAsync(
-        NpgsqlConnection connection, NpgsqlTransaction transaction, ValidOrder validOrder, CancellationToken cancellationToken)
+        NpgsqlConnection orderDatabaseConnection, NpgsqlTransaction orderDatabaseTransaction, ValidOrder validOrder, CancellationToken cancellationToken)
     {
         var exposureMoveParameters = new
         {
@@ -83,24 +83,24 @@ public sealed class PostgresOrderProcessor(NpgsqlDataSource dataSource) : IOrder
             Limit = ExposureLimit.PerSymbol
         };
 
-        var movedExposureRows = await connection.ExecuteAsync(new CommandDefinition(
-            MoveExposureSql, exposureMoveParameters, transaction, cancellationToken: cancellationToken));
+        var movedExposureRows = await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
+            MoveExposureSql, exposureMoveParameters, orderDatabaseTransaction, cancellationToken: cancellationToken));
         if (movedExposureRows == 1)
             return (true, null);
 
-        var exposureRowsOfSymbol = await connection.ExecuteScalarAsync<long>(new CommandDefinition(
-            SymbolExistsSql, exposureMoveParameters, transaction, cancellationToken: cancellationToken));
+        var exposureRowsOfSymbol = await orderDatabaseConnection.ExecuteScalarAsync<long>(new CommandDefinition(
+            SymbolExistsSql, exposureMoveParameters, orderDatabaseTransaction, cancellationToken: cancellationToken));
         if (exposureRowsOfSymbol == 0)
             throw new InvalidOperationException(
                 $"O símbolo {validOrder.OrderSymbol} não tem linha de exposição. A migração do banco não foi aplicada.");
 
-        return (false, ExposureLimit.RejectionText(validOrder.OrderSymbol));
+        return (false, ExposureLimit.ExposureLimitRejectionText(validOrder.OrderSymbol));
     }
 
     private static async Task<OrderOutcome?> TryReadStoredOrderOutcomeAsync(
-        NpgsqlConnection connection, string clOrdId, CancellationToken cancellationToken)
+        NpgsqlConnection orderDatabaseConnection, string clOrdId, CancellationToken cancellationToken)
     {
-        var storedOrder = await connection.QuerySingleOrDefaultAsync<StoredOrderRow>(new CommandDefinition(
+        var storedOrder = await orderDatabaseConnection.QuerySingleOrDefaultAsync<StoredOrderRow>(new CommandDefinition(
             SelectOrderSql, new { ClOrdId = clOrdId }, cancellationToken: cancellationToken));
         if (storedOrder is null)
             return null;

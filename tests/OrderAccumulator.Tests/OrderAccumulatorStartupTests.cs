@@ -8,8 +8,8 @@ using OrderAccumulator.Persistence;
 namespace OrderAccumulator.Tests;
 
 // O app sobe contra um banco vazio próprio: a migração tem de rodar na subida.
-[Collection(PostgresCollection.Name)]
-public sealed class AppStartupTests(PostgresFixture postgres) : IAsyncLifetime
+[Collection(OrderAccumulatorPostgresCollection.Name)]
+public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
     private string emptyDatabaseConnectionString = null!;
     private WebApplicationFactory<Program> orderAccumulatorApp = null!;
@@ -17,15 +17,15 @@ public sealed class AppStartupTests(PostgresFixture postgres) : IAsyncLifetime
     public async Task InitializeAsync()
     {
         var emptyDatabaseName = "startup_" + Guid.NewGuid().ToString("N");
-        await using (var adminConnection = await postgres.DataSource.OpenConnectionAsync())
+        await using (var adminConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync())
             await adminConnection.ExecuteAsync($"CREATE DATABASE {emptyDatabaseName}");
 
-        emptyDatabaseConnectionString = new NpgsqlConnectionStringBuilder(postgres.ConnectionString)
+        emptyDatabaseConnectionString = new NpgsqlConnectionStringBuilder(orderAccumulatorDatabase.OrderDatabaseConnectionString)
         {
             Database = emptyDatabaseName
         }.ConnectionString;
         orderAccumulatorApp = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(host => host.UseSetting("ConnectionStrings:Flowa", emptyDatabaseConnectionString));
+            .WithWebHostBuilder(orderAccumulatorHost => orderAccumulatorHost.UseSetting("ConnectionStrings:Flowa", emptyDatabaseConnectionString));
     }
 
     public async Task DisposeAsync() => await orderAccumulatorApp.DisposeAsync();
@@ -56,10 +56,10 @@ public sealed class AppStartupTests(PostgresFixture postgres) : IAsyncLifetime
     {
         orderAccumulatorApp.CreateClient();
 
-        await using var connection = new NpgsqlConnection(emptyDatabaseConnectionString);
-        var symbolExposureRows = (await connection.QueryAsync<(string Symbol, decimal Exposure)>(
+        await using var orderDatabaseConnection = new NpgsqlConnection(emptyDatabaseConnectionString);
+        var symbolExposureRows = (await orderDatabaseConnection.QueryAsync<(string Symbol, decimal Exposure)>(
             "SELECT symbol, exposure FROM exposures ORDER BY symbol")).ToList();
-        var storedOrderCount = await connection.ExecuteScalarAsync<long>("SELECT count(*) FROM orders");
+        var storedOrderCount = await orderDatabaseConnection.ExecuteScalarAsync<long>("SELECT count(*) FROM orders");
 
         Assert.Equal([("PETR4", 0m), ("VALE3", 0m), ("VIIA4", 0m)], symbolExposureRows);
         Assert.Equal(0, storedOrderCount);
@@ -70,10 +70,10 @@ public sealed class AppStartupTests(PostgresFixture postgres) : IAsyncLifetime
     {
         await using var emptyDatabase = NpgsqlDataSource.Create(emptyDatabaseConnectionString);
 
-        await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => Task.Run(() => emptyDatabase.ApplySchemaAsync())));
+        await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => Task.Run(() => emptyDatabase.ApplyOrderAccumulatorSchemaAsync())));
 
-        await using var connection = await emptyDatabase.OpenConnectionAsync();
-        Assert.Equal(3, await connection.ExecuteScalarAsync<long>("SELECT count(*) FROM exposures"));
+        await using var orderDatabaseConnection = await emptyDatabase.OpenConnectionAsync();
+        Assert.Equal(3, await orderDatabaseConnection.ExecuteScalarAsync<long>("SELECT count(*) FROM exposures"));
     }
 
     private static string ReadGitHeadSha()
