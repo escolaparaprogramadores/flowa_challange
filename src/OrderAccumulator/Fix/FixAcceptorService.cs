@@ -33,10 +33,13 @@ public sealed class FixAcceptorService(
 
     // A sessão vem do acceptor.cfg. A porta vem da configuração (Fix__AcceptorPort) e o dicionário
     // é procurado ao lado do executável, para não depender da pasta de onde o app foi iniciado.
+    // Fix__AcceptorBindHost é opcional: sem ele o acceptor escuta em todas as interfaces, como o
+    // compose precisa; os testes usam 127.0.0.1 para não abrir a porta para a rede.
     public static SessionSettings LoadSettings(IConfiguration configuration)
     {
         var port = configuration.GetValue<int?>("Fix:AcceptorPort")
             ?? throw new InvalidOperationException("Defina a porta do acceptor FIX em Fix__AcceptorPort.");
+        var bindHost = configuration["Fix:AcceptorBindHost"];
 
         var settings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, SettingsFile));
         foreach (var sessionId in settings.GetSessions())
@@ -44,6 +47,8 @@ public sealed class FixAcceptorService(
             var session = settings.Get(sessionId);
             session.SetLong("SocketAcceptPort", port);
             session.SetString("DataDictionary", Path.Combine(AppContext.BaseDirectory, DictionaryFile));
+            if (!string.IsNullOrWhiteSpace(bindHost))
+                session.SetString("SocketAcceptHost", bindHost);
         }
 
         return settings;

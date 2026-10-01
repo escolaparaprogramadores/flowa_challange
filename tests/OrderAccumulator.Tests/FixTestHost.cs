@@ -5,6 +5,8 @@ using System.Threading.Channels;
 using SideCodes = Flowa.Shared.SideCodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using QuickFix;
 using QuickFix.Fields;
@@ -15,15 +17,20 @@ using Message = QuickFix.Message;
 
 namespace OrderAccumulator.Tests;
 
-// O OrderAccumulator inteiro (Program.cs), com o acceptor FIX numa porta livre e o banco do container.
+// O OrderAccumulator inteiro (Program.cs), com o acceptor FIX em 127.0.0.1 numa porta livre
+// (ou na porta pedida) e o banco do container.
 public sealed class AccumulatorApp : WebApplicationFactory<Program>
 {
-    private readonly string connectionString;
+    public const string BindHost = "127.0.0.1";
 
-    public AccumulatorApp(string connectionString)
+    private readonly string connectionString;
+    private readonly Action<IServiceCollection>? replaceServices;
+
+    public AccumulatorApp(string connectionString, int? fixPort = null, Action<IServiceCollection>? replaceServices = null)
     {
         this.connectionString = connectionString;
-        FixPort = FreeTcpPort();
+        this.replaceServices = replaceServices;
+        FixPort = fixPort ?? FreeTcpPort();
     }
 
     public int FixPort { get; }
@@ -34,7 +41,10 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
     {
         builder.UseSetting("ConnectionStrings:Flowa", connectionString);
         builder.UseSetting("Fix:AcceptorPort", FixPort.ToString());
+        builder.UseSetting("Fix:AcceptorBindHost", BindHost);
         builder.ConfigureLogging(logging => logging.AddProvider(Logs));
+        if (replaceServices is not null)
+            builder.ConfigureTestServices(replaceServices);
     }
 
     // Força a subida do host (e do acceptor) sem precisar de uma chamada HTTP antes.
@@ -137,6 +147,15 @@ public sealed class TestInitiator : IApplication, IDisposable
         var report = await reports.Reader.ReadAsync().AsTask().WaitAsync(Wait);
         Assert.Equal(order.ClOrdID.Value, report.ClOrdID.Value);
         return report;
+    }
+
+    // Manda a ordem e confere que nenhum ExecutionReport volta dentro do prazo.
+    public async Task ExpectNoAnswerAsync(NewOrderSingle order, TimeSpan wait)
+    {
+        Assert.True(Session.SendToTarget(order, session!));
+        // Leitura cancelável: um ReadAsync pendurado depois do prazo engoliria o próximo relatório.
+        using var timeout = new CancellationTokenSource(wait);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reports.Reader.ReadAsync(timeout.Token).AsTask());
     }
 
     public void Dispose() => initiator.Dispose();

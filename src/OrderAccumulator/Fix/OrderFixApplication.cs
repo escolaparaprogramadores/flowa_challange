@@ -20,7 +20,20 @@ public sealed class OrderFixApplication(IOrderProcessor processor, ILogger<Order
 
         // O QuickFIX chama cada sessão na sua própria thread e espera o retorno; esperar aqui
         // mantém as respostas na mesma ordem das ordens recebidas.
-        var outcome = processor.ProcessAsync(incoming).GetAwaiter().GetResult();
+        OrderOutcome outcome;
+        try
+        {
+            outcome = processor.ProcessAsync(incoming).GetAwaiter().GetResult();
+        }
+        catch (Exception exception)
+        {
+            // Ponto único de erro desta entrada. Sem resposta, o OrderGenerator desiste em 5 s e mostra
+            // communication_error (contrato, seção 3). A transação foi desfeita, então nada ficou gravado
+            // e a sessão FIX segue de pé para as próximas ordens.
+            logger.LogError(exception, "Falha ao processar a ordem {ClOrdId}; nenhum ExecutionReport enviado.", incoming.ClOrdId);
+            return;
+        }
+
         if (outcome.IsRepeat)
             logger.LogInformation("ClOrdID {ClOrdId} repetido: devolvendo a resposta original.", outcome.ClOrdId);
 
