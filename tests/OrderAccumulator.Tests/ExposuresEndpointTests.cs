@@ -14,7 +14,7 @@ public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
     [Fact]
     public async Task Get_returns_the_three_symbols_in_contract_order_with_limit_and_remaining()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).Start();
+        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
 
         var exposuresJson = await GetExposuresJsonAsync(app);
 
@@ -27,14 +27,14 @@ public sealed class ExposuresEndpointTests(PostgresFixture db) : IAsyncLifetime
     [Fact]
     public async Task Accepted_orders_move_the_values_and_a_rejected_one_does_not()
     {
-        await using var app = new AccumulatorApp(db.ConnectionString).Start();
-        using var testInitiator = await TestInitiator.ConnectAsync(app.FixPort);
+        await using var app = new AccumulatorApp(db.ConnectionString).StartWithFixAcceptor();
+        using var testInitiator = await TestInitiator.LogOnToAcceptorAsync(app.FixPort);
 
-        await testInitiator.SendAsync(TestInitiator.NewOrder("compra-petr4", "PETR4", '1', 100, 10.50m));
-        await testInitiator.SendAsync(TestInitiator.NewOrder("venda-vale3", "VALE3", '2', 20, 25.00m));
+        await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("compra-petr4", "PETR4", '1', 100, 10.50m));
+        await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("venda-vale3", "VALE3", '2', 20, 25.00m));
         var exposuresAfterAccepted = ReadExposureEntries(await GetExposuresJsonAsync(app));
 
-        var rejectedReport = await testInitiator.SendAsync(TestInitiator.NewOrder("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
+        var rejectedReport = await testInitiator.SendExpectingExecutionReportAsync(TestInitiator.NewOrder("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
         var exposuresAfterRejected = ReadExposureEntries(await GetExposuresJsonAsync(app));
 
         Assert.Equal(

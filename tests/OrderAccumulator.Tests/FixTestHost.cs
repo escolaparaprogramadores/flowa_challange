@@ -21,7 +21,7 @@ namespace OrderAccumulator.Tests;
 // (ou na porta pedida) e o banco do container.
 public sealed class AccumulatorApp : WebApplicationFactory<Program>
 {
-    public const string BindHost = "127.0.0.1";
+    public const string LoopbackBindHost = "127.0.0.1";
 
     private readonly string connectionString;
     private readonly Action<IServiceCollection>? replaceServices;
@@ -30,7 +30,7 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
     {
         this.connectionString = connectionString;
         this.replaceServices = replaceServices;
-        FixPort = fixPort ?? FreeTcpPort();
+        FixPort = fixPort ?? FindFreeTcpPort();
     }
 
     public int FixPort { get; }
@@ -41,20 +41,20 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
     {
         webHostBuilder.UseSetting("ConnectionStrings:Flowa", connectionString);
         webHostBuilder.UseSetting("Fix:AcceptorPort", FixPort.ToString());
-        webHostBuilder.UseSetting("Fix:AcceptorBindHost", BindHost);
+        webHostBuilder.UseSetting("Fix:AcceptorBindHost", LoopbackBindHost);
         webHostBuilder.ConfigureLogging(loggingBuilder => loggingBuilder.AddProvider(Logs));
         if (replaceServices is not null)
             webHostBuilder.ConfigureTestServices(replaceServices);
     }
 
     // Força a subida do host (e do acceptor) sem precisar de uma chamada HTTP antes.
-    public AccumulatorApp Start()
+    public AccumulatorApp StartWithFixAcceptor()
     {
         _ = Services;
         return this;
     }
 
-    private static int FreeTcpPort()
+    private static int FindFreeTcpPort()
     {
         var portProbe = new TcpListener(IPAddress.Loopback, 0);
         portProbe.Start();
@@ -123,7 +123,7 @@ public sealed class TestInitiator : IApplication, IDisposable
         initiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, (ILoggerFactory?)null, null);
     }
 
-    public static async Task<TestInitiator> ConnectAsync(int port)
+    public static async Task<TestInitiator> LogOnToAcceptorAsync(int port)
     {
         var testInitiator = new TestInitiator(port);
         testInitiator.initiator.Start();
@@ -142,7 +142,7 @@ public sealed class TestInitiator : IApplication, IDisposable
         NewOrder(Guid.NewGuid().ToString("N"), symbol, OrderSideCodes.BuyFix, quantity, price);
 
     // Manda a ordem e devolve o ExecutionReport que voltou para ela.
-    public async Task<ExecutionReport> SendAsync(NewOrderSingle order)
+    public async Task<ExecutionReport> SendExpectingExecutionReportAsync(NewOrderSingle order)
     {
         Assert.True(Session.SendToTarget(order, sessionId!));
         var executionReport = await executionReports.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
