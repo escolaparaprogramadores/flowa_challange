@@ -37,7 +37,7 @@ public static class ApiEndpoints
         return commitSeparatorIndex < 0 ? null : informationalVersion![(commitSeparatorIndex + 1)..];
     }
 
-    public static IResult UnexpectedErrorResponse() =>
+    public static IResult BuildUnexpectedErrorResponse() =>
         Results.Json(new { status = "error", message = UnexpectedErrorMessage }, statusCode: StatusCodes.Status500InternalServerError);
 
     private static async Task<IResult> PostOrder(HttpRequest orderHttpRequest, FixOrderClient fixOrderClient)
@@ -57,11 +57,11 @@ public static class ApiEndpoints
 
         return fixOrderResult.Outcome switch
         {
-            OrderOutcome.Accepted => Results.Json(OrderResponseBody("accepted", fixOrderResult, validOrder, AcceptedOrderMessage)),
-            OrderOutcome.Rejected => Results.Json(OrderResponseBody("rejected", fixOrderResult, validOrder,
+            OrderOutcome.Accepted => Results.Json(BuildOrderResponseBody("accepted", fixOrderResult, validOrder, AcceptedOrderMessage)),
+            OrderOutcome.Rejected => Results.Json(BuildOrderResponseBody("rejected", fixOrderResult, validOrder,
                 fixOrderResult.RejectionText ?? RejectedOrderWithoutTextMessage)),
-            OrderOutcome.NoLoggedOnSession or OrderOutcome.ExecutionReportTimeout => CommunicationErrorResponse(OrderCommunicationMessage),
-            _ => UnexpectedErrorResponse()
+            OrderOutcome.NoLoggedOnSession or OrderOutcome.ExecutionReportTimeout => BuildCommunicationErrorResponse(OrderCommunicationMessage),
+            _ => BuildUnexpectedErrorResponse()
         };
     }
 
@@ -72,27 +72,27 @@ public static class ApiEndpoints
         {
             using var accumulatorExposuresResponse = await accumulatorClient.GetAsync("/api/exposures", requestAborted);
             if (accumulatorExposuresResponse.StatusCode != HttpStatusCode.OK)
-                return CommunicationErrorResponse(ExposureCommunicationMessage);
+                return BuildCommunicationErrorResponse(ExposureCommunicationMessage);
 
             var exposuresJson = await accumulatorExposuresResponse.Content.ReadAsStringAsync(requestAborted);
             return Results.Content(exposuresJson, "application/json", statusCode: StatusCodes.Status200OK);
         }
         catch (HttpRequestException)
         {
-            return CommunicationErrorResponse(ExposureCommunicationMessage);
+            return BuildCommunicationErrorResponse(ExposureCommunicationMessage);
         }
         catch (TaskCanceledException) when (!requestAborted.IsCancellationRequested)
         {
             // Cancelamento sem pedido de quem chamou é o timeout de 5 s do HttpClient.
-            return CommunicationErrorResponse(ExposureCommunicationMessage);
+            return BuildCommunicationErrorResponse(ExposureCommunicationMessage);
         }
     }
 
-    private static IResult CommunicationErrorResponse(string communicationErrorMessage) =>
+    private static IResult BuildCommunicationErrorResponse(string communicationErrorMessage) =>
         Results.Json(new { status = "communication_error", message = communicationErrorMessage },
             statusCode: StatusCodes.Status503ServiceUnavailable);
 
-    private static object OrderResponseBody(string orderStatus, OrderResult fixOrderResult, ValidOrder validOrder, string orderMessage) => new
+    private static object BuildOrderResponseBody(string orderStatus, OrderResult fixOrderResult, ValidOrder validOrder, string orderMessage) => new
     {
         status = orderStatus,
         clOrdId = fixOrderResult.ClOrdId,

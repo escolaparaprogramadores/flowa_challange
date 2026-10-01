@@ -29,7 +29,7 @@ var orderGeneratorApp = orderGeneratorBuilder.Build();
 
 // Erro não previsto vira o corpo do contrato, sem stack trace para quem chamou.
 orderGeneratorApp.UseExceptionHandler(errorPipeline =>
-    errorPipeline.Run(httpContext => ApiEndpoints.UnexpectedErrorResponse().ExecuteAsync(httpContext)));
+    errorPipeline.Run(httpContext => ApiEndpoints.BuildUnexpectedErrorResponse().ExecuteAsync(httpContext)));
 
 orderGeneratorApp.UseDefaultFiles();
 orderGeneratorApp.UseStaticFiles();
