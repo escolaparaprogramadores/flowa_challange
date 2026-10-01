@@ -73,23 +73,31 @@ public sealed class ComposeFixture : IAsyncLifetime
         var containerState = container.GetProperty("State");
 
         // Só as portas com ligação no host contam como publicadas; as outras ficam na rede do compose.
-        var hostPortsByContainerPort = new Dictionary<string, string>();
+        // Guardamos cada ligação, para uma segunda ligação da mesma porta não sumir da comparação.
+        var publishedPortBindings = new List<string>();
         foreach (var exposedPort in container.GetProperty("NetworkSettings").GetProperty("Ports").EnumerateObject())
         {
             if (exposedPort.Value.ValueKind != JsonValueKind.Array) continue;
             foreach (var hostBinding in exposedPort.Value.EnumerateArray())
-                hostPortsByContainerPort[exposedPort.Name] =
-                    $"{hostBinding.GetProperty("HostIp").GetString()}:{hostBinding.GetProperty("HostPort").GetString()}";
+                publishedPortBindings.Add(
+                    $"{exposedPort.Name}->{hostBinding.GetProperty("HostIp").GetString()}:{hostBinding.GetProperty("HostPort").GetString()}");
         }
 
         return new ServiceContainerState(
             container.GetProperty("Id").GetString()!,
             containerState.GetProperty("Status").GetString()!,
             containerState.GetProperty("StartedAt").GetString()!,
-            container.GetProperty("Config").GetProperty("User").GetString() ?? "",
             string.Join(' ', container.GetProperty("Config").GetProperty("Entrypoint").EnumerateArray().Select(entrypointPart => entrypointPart.GetString())),
-            hostPortsByContainerPort);
+            publishedPortBindings.Order().ToList());
     }
+
+    // O uid de quem roda o processo dentro do container, lido no próprio container.
+    public async Task<string> ReadContainerProcessUserIdAsync(string serviceName) =>
+        (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", serviceName, "id", "-u")).Trim();
+
+    // A configuração que o compose de fato vai usar, já com variáveis resolvidas.
+    public async Task<JsonDocument> ReadResolvedComposeConfigAsync() =>
+        JsonDocument.Parse(await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "config", "--format", "json"));
 
     // Conta os Logon de resposta do acceptor no log do OrderGenerator. Contamos em vez de
     // filtrar por hora porque o relógio do Docker pode não bater com o da máquina.
@@ -168,9 +176,8 @@ public sealed record ServiceContainerState(
     string ContainerId,
     string Status,
     string StartedAt,
-    string RunAsUser,
     string Entrypoint,
-    IReadOnlyDictionary<string, string> HostPortsByContainerPort);
+    IReadOnlyList<string> PublishedPortBindings);
 
 public static class RepoPaths
 {

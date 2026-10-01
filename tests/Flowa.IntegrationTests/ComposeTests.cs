@@ -21,13 +21,19 @@ public sealed class ComposeTests(ComposeFixture compose)
         Assert.Equal("dotnet OrderGenerator.dll", orderGenerator.Entrypoint);
         Assert.Equal("dotnet OrderAccumulator.dll", orderAccumulator.Entrypoint);
 
-        // O initiator é quem manda o primeiro Logon; o acceptor só responde.
+        // O initiator manda o primeiro Logon, saindo do log do OrderGenerator.
         var generatorFixMessages = FixLog.ParseFixMessages(await compose.ReadServiceLogAsync("ordergenerator"));
-        var initiatorLogon = generatorFixMessages.First(fixMessage => fixMessage.TagValue(35) == "A");
+        var initiatorLogon = generatorFixMessages.First(fixMessage => fixMessage.TagValue(35) == "A" && fixMessage.TagValue(49) == "ORDERGENERATOR");
+        Assert.Equal(initiatorLogon, generatorFixMessages.First(fixMessage => fixMessage.TagValue(35) == "A"));
         Assert.Equal("FIX.4.4", initiatorLogon.TagValue(8));
-        Assert.Equal("ORDERGENERATOR", initiatorLogon.TagValue(49));
         Assert.Equal("ORDERACCUMULATOR", initiatorLogon.TagValue(56));
         Assert.Equal("30", initiatorLogon.TagValue(108));
+
+        // O acceptor responde o Logon com os CompIDs trocados, saindo do log do OrderAccumulator.
+        var accumulatorFixMessages = FixLog.ParseFixMessages(await compose.ReadServiceLogAsync("orderaccumulator"));
+        var acceptorLogon = accumulatorFixMessages.First(fixMessage => fixMessage.TagValue(35) == "A" && fixMessage.TagValue(49) == "ORDERACCUMULATOR");
+        Assert.Equal("FIX.4.4", acceptorLogon.TagValue(8));
+        Assert.Equal("ORDERGENERATOR", acceptorLogon.TagValue(56));
     }
 
     [Fact]
@@ -38,14 +44,27 @@ public sealed class ComposeTests(ComposeFixture compose)
         var postgres = await compose.InspectServiceContainerAsync("postgres");
 
         // O acceptor FIX só confere SenderCompID/TargetCompID: a 9876 não pode sair da rede do compose.
-        Assert.Equal(
-            new Dictionary<string, string> { ["8080/tcp"] = $"127.0.0.1:{ComposeFixture.OrderGeneratorHostPort}" },
-            orderGenerator.HostPortsByContainerPort);
-        Assert.Empty(orderAccumulator.HostPortsByContainerPort);
-        Assert.Empty(postgres.HostPortsByContainerPort);
+        Assert.Equal(new[] { $"8080/tcp->127.0.0.1:{ComposeFixture.OrderGeneratorHostPort}" }, orderGenerator.PublishedPortBindings);
+        Assert.Empty(orderAccumulator.PublishedPortBindings);
+        Assert.Empty(postgres.PublishedPortBindings);
 
-        Assert.DoesNotContain(orderGenerator.RunAsUser, new[] { "", "0", "root" });
-        Assert.DoesNotContain(orderAccumulator.RunAsUser, new[] { "", "0", "root" });
+        // 1654 é o usuário "app" que a imagem aspnet do .NET já traz (APP_UID).
+        Assert.Equal("1654", await compose.ReadContainerProcessUserIdAsync("ordergenerator"));
+        Assert.Equal("1654", await compose.ReadContainerProcessUserIdAsync("orderaccumulator"));
+    }
+
+    [Fact]
+    public async Task OrderAccumulator_so_sobe_depois_do_postgres_ficar_saudavel()
+    {
+        using var resolvedConfig = await compose.ReadResolvedComposeConfigAsync();
+        var services = resolvedConfig.RootElement.GetProperty("services");
+
+        var accumulatorDependsOnPostgres = services.GetProperty("orderaccumulator").GetProperty("depends_on").GetProperty("postgres");
+        Assert.Equal("service_healthy", accumulatorDependsOnPostgres.GetProperty("condition").GetString());
+
+        var postgresHealthcheck = services.GetProperty("postgres").GetProperty("healthcheck").GetProperty("test")
+            .EnumerateArray().Select(healthcheckPart => healthcheckPart.GetString()).ToArray();
+        Assert.Equal(new[] { "CMD-SHELL", "pg_isready -U flowa -d flowa" }, postgresHealthcheck);
     }
 
     [Fact]
@@ -115,6 +134,7 @@ public sealed class ComposeTests(ComposeFixture compose)
         var generatorBefore = await compose.InspectServiceContainerAsync("ordergenerator");
         var accumulatorBefore = await compose.InspectServiceContainerAsync("orderaccumulator");
         var logonsBeforeRecreate = await compose.CountFixLogonsFromAcceptorAsync();
+        var exposuresBeforeRecreate = await compose.OrderGeneratorHttp.GetStringAsync("/api/exposures");
 
         await compose.RunComposeCommandAsync(TimeSpan.FromMinutes(3), "up", "-d", "--no-deps", "--force-recreate", "--wait", "orderaccumulator");
 
@@ -126,6 +146,9 @@ public sealed class ComposeTests(ComposeFixture compose)
         var generatorAfter = await compose.InspectServiceContainerAsync("ordergenerator");
         Assert.Equal(generatorBefore.ContainerId, generatorAfter.ContainerId);
         Assert.Equal(generatorBefore.StartedAt, generatorAfter.StartedAt);
+
+        // O banco fica num volume nomeado: o container novo enxerga a mesma exposição de antes.
+        Assert.Equal(exposuresBeforeRecreate, await compose.OrderGeneratorHttp.GetStringAsync("/api/exposures"));
 
         var orderAfterRelogon = await PostOrderAsync("VALE3", "buy", 10, 50.00m);
         Assert.Equal("accepted", orderAfterRelogon.GetProperty("status").GetString());
@@ -154,6 +177,30 @@ public sealed class ComposeTests(ComposeFixture compose)
 // Roda sem Docker: o limite é constante do OrderAccumulator e não pode vazar para configuração (CA-21).
 public sealed class ExposureLimitOutsideConfigTests
 {
+    private static readonly Regex ExposureLimitPattern = new(@"100[.,_ ]?000[.,_ ]?000|\b1(\.0+)?e\+?0*8\b", RegexOptions.IgnoreCase);
+
+    [Theory]
+    [InlineData("100000000")]
+    [InlineData("100.000.000")]
+    [InlineData("100,000,000")]
+    [InlineData("100_000_000")]
+    [InlineData("100 000 000")]
+    [InlineData("100000000.00")]
+    [InlineData("1e8")]
+    [InlineData("1E+08")]
+    [InlineData("1.0e8")]
+    [InlineData("Exposure__Limit: \"1.0E8\"")]
+    public void A_guarda_acha_o_limite_em_cada_grafia(string limitWritten) =>
+        Assert.Matches(ExposureLimitPattern, limitWritten);
+
+    [Theory]
+    [InlineData("99999999")]
+    [InlineData("10000000")]
+    [InlineData("1.5e8")]
+    [InlineData("Port=5432")]
+    public void A_guarda_nao_confunde_outros_numeros_com_o_limite(string otherNumber) =>
+        Assert.DoesNotMatch(ExposureLimitPattern, otherNumber);
+
     [Fact]
     public void Limite_de_exposicao_nao_aparece_no_compose_nos_Dockerfiles_nem_em_appsettings()
     {
@@ -168,11 +215,35 @@ public sealed class ExposureLimitOutsideConfigTests
         Assert.All(packagingFiles, packagingPath => Assert.True(File.Exists(packagingPath), $"{packagingPath} não existe"));
         Assert.Contains(appSettingsFiles, settingsPath => settingsPath.Contains("OrderAccumulator"));
 
-        var exposureLimitPattern = new Regex(@"100[.,_ ]?000[.,_ ]?000|\b1(\.0+)?e\+?0*8\b", RegexOptions.IgnoreCase);
         var filesWithLimit = packagingFiles.Concat(appSettingsFiles)
-            .Where(configPath => exposureLimitPattern.IsMatch(File.ReadAllText(configPath)))
+            .Where(configPath => ExposureLimitPattern.IsMatch(File.ReadAllText(configPath)))
             .Select(configPath => Path.GetRelativePath(repoRoot, configPath))
             .ToList();
         Assert.Empty(filesWithLimit);
+    }
+}
+
+// Roda sem Docker: o contexto de build deixa de fora só lixo de build e arquivos locais,
+// e mantém o .git (o build lê o commit dele) e tudo o que os Dockerfiles copiam.
+public sealed class DockerBuildContextTests
+{
+    [Fact]
+    public void O_dockerignore_tira_so_saidas_de_build_e_arquivos_locais()
+    {
+        var ignoredPatterns = File.ReadAllLines(Path.Combine(RepoPaths.FindRepoRoot(), ".dockerignore"))
+            .Select(dockerignoreLine => dockerignoreLine.Trim())
+            .Where(dockerignoreLine => dockerignoreLine.Length > 0 && !dockerignoreLine.StartsWith('#'))
+            .ToArray();
+
+        Assert.Equal(
+            new[]
+            {
+                ".vs/", ".vscode/", ".idea/",
+                "**/bin/", "**/obj/", "**/node_modules/", "**/dist/",
+                "**/TestResults/", "**/playwright-report/", "**/test-results/",
+                "src/OrderGenerator/wwwroot/",
+                ".env", ".env.*", "*.log",
+            },
+            ignoredPatterns);
     }
 }
