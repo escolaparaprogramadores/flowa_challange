@@ -5,8 +5,8 @@ Quem implementa segue o que está aqui. Mudou alguma coisa? Sobe a versão e avi
 
 As regras de campo da ordem (símbolo, lado, quantidade e preço) e as mensagens de erro moram em
 `src/Flowa.Shared` (`OrderRules`, `OrderValidator`, `OrderMessages`). O OrderGenerator chama
-`OrderValidator.ValidateFromJson` com o texto cru do JSON; o OrderAccumulator chama
-`OrderValidator.ValidateFromFix` com os valores da mensagem FIX. Os dois apps usam esse projeto,
+`OrderValidator.ValidateOrderFromJson` com o texto cru do JSON; o OrderAccumulator chama
+`OrderValidator.ValidateOrderFromFix` com os valores da mensagem FIX. Os dois apps usam esse projeto,
 então a regra é uma só.
 
 ## 1. Rotas HTTP

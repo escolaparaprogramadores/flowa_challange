@@ -5,16 +5,16 @@ namespace Flowa.Shared.Tests;
 public class OrderValidatorTests
 {
     // Ordem válida de base; cada teste troca só o campo que está provando.
-    private const string ValidSymbol = "PETR4";
-    private const string ValidSide = "buy";
-    private const string ValidQuantity = "100";
-    private const string ValidPrice = "10.50";
+    private const string ValidOrderSymbol = "PETR4";
+    private const string ValidOrderSideText = "buy";
+    private const string ValidOrderQuantityText = "100";
+    private const string ValidOrderPriceText = "10.50";
 
-    private static void AssertRejectedWithSingleError(OrderValidationResult validationResult, string field, string message)
+    private static void AssertOrderRejectedWithSingleFieldError(OrderValidationResult orderValidationResult, string orderField, string orderFieldErrorMessage)
     {
-        Assert.False(validationResult.IsValid);
-        Assert.Null(validationResult.Order);
-        Assert.Equal(new OrderFieldError(field, message), Assert.Single(validationResult.Errors));
+        Assert.False(orderValidationResult.IsValid);
+        Assert.Null(orderValidationResult.Order);
+        Assert.Equal(new OrderFieldError(orderField, orderFieldErrorMessage), Assert.Single(orderValidationResult.Errors));
     }
 
     // Regra: símbolo
@@ -23,12 +23,12 @@ public class OrderValidatorTests
     [InlineData("PETR4")]
     [InlineData("VALE3")]
     [InlineData("VIIA4")]
-    public void DeveAceitarSimboloPermitido(string symbol)
+    public void DeveAceitarSimboloPermitido(string orderSymbol)
     {
-        var validationResult = OrderValidator.ValidateFromJson(symbol, ValidSide, ValidQuantity, ValidPrice);
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson(orderSymbol, ValidOrderSideText, ValidOrderQuantityText, ValidOrderPriceText);
 
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(symbol, validationResult.Order!.Symbol);
+        Assert.True(orderValidationResult.IsValid);
+        Assert.Equal(orderSymbol, orderValidationResult.Order!.Symbol);
     }
 
     [Theory]
@@ -37,11 +37,11 @@ public class OrderValidatorTests
     [InlineData("PETR4 ", OrderMessages.SymbolInvalid)]
     [InlineData("", OrderMessages.SymbolRequired)]
     [InlineData(null, OrderMessages.SymbolRequired)]
-    public void DeveRecusarSimboloForaDaListaOuVazio(string? symbol, string expectedMessage)
+    public void DeveRecusarSimboloForaDaListaOuVazio(string? orderSymbol, string expectedOrderFieldErrorMessage)
     {
-        var validationResult = OrderValidator.ValidateFromJson(symbol, ValidSide, ValidQuantity, ValidPrice);
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson(orderSymbol, ValidOrderSideText, ValidOrderQuantityText, ValidOrderPriceText);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Symbol, expectedMessage);
+        AssertOrderRejectedWithSingleFieldError(orderValidationResult, OrderFields.Symbol, expectedOrderFieldErrorMessage);
     }
 
     // Regra: lado
@@ -49,25 +49,25 @@ public class OrderValidatorTests
     [Theory]
     [InlineData("buy", OrderSide.Buy, '1')]
     [InlineData("sell", OrderSide.Sell, '2')]
-    public void DeveConverterLadoDaTelaParaFix(string side, OrderSide expectedSide, char expectedFix)
+    public void DeveConverterLadoDaTelaParaFix(string orderSide, OrderSide expectedOrderSide, char expectedOrderSideFixCode)
     {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, side, ValidQuantity, ValidPrice);
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson(ValidOrderSymbol, orderSide, ValidOrderQuantityText, ValidOrderPriceText);
 
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(expectedSide, validationResult.Order!.Side);
-        Assert.Equal(expectedFix, validationResult.Order.Side.ToFixOrderSide());
-        Assert.Equal(side, validationResult.Order.Side.ToJsonOrderSide());
+        Assert.True(orderValidationResult.IsValid);
+        Assert.Equal(expectedOrderSide, orderValidationResult.Order!.Side);
+        Assert.Equal(expectedOrderSideFixCode, orderValidationResult.Order.Side.ToFixOrderSide());
+        Assert.Equal(orderSide, orderValidationResult.Order.Side.ToJsonOrderSide());
     }
 
     [Theory]
     [InlineData('1', OrderSide.Buy)]
     [InlineData('2', OrderSide.Sell)]
-    public void DeveAceitarLadoFix(char side, OrderSide expectedSide)
+    public void DeveAceitarLadoFix(char orderSide, OrderSide expectedOrderSide)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, side, 100m, 10.50m);
+        var orderValidationResult = OrderValidator.ValidateOrderFromFix(ValidOrderSymbol, orderSide, 100m, 10.50m);
 
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(expectedSide, validationResult.Order!.Side);
+        Assert.True(orderValidationResult.IsValid);
+        Assert.Equal(expectedOrderSide, orderValidationResult.Order!.Side);
     }
 
     [Theory]
@@ -77,22 +77,22 @@ public class OrderValidatorTests
     [InlineData("short", OrderMessages.SideInvalid)]
     [InlineData("", OrderMessages.SideRequired)]
     [InlineData(null, OrderMessages.SideRequired)]
-    public void DeveRecusarLadoDesconhecidoOuVazio(string? side, string expectedMessage)
+    public void DeveRecusarLadoDesconhecidoOuVazio(string? orderSide, string expectedOrderFieldErrorMessage)
     {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, side, ValidQuantity, ValidPrice);
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson(ValidOrderSymbol, orderSide, ValidOrderQuantityText, ValidOrderPriceText);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Side, expectedMessage);
+        AssertOrderRejectedWithSingleFieldError(orderValidationResult, OrderFields.Side, expectedOrderFieldErrorMessage);
     }
 
     [Theory]
     [InlineData('0')]
     [InlineData('3')]
     [InlineData('5')]
-    public void DeveRecusarLadoFixDiferenteDeCompraEVenda(char side)
+    public void DeveRecusarLadoFixDiferenteDeCompraEVenda(char orderSide)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, side, 100m, 10.50m);
+        var orderValidationResult = OrderValidator.ValidateOrderFromFix(ValidOrderSymbol, orderSide, 100m, 10.50m);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Side, OrderMessages.SideInvalid);
+        AssertOrderRejectedWithSingleFieldError(orderValidationResult, OrderFields.Side, OrderMessages.SideInvalid);
     }
 
     // Regra: quantidade
@@ -103,12 +103,12 @@ public class OrderValidatorTests
     [InlineData("99999", 99999)]
     [InlineData("100.0", 100)]
     [InlineData("+5", 5)]
-    public void DeveAceitarQuantidadeNasBordas(string quantity, int expected)
+    public void DeveAceitarQuantidadeNasBordas(string orderQuantity, int expectedOrderQuantity)
     {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, ValidSide, quantity, ValidPrice);
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson(ValidOrderSymbol, ValidOrderSideText, orderQuantity, ValidOrderPriceText);
 
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(expected, validationResult.Order!.Quantity);
+        Assert.True(orderValidationResult.IsValid);
+        Assert.Equal(expectedOrderQuantity, orderValidationResult.Order!.Quantity);
     }
 
     [Theory]
@@ -125,23 +125,23 @@ public class OrderValidatorTests
     [InlineData("99999.00000000000000000000000001", OrderMessages.QuantityNotInteger)]
     [InlineData("", OrderMessages.QuantityRequired)]
     [InlineData(null, OrderMessages.QuantityRequired)]
-    public void DeveRecusarQuantidadeInvalida(string? quantity, string expectedMessage)
+    public void DeveRecusarQuantidadeInvalida(string? orderQuantity, string expectedOrderFieldErrorMessage)
     {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, ValidSide, quantity, ValidPrice);
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson(ValidOrderSymbol, ValidOrderSideText, orderQuantity, ValidOrderPriceText);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Quantity, expectedMessage);
+        AssertOrderRejectedWithSingleFieldError(orderValidationResult, OrderFields.Quantity, expectedOrderFieldErrorMessage);
     }
 
     public static TheoryData<decimal, int> QuantidadesFixAceitas => new() { { 1m, 1 }, { 99999m, 99999 } };
 
     [Theory]
     [MemberData(nameof(QuantidadesFixAceitas))]
-    public void DeveAceitarQuantidadeFixNasBordas(decimal quantity, int expected)
+    public void DeveAceitarQuantidadeFixNasBordas(decimal orderQuantity, int expectedOrderQuantity)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, quantity, 10.50m);
+        var orderValidationResult = OrderValidator.ValidateOrderFromFix(ValidOrderSymbol, OrderSideCodes.BuyFix, orderQuantity, 10.50m);
 
-        Assert.True(validationResult.IsValid);
-        Assert.Equal(expected, validationResult.Order!.Quantity);
+        Assert.True(orderValidationResult.IsValid);
+        Assert.Equal(expectedOrderQuantity, orderValidationResult.Order!.Quantity);
     }
 
     public static TheoryData<decimal, string> QuantidadesFixRecusadas => new()
@@ -154,11 +154,11 @@ public class OrderValidatorTests
 
     [Theory]
     [MemberData(nameof(QuantidadesFixRecusadas))]
-    public void DeveRecusarQuantidadeFixInvalida(decimal quantity, string expectedMessage)
+    public void DeveRecusarQuantidadeFixInvalida(decimal orderQuantity, string expectedOrderFieldErrorMessage)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, quantity, 10.50m);
+        var orderValidationResult = OrderValidator.ValidateOrderFromFix(ValidOrderSymbol, OrderSideCodes.BuyFix, orderQuantity, 10.50m);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Quantity, expectedMessage);
+        AssertOrderRejectedWithSingleFieldError(orderValidationResult, OrderFields.Quantity, expectedOrderFieldErrorMessage);
     }
 
     // Regra: preço
@@ -168,15 +168,15 @@ public class OrderValidatorTests
 
     [Theory]
     [MemberData(nameof(PrecosAceitos))]
-    public void DeveAceitarPrecoNasBordasNasDuasEntradas(string priceText, decimal price)
+    public void DeveAceitarPrecoNasBordasNasDuasEntradas(string orderPriceText, decimal orderPrice)
     {
-        var jsonValidationResult = OrderValidator.ValidateFromJson(ValidSymbol, ValidSide, ValidQuantity, priceText);
-        var fixValidationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, 100m, price);
+        var jsonOrderValidationResult = OrderValidator.ValidateOrderFromJson(ValidOrderSymbol, ValidOrderSideText, ValidOrderQuantityText, orderPriceText);
+        var fixOrderValidationResult = OrderValidator.ValidateOrderFromFix(ValidOrderSymbol, OrderSideCodes.BuyFix, 100m, orderPrice);
 
-        Assert.True(jsonValidationResult.IsValid);
-        Assert.Equal(price, jsonValidationResult.Order!.Price);
-        Assert.True(fixValidationResult.IsValid);
-        Assert.Equal(price, fixValidationResult.Order!.Price);
+        Assert.True(jsonOrderValidationResult.IsValid);
+        Assert.Equal(orderPrice, jsonOrderValidationResult.Order!.Price);
+        Assert.True(fixOrderValidationResult.IsValid);
+        Assert.Equal(orderPrice, fixOrderValidationResult.Order!.Price);
     }
 
     [Theory]
@@ -192,11 +192,11 @@ public class OrderValidatorTests
     [InlineData("-99999999999999999999999999999999", OrderMessages.PriceNotPositive)]
     [InlineData("", OrderMessages.PriceRequired)]
     [InlineData(null, OrderMessages.PriceRequired)]
-    public void DeveRecusarPrecoInvalido(string? price, string expectedMessage)
+    public void DeveRecusarPrecoInvalido(string? orderPrice, string expectedOrderFieldErrorMessage)
     {
-        var validationResult = OrderValidator.ValidateFromJson(ValidSymbol, ValidSide, ValidQuantity, price);
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson(ValidOrderSymbol, ValidOrderSideText, ValidOrderQuantityText, orderPrice);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Price, expectedMessage);
+        AssertOrderRejectedWithSingleFieldError(orderValidationResult, OrderFields.Price, expectedOrderFieldErrorMessage);
     }
 
     public static TheoryData<decimal, string> PrecosFixRecusados => new()
@@ -209,11 +209,11 @@ public class OrderValidatorTests
 
     [Theory]
     [MemberData(nameof(PrecosFixRecusados))]
-    public void DeveRecusarPrecoFixInvalido(decimal price, string expectedMessage)
+    public void DeveRecusarPrecoFixInvalido(decimal orderPrice, string expectedOrderFieldErrorMessage)
     {
-        var validationResult = OrderValidator.ValidateFromFix(ValidSymbol, OrderSideCodes.BuyFix, 100m, price);
+        var orderValidationResult = OrderValidator.ValidateOrderFromFix(ValidOrderSymbol, OrderSideCodes.BuyFix, 100m, orderPrice);
 
-        AssertRejectedWithSingleError(validationResult, OrderFields.Price, expectedMessage);
+        AssertOrderRejectedWithSingleFieldError(orderValidationResult, OrderFields.Price, expectedOrderFieldErrorMessage);
     }
 
     // Ordem inteira
@@ -221,19 +221,19 @@ public class OrderValidatorTests
     [Fact]
     public void DeveDevolverOrdemTipadaQuandoTudoEstaValido()
     {
-        var validationResult = OrderValidator.ValidateFromJson("VALE3", "sell", "250", "35.10");
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson("VALE3", "sell", "250", "35.10");
 
-        Assert.True(validationResult.IsValid);
-        Assert.Empty(validationResult.Errors);
-        Assert.Equal(new ValidOrder("VALE3", OrderSide.Sell, 250, 35.10m), validationResult.Order);
+        Assert.True(orderValidationResult.IsValid);
+        Assert.Empty(orderValidationResult.Errors);
+        Assert.Equal(new ValidOrder("VALE3", OrderSide.Sell, 250, 35.10m), orderValidationResult.Order);
     }
 
     [Fact]
     public void DeveListarUmErroPorCampoQuandoTudoEstaInvalido()
     {
-        var validationResult = OrderValidator.ValidateFromJson("XPTO", "hold", "0", "1000");
+        var orderValidationResult = OrderValidator.ValidateOrderFromJson("XPTO", "hold", "0", "1000");
 
-        Assert.Null(validationResult.Order);
+        Assert.Null(orderValidationResult.Order);
         Assert.Equal(
             [
                 new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid),
@@ -241,25 +241,25 @@ public class OrderValidatorTests
                 new OrderFieldError(OrderFields.Quantity, OrderMessages.QuantityNotPositive),
                 new OrderFieldError(OrderFields.Price, OrderMessages.PriceTooLarge)
             ],
-            validationResult.Errors);
+            orderValidationResult.Errors);
     }
 
     [Fact]
     public void DeveDevolverOrdemTipadaQuandoTudoEstaValidoNoFix()
     {
-        var validationResult = OrderValidator.ValidateFromFix("VIIA4", OrderSideCodes.SellFix, 250m, 35.10m);
+        var orderValidationResult = OrderValidator.ValidateOrderFromFix("VIIA4", OrderSideCodes.SellFix, 250m, 35.10m);
 
-        Assert.True(validationResult.IsValid);
-        Assert.Empty(validationResult.Errors);
-        Assert.Equal(new ValidOrder("VIIA4", OrderSide.Sell, 250, 35.10m), validationResult.Order);
+        Assert.True(orderValidationResult.IsValid);
+        Assert.Empty(orderValidationResult.Errors);
+        Assert.Equal(new ValidOrder("VIIA4", OrderSide.Sell, 250, 35.10m), orderValidationResult.Order);
     }
 
     [Fact]
     public void DeveListarUmErroPorCampoQuandoTudoEstaInvalidoNoFix()
     {
-        var validationResult = OrderValidator.ValidateFromFix("XPTO", '9', 1.5m, 10.005m);
+        var orderValidationResult = OrderValidator.ValidateOrderFromFix("XPTO", '9', 1.5m, 10.005m);
 
-        Assert.Null(validationResult.Order);
+        Assert.Null(orderValidationResult.Order);
         Assert.Equal(
             [
                 new OrderFieldError(OrderFields.Symbol, OrderMessages.SymbolInvalid),
@@ -267,7 +267,7 @@ public class OrderValidatorTests
                 new OrderFieldError(OrderFields.Quantity, OrderMessages.QuantityNotInteger),
                 new OrderFieldError(OrderFields.Price, OrderMessages.PriceOffTick)
             ],
-            validationResult.Errors);
+            orderValidationResult.Errors);
     }
 
     [Fact]
