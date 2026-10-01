@@ -13,21 +13,21 @@ public enum OrderOutcome
 {
     Accepted,
     Rejected,
-    NoSession,
-    Timeout,
-    UnexpectedReport
+    NoLoggedOnSession,
+    ExecutionReportTimeout,
+    UnexpectedExecutionReport
 }
 
-public sealed record OrderResult(OrderOutcome Outcome, string ClOrdId, string? OrderId = null, string? ExecId = null, string? Text = null);
+public sealed record OrderResult(OrderOutcome Outcome, string ClOrdId, string? OrderId = null, string? ExecId = null, string? RejectionText = null);
 
 // Ponta initiator da sessão FIX: manda a NewOrderSingle e espera o ExecutionReport do mesmo ClOrdID.
 public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
 {
-    public static readonly TimeSpan ResponseTimeout = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan ExecutionReportTimeout = TimeSpan.FromSeconds(5);
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Message>> _ordersAwaitingExecutionReport = new();
     private readonly SocketInitiator _initiator;
-    private SessionID? _sessionId;
+    private SessionID? _initiatorSessionId;
 
     public FixOrderClient(IConfiguration configuration)
     {
@@ -42,24 +42,24 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         var clOrdId = Guid.NewGuid().ToString("N");
 
         // Sem sessão logada a ordem não sai: o QuickFIX a guardaria na store e mandaria depois do logon (D-34).
-        var sessionId = _sessionId;
-        var session = sessionId is null ? null : Session.LookupSession(sessionId);
-        if (sessionId is null || session is null || !session.IsLoggedOn)
-            return new OrderResult(OrderOutcome.NoSession, clOrdId);
+        var initiatorSessionId = _initiatorSessionId;
+        var initiatorSession = initiatorSessionId is null ? null : Session.LookupSession(initiatorSessionId);
+        if (initiatorSessionId is null || initiatorSession is null || !initiatorSession.IsLoggedOn)
+            return new OrderResult(OrderOutcome.NoLoggedOnSession, clOrdId);
 
         // A espera é registrada antes do envio porque a resposta pode chegar antes do Send voltar.
         var executionReportWaiter = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
         _ordersAwaitingExecutionReport[clOrdId] = executionReportWaiter;
         try
         {
-            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order), sessionId))
-                return new OrderResult(OrderOutcome.NoSession, clOrdId);
+            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order), initiatorSessionId))
+                return new OrderResult(OrderOutcome.NoLoggedOnSession, clOrdId);
 
-            return ToOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ResponseTimeout));
+            return ToOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
         }
         catch (TimeoutException)
         {
-            return new OrderResult(OrderOutcome.Timeout, clOrdId);
+            return new OrderResult(OrderOutcome.ExecutionReportTimeout, clOrdId);
         }
         finally
         {
@@ -69,22 +69,22 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
 
     private static SessionSettings LoadInitiatorSessionSettings(IConfiguration configuration)
     {
-        var settings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, "initiator.cfg"));
-        var host = configuration["Fix:AcceptorHost"]
+        var initiatorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, "initiator.cfg"));
+        var acceptorHost = configuration["Fix:AcceptorHost"]
             ?? throw new InvalidOperationException("Configuração Fix:AcceptorHost ausente.");
-        var port = configuration.GetValue<int?>("Fix:AcceptorPort")
+        var acceptorPort = configuration.GetValue<int?>("Fix:AcceptorPort")
             ?? throw new InvalidOperationException("Configuração Fix:AcceptorPort ausente.");
 
-        foreach (var sessionId in settings.GetSessions())
+        foreach (var configuredSessionId in initiatorSettings.GetSessions())
         {
-            var session = settings.Get(sessionId);
-            session.SetString(SessionSettings.SOCKET_CONNECT_HOST, host);
-            session.SetLong(SessionSettings.SOCKET_CONNECT_PORT, port);
+            var configuredSession = initiatorSettings.Get(configuredSessionId);
+            configuredSession.SetString(SessionSettings.SOCKET_CONNECT_HOST, acceptorHost);
+            configuredSession.SetLong(SessionSettings.SOCKET_CONNECT_PORT, acceptorPort);
             // Caminho absoluto: o processo pode subir de qualquer pasta.
-            session.SetString(SessionSettings.DATA_DICTIONARY, Path.Combine(AppContext.BaseDirectory, "FIX44.xml"));
+            configuredSession.SetString(SessionSettings.DATA_DICTIONARY, Path.Combine(AppContext.BaseDirectory, "FIX44.xml"));
         }
 
-        return settings;
+        return initiatorSettings;
     }
 
     private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, ValidOrder order)
@@ -100,17 +100,17 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         return newOrderSingle;
     }
 
-    private static OrderResult ToOrderResult(string clOrdId, Message report)
+    private static OrderResult ToOrderResult(string clOrdId, Message executionReport)
     {
-        var orderId = report.GetString(Tags.OrderID);
-        var execId = report.GetString(Tags.ExecID);
+        var orderId = executionReport.GetString(Tags.OrderID);
+        var execId = executionReport.GetString(Tags.ExecID);
 
-        return report.GetChar(Tags.ExecType) switch
+        return executionReport.GetChar(Tags.ExecType) switch
         {
             ExecType.NEW => new OrderResult(OrderOutcome.Accepted, clOrdId, orderId, execId),
             ExecType.REJECTED => new OrderResult(OrderOutcome.Rejected, clOrdId, orderId, execId,
-                report.IsSetField(Tags.Text) ? report.GetString(Tags.Text) : null),
-            _ => new OrderResult(OrderOutcome.UnexpectedReport, clOrdId, orderId, execId)
+                executionReport.IsSetField(Tags.Text) ? executionReport.GetString(Tags.Text) : null),
+            _ => new OrderResult(OrderOutcome.UnexpectedExecutionReport, clOrdId, orderId, execId)
         };
     }
 
@@ -124,7 +124,7 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
             executionReportWaiter.TrySetResult(message);
     }
 
-    public void OnCreate(SessionID sessionID) => _sessionId = sessionID;
+    public void OnCreate(SessionID sessionID) => _initiatorSessionId = sessionID;
 
     public void OnLogon(SessionID sessionID) { }
 

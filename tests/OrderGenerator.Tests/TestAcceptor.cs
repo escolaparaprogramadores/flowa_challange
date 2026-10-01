@@ -33,19 +33,19 @@ public sealed class TestAcceptor : IApplication, IDisposable
     public ConcurrentDictionary<string, Message> SentExecutionReports { get; } = new();
 
     // Monta a resposta para a ordem recebida; null deixa a ordem sem resposta (acceptor mudo).
-    public Func<Message, Message?> ExecutionReportResponder { get; set; } = order => null;
+    public Func<Message, Message?> ExecutionReportResponder { get; set; } = receivedOrder => null;
 
     // Quanto esperar antes de mandar a resposta, por ordem.
-    public Func<Message, TimeSpan> ExecutionReportDelay { get; set; } = order => TimeSpan.Zero;
+    public Func<Message, TimeSpan> ExecutionReportDelay { get; set; } = receivedOrder => TimeSpan.Zero;
 
     // Relatório extra mandado antes da resposta, com ClOrdID que não é o da ordem.
-    public Func<Message, Message?> StrayExecutionReport { get; set; } = order => null;
+    public Func<Message, Message?> StrayExecutionReport { get; set; } = receivedOrder => null;
 
     public void ResetToAcceptEveryOrder()
     {
         ExecutionReportResponder = BuildAcceptedReport;
-        ExecutionReportDelay = order => TimeSpan.Zero;
-        StrayExecutionReport = order => null;
+        ExecutionReportDelay = receivedOrder => TimeSpan.Zero;
+        StrayExecutionReport = receivedOrder => null;
         ReceivedOrders.Clear();
         SentExecutionReports.Clear();
     }
@@ -96,25 +96,25 @@ public sealed class TestAcceptor : IApplication, IDisposable
         }
     }
 
-    public Message BuildAcceptedReport(Message order) =>
-        BuildExecutionReport(order, ExecType.NEW, OrdStatus.NEW, order.GetDecimal(Tags.OrderQty));
+    public Message BuildAcceptedReport(Message receivedOrder) =>
+        BuildExecutionReport(receivedOrder, ExecType.NEW, OrdStatus.NEW, receivedOrder.GetDecimal(Tags.OrderQty));
 
-    public Message BuildRejectedReport(Message order, string rejectionText)
+    public Message BuildRejectedReport(Message receivedOrder, string rejectionText)
     {
-        var rejectedReport = BuildExecutionReport(order, ExecType.REJECTED, OrdStatus.REJECTED, 0);
+        var rejectedReport = BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
         rejectedReport.SetField(new Text(rejectionText));
         return rejectedReport;
     }
 
-    public Message BuildExecutionReport(Message order, char execType, char ordStatus, decimal leavesQty, string? clOrdId = null)
+    public Message BuildExecutionReport(Message receivedOrder, char execType, char ordStatus, decimal leavesQty, string? clOrdId = null)
     {
         var reportNumber = Interlocked.Increment(ref _executionReportNumber);
         var executionReport = new QuickFix.FIX44.ExecutionReport(
             new OrderID($"ORD-{reportNumber}"), new ExecID($"EXE-{reportNumber}"),
             new ExecType(execType), new OrdStatus(ordStatus),
-            new Symbol(order.GetString(Tags.Symbol)), new Side(order.GetChar(Tags.Side)),
+            new Symbol(receivedOrder.GetString(Tags.Symbol)), new Side(receivedOrder.GetChar(Tags.Side)),
             new LeavesQty(leavesQty), new CumQty(0), new AvgPx(0));
-        executionReport.Set(new ClOrdID(clOrdId ?? order.GetString(Tags.ClOrdID)));
+        executionReport.Set(new ClOrdID(clOrdId ?? receivedOrder.GetString(Tags.ClOrdID)));
         return executionReport;
     }
 
@@ -176,19 +176,19 @@ public static class TestHost
     }
 
     public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixPort, string accumulatorUrl = "http://127.0.0.1:1", string? webRoot = null) =>
-        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(webHostBuilder =>
         {
-            builder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
-            builder.UseSetting("Fix:AcceptorPort", fixPort.ToString());
-            builder.UseSetting("OrderAccumulator:BaseUrl", accumulatorUrl);
+            webHostBuilder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
+            webHostBuilder.UseSetting("Fix:AcceptorPort", fixPort.ToString());
+            webHostBuilder.UseSetting("OrderAccumulator:BaseUrl", accumulatorUrl);
             if (webRoot is not null)
-                builder.UseSetting(WebHostDefaults.WebRootKey, webRoot);
+                webHostBuilder.UseSetting(WebHostDefaults.WebRootKey, webRoot);
         });
 
-    public static async Task WaitUntil(Func<bool> condition)
+    public static async Task WaitUntil(Func<bool> expectedCondition)
     {
         var conditionClock = Stopwatch.StartNew();
-        while (!condition())
+        while (!expectedCondition())
         {
             Assert.True(conditionClock.Elapsed < TimeSpan.FromSeconds(10), "a condição esperada não aconteceu em 10 s");
             await Task.Delay(50);

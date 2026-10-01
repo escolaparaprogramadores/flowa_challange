@@ -105,6 +105,30 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     }
 
     [Theory]
+    [InlineData("[]")]
+    [InlineData("42")]
+    [InlineData("null")]
+    [InlineData("""{"symbol":null,"side":null,"quantity":null,"price":null}""")]
+    public async Task JSON_sem_os_campos_da_ordem_responde_400_com_os_quatro_campos_obrigatorios(string orderJsonWithoutFields)
+    {
+        var emptyOrderHttpResponse = await PostOrderJson(orderJsonWithoutFields);
+
+        Assert.Equal(HttpStatusCode.BadRequest, emptyOrderHttpResponse.StatusCode);
+        var fieldErrors = (await ReadJson(emptyOrderHttpResponse)).GetProperty("errors").EnumerateArray()
+            .Select(fieldError => (fieldError.GetProperty("field").GetString(), fieldError.GetProperty("message").GetString()))
+            .ToList();
+        Assert.Equal(
+            [
+                (OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolRequiredMessage),
+                (OrderFields.OrderSideFieldName, OrderMessages.OrderSideRequiredMessage),
+                (OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityRequiredMessage),
+                (OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceRequiredMessage)
+            ],
+            fieldErrors);
+        await AssertOnlySentinelReachedAcceptor();
+    }
+
+    [Theory]
     [InlineData("buy", '1')]
     [InlineData("sell", '2')]
     public async Task Compra_e_venda_saem_como_NewOrderSingle_e_voltam_aceitas(string jsonSide, char fixSide)
@@ -150,6 +174,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
 
         Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
         var sentNewOrderSingle = Assert.Single(_generator.Acceptor.ReceivedOrders);
+        Assert.Equal("VIIA4", sentNewOrderSingle.GetString(Tags.Symbol));
+        Assert.Equal(Side.SELL, sentNewOrderSingle.GetChar(Tags.Side));
         Assert.Equal(expectedQuantity, sentNewOrderSingle.GetDecimal(Tags.OrderQty));
         Assert.Equal(expectedPrice, sentNewOrderSingle.GetDecimal(Tags.Price));
         var orderResponse = await ReadJson(orderHttpResponse);
@@ -162,7 +188,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     public async Task Ordem_rejeitada_devolve_o_texto_da_tag_58()
     {
         const string rejectionText = "Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.";
-        _generator.Acceptor.ExecutionReportResponder = order => _generator.Acceptor.BuildRejectedReport(order, rejectionText);
+        _generator.Acceptor.ExecutionReportResponder = receivedOrder => _generator.Acceptor.BuildRejectedReport(receivedOrder, rejectionText);
 
         var orderHttpResponse = await PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":99999,"price":999.99}""");
 
@@ -180,11 +206,26 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     }
 
     [Fact]
+    public async Task Ordem_rejeitada_sem_tag_58_devolve_a_mensagem_padrao()
+    {
+        _generator.Acceptor.ExecutionReportResponder = receivedOrder =>
+            _generator.Acceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
+
+        var orderHttpResponse = await PostOrderJson("""{"symbol":"VALE3","side":"sell","quantity":4,"price":12.34}""");
+
+        Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
+        var rejectedResponse = await ReadJson(orderHttpResponse);
+        Assert.Equal("rejected", rejectedResponse.GetProperty("status").GetString());
+        Assert.Equal("Ordem rejeitada.", rejectedResponse.GetProperty("message").GetString());
+        AssertAnswersItsOwnExecutionReport(rejectedResponse);
+    }
+
+    [Fact]
     public async Task ExecutionReport_com_ExecType_fora_do_contrato_responde_500()
     {
         // 150=2 (Fill) não está no contrato v1, que só prevê 0 (New) e 8 (Rejected).
-        _generator.Acceptor.ExecutionReportResponder = order =>
-            _generator.Acceptor.BuildExecutionReport(order, ExecType.FILL, OrdStatus.FILLED, 0);
+        _generator.Acceptor.ExecutionReportResponder = receivedOrder =>
+            _generator.Acceptor.BuildExecutionReport(receivedOrder, ExecType.FILL, OrdStatus.FILLED, 0);
 
         var orderHttpResponse = await PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":10,"price":20.00}""");
 
@@ -197,8 +238,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     [Fact]
     public async Task Relatorio_de_outro_ClOrdID_nao_responde_pela_ordem()
     {
-        _generator.Acceptor.StrayExecutionReport = order =>
-            _generator.Acceptor.BuildExecutionReport(order, ExecType.REJECTED, OrdStatus.REJECTED, 0, clOrdId: "nao-e-desta-ordem");
+        _generator.Acceptor.StrayExecutionReport = receivedOrder =>
+            _generator.Acceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0, clOrdId: "nao-e-desta-ordem");
 
         var orderResponse = await ReadJson(await PostOrderJson("""{"symbol":"VIIA4","side":"buy","quantity":5,"price":3.21}"""));
 
@@ -213,11 +254,11 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     {
         // A de PETR4 é respondida depois da de VALE3: as respostas chegam fora da ordem de envio.
         const string rejectionText = "Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.";
-        _generator.Acceptor.ExecutionReportResponder = order => order.GetString(Tags.Symbol) == "VALE3"
-            ? _generator.Acceptor.BuildRejectedReport(order, rejectionText)
-            : _generator.Acceptor.BuildAcceptedReport(order);
-        _generator.Acceptor.ExecutionReportDelay = order =>
-            order.GetString(Tags.Symbol) == "PETR4" ? TimeSpan.FromMilliseconds(500) : TimeSpan.Zero;
+        _generator.Acceptor.ExecutionReportResponder = receivedOrder => receivedOrder.GetString(Tags.Symbol) == "VALE3"
+            ? _generator.Acceptor.BuildRejectedReport(receivedOrder, rejectionText)
+            : _generator.Acceptor.BuildAcceptedReport(receivedOrder);
+        _generator.Acceptor.ExecutionReportDelay = receivedOrder =>
+            receivedOrder.GetString(Tags.Symbol) == "PETR4" ? TimeSpan.FromMilliseconds(500) : TimeSpan.Zero;
 
         var petr4Request = PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":10,"price":30.00}""");
         var vale3Request = PostOrderJson("""{"symbol":"VALE3","side":"sell","quantity":20,"price":60.00}""");
@@ -236,14 +277,14 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
     [Fact]
     public async Task Resposta_que_chega_depois_dos_5_segundos_e_descartada()
     {
-        _generator.Acceptor.ExecutionReportDelay = order => TimeSpan.FromSeconds(6);
+        _generator.Acceptor.ExecutionReportDelay = receivedOrder => TimeSpan.FromSeconds(6);
 
         var lateOrderHttpResponse = await PostOrderJson("""{"symbol":"PETR4","side":"buy","quantity":10,"price":30.00}""");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, lateOrderHttpResponse.StatusCode);
         var lateClOrdId = Assert.Single(_generator.Acceptor.ReceivedOrders).GetString(Tags.ClOrdID);
         await TestHost.WaitUntil(() => _generator.Acceptor.SentExecutionReports.ContainsKey(lateClOrdId));
 
-        _generator.Acceptor.ExecutionReportDelay = order => TimeSpan.Zero;
+        _generator.Acceptor.ExecutionReportDelay = receivedOrder => TimeSpan.Zero;
         var nextOrderResponse = await ReadJson(await PostOrderJson("""{"symbol":"VALE3","side":"buy","quantity":10,"price":30.00}"""));
 
         Assert.Equal("accepted", nextOrderResponse.GetProperty("status").GetString());
@@ -271,8 +312,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnGenerator>
 
         // O ScreenLog do QuickFIX troca o separador SOH por "|" e marca a direção da mensagem.
         var stdoutLines = capturedStdout.ToString().Split('\n');
-        Assert.Single(stdoutLines, line => line.StartsWith("<outgoing> ") && line.Contains("|35=D|") && line.Contains("|11=" + clOrdId + "|"));
-        Assert.Single(stdoutLines, line => line.StartsWith("<incoming> ") && line.Contains("|35=8|") && line.Contains("|11=" + clOrdId + "|"));
+        Assert.Single(stdoutLines, stdoutLine => stdoutLine.StartsWith("<outgoing> ") && stdoutLine.Contains("|35=D|") && stdoutLine.Contains("|11=" + clOrdId + "|"));
+        Assert.Single(stdoutLines, stdoutLine => stdoutLine.StartsWith("<incoming> ") && stdoutLine.Contains("|35=8|") && stdoutLine.Contains("|11=" + clOrdId + "|"));
     }
 
     // A sessão FIX entrega em ordem: se uma ordem inválida tivesse saído, ela chegaria antes da sentinela.
@@ -327,7 +368,7 @@ public sealed class OrderCommunicationTests
         acceptor.Start();
 
         var acceptorListeners = System.Net.NetworkInformation.IPGlobalProperties.GetIPGlobalProperties()
-            .GetActiveTcpListeners().Where(endpoint => endpoint.Port == acceptor.Port).ToList();
+            .GetActiveTcpListeners().Where(listenerEndpoint => listenerEndpoint.Port == acceptor.Port).ToList();
 
         var acceptorListener = Assert.Single(acceptorListeners);
         Assert.Equal(IPAddress.Loopback, acceptorListener.Address);

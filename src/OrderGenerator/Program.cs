@@ -7,35 +7,36 @@ var buildCommitSha = ApiEndpoints.ReadBuildCommitSha() is { Length: 40 } shaFrom
         "O build não gravou o commit. Compile dentro do repositório git ou passe -p:SourceRevisionId=<sha completo>.");
 
 // Raiz na pasta do binário: appsettings.json e wwwroot são achados de qualquer pasta de onde o processo suba.
-var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+var orderGeneratorBuilder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
     ContentRootPath = AppContext.BaseDirectory
 });
-ContractHttpPort.UseDefaultWhenNotInformed(builder);
+ContractHttpPort.UseDefaultWhenNotInformed(orderGeneratorBuilder);
 
-builder.Services.AddSingleton<FixOrderClient>();
-builder.Services.AddHostedService(services => services.GetRequiredService<FixOrderClient>());
+orderGeneratorBuilder.Services.AddSingleton<FixOrderClient>();
+orderGeneratorBuilder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FixOrderClient>());
 
-builder.Services.AddHttpClient(ApiEndpoints.AccumulatorClient, (services, accumulatorClient) =>
+orderGeneratorBuilder.Services.AddHttpClient(ApiEndpoints.AccumulatorHttpClientName, (serviceProvider, accumulatorClient) =>
 {
-    var accumulatorBaseUrl = services.GetRequiredService<IConfiguration>()["OrderAccumulator:BaseUrl"]
+    var accumulatorBaseUrl = serviceProvider.GetRequiredService<IConfiguration>()["OrderAccumulator:BaseUrl"]
         ?? throw new InvalidOperationException("Configuração OrderAccumulator:BaseUrl ausente.");
     accumulatorClient.BaseAddress = new Uri(accumulatorBaseUrl);
     accumulatorClient.Timeout = TimeSpan.FromSeconds(5);
 });
 
-var app = builder.Build();
+var orderGeneratorApp = orderGeneratorBuilder.Build();
 
 // Erro não previsto vira o corpo do contrato, sem stack trace para quem chamou.
-app.UseExceptionHandler(errors => errors.Run(context => ApiEndpoints.UnexpectedError().ExecuteAsync(context)));
+orderGeneratorApp.UseExceptionHandler(errorPipeline =>
+    errorPipeline.Run(httpContext => ApiEndpoints.UnexpectedErrorResponse().ExecuteAsync(httpContext)));
 
-app.UseDefaultFiles();
-app.UseStaticFiles();
-app.MapApi(buildCommitSha);
-app.MapFallbackToFile("index.html");
+orderGeneratorApp.UseDefaultFiles();
+orderGeneratorApp.UseStaticFiles();
+orderGeneratorApp.MapOrderGeneratorRoutes(buildCommitSha);
+orderGeneratorApp.MapFallbackToFile("index.html");
 
-app.Run();
+orderGeneratorApp.Run();
 
 // Deixa o WebApplicationFactory dos testes enxergar o ponto de entrada.
 public partial class Program;
@@ -45,9 +46,10 @@ public static class ContractHttpPort
 {
     public const string DefaultHttpPort = "8080";
 
-    public static void UseDefaultWhenNotInformed(WebApplicationBuilder builder)
+    public static void UseDefaultWhenNotInformed(WebApplicationBuilder orderGeneratorBuilder)
     {
-        if (string.IsNullOrEmpty(builder.Configuration["HTTP_PORTS"]) && string.IsNullOrEmpty(builder.Configuration["URLS"]))
-            builder.WebHost.UseSetting(WebHostDefaults.HttpPortsKey, DefaultHttpPort);
+        if (string.IsNullOrEmpty(orderGeneratorBuilder.Configuration["HTTP_PORTS"])
+            && string.IsNullOrEmpty(orderGeneratorBuilder.Configuration["URLS"]))
+            orderGeneratorBuilder.WebHost.UseSetting(WebHostDefaults.HttpPortsKey, DefaultHttpPort);
     }
 }

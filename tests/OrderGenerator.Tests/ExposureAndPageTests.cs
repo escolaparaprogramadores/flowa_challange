@@ -20,10 +20,10 @@ public sealed class ExposureProxyTests
     [Fact]
     public async Task Repassa_o_corpo_do_accumulator_com_status_200()
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async context =>
+        await using var fakeAccumulator = await StartFakeAccumulator(async exposuresHttpContext =>
         {
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(AccumulatorExposuresJson);
+            exposuresHttpContext.Response.ContentType = "application/json";
+            await exposuresHttpContext.Response.WriteAsync(AccumulatorExposuresJson);
         });
         await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), fakeAccumulator.Url);
         using var orderGeneratorClient = orderGenerator.CreateClient();
@@ -52,8 +52,8 @@ public sealed class ExposureProxyTests
     [Fact]
     public async Task Accumulator_que_nao_responde_em_5_segundos_vira_503()
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async context =>
-            await Task.Delay(TimeSpan.FromSeconds(8), context.RequestAborted));
+        await using var fakeAccumulator = await StartFakeAccumulator(async exposuresHttpContext =>
+            await Task.Delay(TimeSpan.FromSeconds(8), exposuresHttpContext.RequestAborted));
         await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), fakeAccumulator.Url);
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
@@ -68,9 +68,9 @@ public sealed class ExposureProxyTests
     [Fact]
     public async Task Accumulator_com_erro_500_vira_503()
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(context =>
+        await using var fakeAccumulator = await StartFakeAccumulator(exposuresHttpContext =>
         {
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            exposuresHttpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
             return Task.CompletedTask;
         });
         await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort(), fakeAccumulator.Url);
@@ -82,9 +82,9 @@ public sealed class ExposureProxyTests
     [Fact]
     public async Task Erro_nao_previsto_vira_500_com_o_corpo_do_contrato_sem_detalhe_interno()
     {
-        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort()).WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services => services
-                .AddHttpClient(ApiEndpoints.AccumulatorClient)
+        await using var orderGenerator = TestHost.CreateOrderGeneratorFactory(TestHost.FreePort()).WithWebHostBuilder(webHostBuilder =>
+            webHostBuilder.ConfigureTestServices(testServices => testServices
+                .AddHttpClient(ApiEndpoints.AccumulatorHttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => new ExplodingHandler())));
         using var orderGeneratorClient = orderGenerator.CreateClient();
 
@@ -257,17 +257,25 @@ public sealed class ContractHttpPortTests
     public void Porta_http_vem_da_variavel_do_contrato_e_8080_so_sem_ela()
     {
         var originalHttpPorts = Environment.GetEnvironmentVariable("ASPNETCORE_HTTP_PORTS");
+        var originalUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
         try
         {
+            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null);
+
             Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", "18080");
             Assert.Equal("18080", HttpPortsChosenAtStartup());
 
             Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", null);
             Assert.Equal(ContractHttpPort.DefaultHttpPort, HttpPortsChosenAtStartup());
+
+            // Com ASPNETCORE_URLS informada quem decide é ela: o 8080 padrão não pode entrar por cima.
+            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:18081");
+            Assert.Null(HttpPortsChosenAtStartup());
         }
         finally
         {
             Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", originalHttpPorts);
+            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", originalUrls);
         }
     }
 
