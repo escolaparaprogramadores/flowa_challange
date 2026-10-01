@@ -287,10 +287,10 @@ public sealed class CleanCloneImageCommitTests
             ["GIT_AUTHOR_NAME"] = "flowa-it", ["GIT_AUTHOR_EMAIL"] = "flowa-it@localhost",
             ["GIT_COMMITTER_NAME"] = "flowa-it", ["GIT_COMMITTER_EMAIL"] = "flowa-it@localhost",
         };
-        Task<string> RunWithCloneEnvironmentAsync(TimeSpan commandTimeout, string commandExecutable, params string[] commandArguments) =>
-            ExternalCommand.CaptureOutputAsync(commandExecutable, commandTimeout, cloneEnvironmentVariables, commandArguments);
-        Task<string> RunCloneComposeAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
-            RunWithCloneEnvironmentAsync(commandTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
+        Task<string> CaptureCloneExternalCommandOutputAsync(TimeSpan commandTimeout, string commandExecutable, params string[] commandArguments) =>
+            ExternalCommand.CaptureExternalCommandOutputAsync(commandExecutable, commandTimeout, cloneEnvironmentVariables, commandArguments);
+        Task<string> RunCloneComposeCommandAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
+            CaptureCloneExternalCommandOutputAsync(commandTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
 
         // O GET /version sai de dentro de cada container, pelo /dev/tcp do bash: a imagem aspnet não tem
         // curl e a 8081 do OrderAccumulator nem sai da rede do compose.
@@ -302,7 +302,7 @@ public sealed class CleanCloneImageCommitTests
             {
                 try
                 {
-                    var versionHttpResponse = await RunCloneComposeAsync(TimeSpan.FromSeconds(20), "exec", "-T", serviceName, "bash", "-c",
+                    var versionHttpResponse = await RunCloneComposeCommandAsync(TimeSpan.FromSeconds(20), "exec", "-T", serviceName, "bash", "-c",
                         $"exec 3<>/dev/tcp/127.0.0.1/{containerHttpPort} && printf 'GET /version HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && cat <&3");
                     var versionJsonStart = versionHttpResponse.IndexOf('{');
                     if (versionJsonStart >= 0)
@@ -321,23 +321,23 @@ public sealed class CleanCloneImageCommitTests
             throw new TimeoutException($"o /version de {serviceName} não respondeu em 2 minutos; última falha: {lastVersionFailure}");
         }
 
-        var repoHeadCommit = (await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
+        var repoHeadCommit = (await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
         var cloneTestFailed = false;
         try
         {
-            await RunWithCloneEnvironmentAsync(TimeSpan.FromMinutes(2), "git", "clone", "--quiet", "--no-local", repoRoot, cloneDirectory);
-            await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "checkout", "--quiet", repoHeadCommit);
+            await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromMinutes(2), "git", "clone", "--quiet", "--no-local", repoRoot, cloneDirectory);
+            await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "checkout", "--quiet", repoHeadCommit);
 
-            await RunCloneComposeAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
+            await RunCloneComposeCommandAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
             Assert.Equal(repoHeadCommit, await ReadCloneServiceCommitAsync("ordergenerator", 8080));
             Assert.Equal(repoHeadCommit, await ReadCloneServiceCommitAsync("orderaccumulator", 8081));
-            await RunCloneComposeAsync(TimeSpan.FromMinutes(2), "down", "-v");
+            await RunCloneComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v");
 
-            await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "commit novo do teste");
-            var newCloneCommit = (await RunWithCloneEnvironmentAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "rev-parse", "HEAD")).Trim();
+            await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "commit novo do teste");
+            var newCloneCommit = (await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "rev-parse", "HEAD")).Trim();
             Assert.NotEqual(repoHeadCommit, newCloneCommit);
 
-            await RunCloneComposeAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
+            await RunCloneComposeCommandAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
             Assert.Equal(newCloneCommit, await ReadCloneServiceCommitAsync("ordergenerator", 8080));
             Assert.Equal(newCloneCommit, await ReadCloneServiceCommitAsync("orderaccumulator", 8081));
         }
@@ -351,7 +351,7 @@ public sealed class CleanCloneImageCommitTests
             // Todo passo da limpeza roda; com o teste já reprovado, falha de limpeza só vai para o log.
             Func<Task>[] cloneCleanupSteps =
             [
-                async () => { if (File.Exists(cloneComposeFile)) await RunCloneComposeAsync(TimeSpan.FromMinutes(2), "down", "-v", "--rmi", "local"); },
+                async () => { if (File.Exists(cloneComposeFile)) await RunCloneComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v", "--rmi", "local"); },
                 () => { DeleteCloneDirectory(cloneDirectory); return Task.CompletedTask; },
             ];
             var cloneCleanupFailures = new List<Exception>();

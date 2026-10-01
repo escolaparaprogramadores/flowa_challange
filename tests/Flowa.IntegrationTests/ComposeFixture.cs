@@ -28,7 +28,7 @@ public sealed class ComposeFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        sourceRevisionId = (await CaptureCommandOutputAsync("git", TimeSpan.FromSeconds(30), "-C", RepoRoot, "rev-parse", "HEAD")).Trim();
+        sourceRevisionId = (await CaptureComposeTestCommandOutputAsync("git", TimeSpan.FromSeconds(30), "-C", RepoRoot, "rev-parse", "HEAD")).Trim();
         await RunComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v", "--remove-orphans");
         await RunComposeCommandAsync(ImageBuildTimeout, "up", "-d", "--build", "--wait", "--wait-timeout", "180");
         await WaitForOrderGeneratorHealthAsync();
@@ -66,7 +66,7 @@ public sealed class ComposeFixture : IAsyncLifetime
         var containerId = (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "ps", "-q", serviceName)).Trim();
         Assert.False(string.IsNullOrEmpty(containerId), $"o serviço {serviceName} não tem container");
 
-        var containerInspectJson = await CaptureCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "inspect", containerId);
+        var containerInspectJson = await CaptureComposeTestCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "inspect", containerId);
         using var containerInspectDocument = JsonDocument.Parse(containerInspectJson);
         var serviceContainer = containerInspectDocument.RootElement[0];
         var containerState = serviceContainer.GetProperty("State");
@@ -117,7 +117,7 @@ public sealed class ComposeFixture : IAsyncLifetime
     }
 
     public Task<string> RunComposeCommandAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
-        CaptureCommandOutputAsync("docker", commandTimeout,
+        CaptureComposeTestCommandOutputAsync("docker", commandTimeout,
             ["compose", "-p", ComposeProjectName, "-f", Path.Combine(RepoRoot, "docker-compose.yml"), .. composeArguments]);
 
     private async Task WaitForOrderGeneratorHealthAsync()
@@ -137,19 +137,19 @@ public sealed class ComposeFixture : IAsyncLifetime
         Assert.Fail($"/health do OrderGenerator não respondeu em {AppStartTimeout}");
     }
 
-    private Task<string> CaptureCommandOutputAsync(string commandExecutable, TimeSpan commandTimeout, params string[] commandArguments)
+    private Task<string> CaptureComposeTestCommandOutputAsync(string commandExecutable, TimeSpan commandTimeout, params string[] commandArguments)
     {
         var composeEnvironmentVariables = new Dictionary<string, string?> { ["FLOWA_HTTP_PORT"] = OrderGeneratorHostPort.ToString() };
         if (sourceRevisionId is not null)
             composeEnvironmentVariables["SOURCE_REVISION_ID"] = sourceRevisionId;
-        return ExternalCommand.CaptureOutputAsync(commandExecutable, commandTimeout, composeEnvironmentVariables, commandArguments);
+        return ExternalCommand.CaptureExternalCommandOutputAsync(commandExecutable, commandTimeout, composeEnvironmentVariables, commandArguments);
     }
 }
 
 public static class ExternalCommand
 {
     // Variável com valor nulo é removida do ambiente do processo filho.
-    public static async Task<string> CaptureOutputAsync(
+    public static async Task<string> CaptureExternalCommandOutputAsync(
         string commandExecutable,
         TimeSpan commandTimeout,
         IReadOnlyDictionary<string, string?> environmentVariables,
