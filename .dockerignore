@@ -1,0 +1,14 @@
+.vs/
+.vscode/
+.idea/
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/TestResults/
+**/playwright-report/
+**/test-results/
+src/OrderGenerator/wwwroot/
+.env
+.env.*
+*.log
