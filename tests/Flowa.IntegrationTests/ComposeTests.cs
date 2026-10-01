@@ -5,24 +5,24 @@ using System.Text.RegularExpressions;
 
 namespace Flowa.IntegrationTests;
 
-// Os dois apps em containers separados, falando FIX de verdade pela rede do compose.
-[Collection(ComposeCollection.Name)]
+// Os dois apps em containers separados, falando FIX de verdade pela rede do composeUnderTest.
+[Collection(ComposeCollection.CollectionName)]
 [Trait("Category", "Integration")]
-public sealed class ComposeTests(ComposeFixture compose)
+public sealed class ComposeTests(ComposeFixture composeUnderTest)
 {
     [Fact]
     public async Task Os_dois_apps_rodam_em_containers_separados_com_os_papeis_fix_do_contrato()
     {
-        var orderGenerator = await compose.InspectServiceContainerAsync("ordergenerator");
-        var orderAccumulator = await compose.InspectServiceContainerAsync("orderaccumulator");
+        var orderGeneratorContainer = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
+        var orderAccumulatorContainer = await composeUnderTest.InspectServiceContainerAsync("orderaccumulator");
 
-        Assert.Equal("running", orderGenerator.Status);
-        Assert.Equal("running", orderAccumulator.Status);
-        Assert.Equal("dotnet OrderGenerator.dll", orderGenerator.Entrypoint);
-        Assert.Equal("dotnet OrderAccumulator.dll", orderAccumulator.Entrypoint);
+        Assert.Equal("running", orderGeneratorContainer.ContainerStatus);
+        Assert.Equal("running", orderAccumulatorContainer.ContainerStatus);
+        Assert.Equal("dotnet OrderGenerator.dll", orderGeneratorContainer.Entrypoint);
+        Assert.Equal("dotnet OrderAccumulator.dll", orderAccumulatorContainer.Entrypoint);
 
         // O initiator manda o primeiro Logon, saindo do log do OrderGenerator.
-        var generatorFixMessages = FixLog.ParseFixMessages(await compose.ReadServiceLogAsync("ordergenerator"));
+        var generatorFixMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync("ordergenerator"));
         var initiatorLogon = generatorFixMessages.First(fixMessage => fixMessage.TagValue(35) == "A" && fixMessage.TagValue(49) == "ORDERGENERATOR");
         Assert.Equal(initiatorLogon, generatorFixMessages.First(fixMessage => fixMessage.TagValue(35) == "A"));
         Assert.Equal("FIX.4.4", initiatorLogon.TagValue(8));
@@ -30,7 +30,7 @@ public sealed class ComposeTests(ComposeFixture compose)
         Assert.Equal("30", initiatorLogon.TagValue(108));
 
         // O acceptor responde o Logon com os CompIDs trocados, saindo do log do OrderAccumulator.
-        var accumulatorFixMessages = FixLog.ParseFixMessages(await compose.ReadServiceLogAsync("orderaccumulator"));
+        var accumulatorFixMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync("orderaccumulator"));
         var acceptorLogon = accumulatorFixMessages.First(fixMessage => fixMessage.TagValue(35) == "A" && fixMessage.TagValue(49) == "ORDERACCUMULATOR");
         Assert.Equal("FIX.4.4", acceptorLogon.TagValue(8));
         Assert.Equal("ORDERGENERATOR", acceptorLogon.TagValue(56));
@@ -39,30 +39,30 @@ public sealed class ComposeTests(ComposeFixture compose)
     [Fact]
     public async Task So_a_porta_da_pagina_fica_aberta_no_host_e_os_apps_nao_rodam_como_root()
     {
-        var orderGenerator = await compose.InspectServiceContainerAsync("ordergenerator");
-        var orderAccumulator = await compose.InspectServiceContainerAsync("orderaccumulator");
-        var postgres = await compose.InspectServiceContainerAsync("postgres");
+        var orderGeneratorContainer = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
+        var orderAccumulatorContainer = await composeUnderTest.InspectServiceContainerAsync("orderaccumulator");
+        var postgresContainer = await composeUnderTest.InspectServiceContainerAsync("postgres");
 
-        // O acceptor FIX só confere SenderCompID/TargetCompID: a 9876 não pode sair da rede do compose.
-        Assert.Equal(new[] { $"8080/tcp->127.0.0.1:{ComposeFixture.OrderGeneratorHostPort}" }, orderGenerator.PublishedPortBindings);
-        Assert.Empty(orderAccumulator.PublishedPortBindings);
-        Assert.Empty(postgres.PublishedPortBindings);
+        // O acceptor FIX só confere SenderCompID/TargetCompID: a 9876 não pode sair da rede do composeUnderTest.
+        Assert.Equal(new[] { $"8080/tcp->127.0.0.1:{ComposeFixture.OrderGeneratorHostPort}" }, orderGeneratorContainer.PublishedPortBindings);
+        Assert.Empty(orderAccumulatorContainer.PublishedPortBindings);
+        Assert.Empty(postgresContainer.PublishedPortBindings);
 
         // 1654 é o usuário "app" que a imagem aspnet do .NET já traz (APP_UID).
-        Assert.Equal("1654", await compose.ReadContainerProcessUserIdAsync("ordergenerator"));
-        Assert.Equal("1654", await compose.ReadContainerProcessUserIdAsync("orderaccumulator"));
+        Assert.Equal("1654", await composeUnderTest.ReadContainerProcessUserIdAsync("ordergenerator"));
+        Assert.Equal("1654", await composeUnderTest.ReadContainerProcessUserIdAsync("orderaccumulator"));
     }
 
     [Fact]
     public async Task OrderAccumulator_so_sobe_depois_do_postgres_ficar_saudavel()
     {
-        using var resolvedConfig = await compose.ReadResolvedComposeConfigAsync();
-        var services = resolvedConfig.RootElement.GetProperty("services");
+        using var resolvedConfig = await composeUnderTest.ReadResolvedComposeConfigAsync();
+        var composeServices = resolvedConfig.RootElement.GetProperty("services");
 
-        var accumulatorDependsOnPostgres = services.GetProperty("orderaccumulator").GetProperty("depends_on").GetProperty("postgres");
+        var accumulatorDependsOnPostgres = composeServices.GetProperty("orderaccumulator").GetProperty("depends_on").GetProperty("postgres");
         Assert.Equal("service_healthy", accumulatorDependsOnPostgres.GetProperty("condition").GetString());
 
-        var postgresHealthcheck = services.GetProperty("postgres").GetProperty("healthcheck").GetProperty("test")
+        var postgresHealthcheck = composeServices.GetProperty("postgres").GetProperty("healthcheck").GetProperty("test")
             .EnumerateArray().Select(healthcheckPart => healthcheckPart.GetString()).ToArray();
         Assert.Equal(new[] { "CMD-SHELL", "pg_isready -U flowa -d flowa" }, postgresHealthcheck);
     }
@@ -111,18 +111,18 @@ public sealed class ComposeTests(ComposeFixture compose)
     [Fact]
     public async Task Pagina_e_exposicao_respondem_pelo_OrderGenerator()
     {
-        using var pageResponse = await compose.OrderGeneratorHttp.GetAsync("/");
+        using var pageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/");
         Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
         Assert.Equal("text/html", pageResponse.Content.Headers.ContentType?.MediaType);
         var pageHtml = await pageResponse.Content.ReadAsStringAsync();
         Assert.Contains("<title>Base investimentos — Boleta de ordens</title>", pageHtml);
         Assert.Contains("<div id=\"raiz\"></div>", pageHtml);
 
-        using var exposuresResponse = await compose.OrderGeneratorHttp.GetAsync("/api/exposures");
+        using var exposuresResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/exposures");
         Assert.Equal(HttpStatusCode.OK, exposuresResponse.StatusCode);
-        var exposures = await exposuresResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(100000000.00m, exposures.GetProperty("limit").GetDecimal());
-        var exposureSymbols = exposures.GetProperty("exposures").EnumerateArray()
+        var exposuresBody = await exposuresResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(100000000.00m, exposuresBody.GetProperty("limit").GetDecimal());
+        var exposureSymbols = exposuresBody.GetProperty("exposures").EnumerateArray()
             .Select(symbolExposure => symbolExposure.GetProperty("symbol").GetString()!)
             .ToArray();
         Assert.Equal(new[] { "PETR4", "VALE3", "VIIA4" }, exposureSymbols);
@@ -131,23 +131,23 @@ public sealed class ComposeTests(ComposeFixture compose)
     [Fact]
     public async Task Depois_de_recriar_o_OrderAccumulator_o_OrderGenerator_reloga_sozinho_e_aceita_a_proxima_ordem()
     {
-        var generatorBefore = await compose.InspectServiceContainerAsync("ordergenerator");
-        var accumulatorBefore = await compose.InspectServiceContainerAsync("orderaccumulator");
-        var logonsBeforeRecreate = await compose.CountFixLogonsFromAcceptorAsync();
+        var generatorBefore = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
+        var accumulatorBefore = await composeUnderTest.InspectServiceContainerAsync("orderaccumulator");
+        var logonsBeforeRecreate = await composeUnderTest.CountFixLogonsFromAcceptorAsync();
 
         // Só este teste usa VALE3: a exposição dele parte de zero no compose de teste.
         var orderBeforeRecreate = await PostOrderAsync("VALE3", "buy", 1, 1.00m);
         Assert.Equal("accepted", orderBeforeRecreate.GetProperty("status").GetString());
         Assert.Equal(1.00m, await ReadSymbolExposureAsync("VALE3"));
 
-        await compose.RunComposeCommandAsync(TimeSpan.FromMinutes(3), "up", "-d", "--no-deps", "--force-recreate", "--wait", "orderaccumulator");
+        await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(3), "up", "-d", "--no-deps", "--force-recreate", "--wait", "orderaccumulator");
 
-        var accumulatorAfter = await compose.InspectServiceContainerAsync("orderaccumulator");
+        var accumulatorAfter = await composeUnderTest.InspectServiceContainerAsync("orderaccumulator");
         Assert.NotEqual(accumulatorBefore.ContainerId, accumulatorAfter.ContainerId);
 
-        await compose.WaitForNewFixLogonAsync(logonsBeforeRecreate);
+        await composeUnderTest.WaitForNewFixLogonAsync(logonsBeforeRecreate);
 
-        var generatorAfter = await compose.InspectServiceContainerAsync("ordergenerator");
+        var generatorAfter = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
         Assert.Equal(generatorBefore.ContainerId, generatorAfter.ContainerId);
         Assert.Equal(generatorBefore.StartedAt, generatorAfter.StartedAt);
 
@@ -165,22 +165,22 @@ public sealed class ComposeTests(ComposeFixture compose)
     [Fact]
     public async Task Os_dados_do_postgres_ficam_num_volume_nomeado()
     {
-        var postgres = await compose.InspectServiceContainerAsync("postgres");
+        var postgresContainer = await composeUnderTest.InspectServiceContainerAsync("postgres");
 
-        Assert.Equal(new[] { $"volume:{ComposeFixture.ComposeProjectName}_pgdata->/var/lib/postgresql/data" }, postgres.VolumeMounts);
+        Assert.Equal(new[] { $"volume:{ComposeFixture.ComposeProjectName}_pgdata->/var/lib/postgresql/data" }, postgresContainer.VolumeMounts);
     }
 
     private async Task<decimal> ReadSymbolExposureAsync(string symbol)
     {
-        var exposures = await compose.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures");
-        var symbolExposure = Assert.Single(exposures.GetProperty("exposures").EnumerateArray(),
+        var exposuresBody = await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures");
+        var symbolExposure = Assert.Single(exposuresBody.GetProperty("exposures").EnumerateArray(),
             exposureRow => exposureRow.GetProperty("symbol").GetString() == symbol);
         return symbolExposure.GetProperty("exposure").GetDecimal();
     }
 
     private async Task<JsonElement> PostOrderAsync(string symbol, string side, int quantity, decimal price)
     {
-        using var orderResponse = await compose.OrderGeneratorHttp.PostAsJsonAsync("/api/orders", new { symbol, side, quantity, price });
+        using var orderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync("/api/orders", new { symbol, side, quantity, price });
         Assert.Equal(HttpStatusCode.OK, orderResponse.StatusCode);
         return await orderResponse.Content.ReadFromJsonAsync<JsonElement>();
     }
@@ -188,7 +188,7 @@ public sealed class ComposeTests(ComposeFixture compose)
     // A mensagem do ClOrdID no log de quem a enviou; tem de existir uma só.
     private async Task<FixMessage> FindSingleFixMessageAsync(string serviceName, string msgType, string clOrdId, string senderCompId)
     {
-        var matchingMessages = FixLog.ParseFixMessages(await compose.ReadServiceLogAsync(serviceName))
+        var matchingMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync(serviceName))
             .Where(fixMessage => fixMessage.TagValue(35) == msgType && fixMessage.TagValue(11) == clOrdId && fixMessage.TagValue(49) == senderCompId)
             .ToList();
         return Assert.Single(matchingMessages);
@@ -230,7 +230,7 @@ public sealed class ExposureLimitOutsideConfigTests
             .Select(relativePath => Path.Combine(repoRoot, relativePath))
             .ToList();
         var appSettingsFiles = Directory.EnumerateFiles(Path.Combine(repoRoot, "src"), "appsettings*.json", SearchOption.AllDirectories)
-            .Where(settingsPath => !settingsPath.Split(Path.DirectorySeparatorChar).Any(folder => folder is "bin" or "obj"))
+            .Where(settingsPath => !settingsPath.Split(Path.DirectorySeparatorChar).Any(pathSegment => pathSegment is "bin" or "obj"))
             .ToList();
 
         Assert.All(packagingFiles, packagingPath => Assert.True(File.Exists(packagingPath), $"{packagingPath} não existe"));

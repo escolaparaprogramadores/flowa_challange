@@ -69,13 +69,13 @@ public sealed class ComposeFixture : IAsyncLifetime
 
         var inspectJson = await CaptureCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "inspect", containerId);
         using var inspectDocument = JsonDocument.Parse(inspectJson);
-        var container = inspectDocument.RootElement[0];
-        var containerState = container.GetProperty("State");
+        var serviceContainer = inspectDocument.RootElement[0];
+        var containerState = serviceContainer.GetProperty("State");
 
         // Só as portas com ligação no host contam como publicadas; as outras ficam na rede do compose.
         // Guardamos cada ligação, para uma segunda ligação da mesma porta não sumir da comparação.
         var publishedPortBindings = new List<string>();
-        foreach (var exposedPort in container.GetProperty("NetworkSettings").GetProperty("Ports").EnumerateObject())
+        foreach (var exposedPort in serviceContainer.GetProperty("NetworkSettings").GetProperty("Ports").EnumerateObject())
         {
             if (exposedPort.Value.ValueKind != JsonValueKind.Array) continue;
             foreach (var hostBinding in exposedPort.Value.EnumerateArray())
@@ -84,12 +84,12 @@ public sealed class ComposeFixture : IAsyncLifetime
         }
 
         return new ServiceContainerState(
-            container.GetProperty("Id").GetString()!,
+            serviceContainer.GetProperty("Id").GetString()!,
             containerState.GetProperty("Status").GetString()!,
             containerState.GetProperty("StartedAt").GetString()!,
-            string.Join(' ', container.GetProperty("Config").GetProperty("Entrypoint").EnumerateArray().Select(entrypointPart => entrypointPart.GetString())),
+            string.Join(' ', serviceContainer.GetProperty("Config").GetProperty("Entrypoint").EnumerateArray().Select(entrypointPart => entrypointPart.GetString())),
             publishedPortBindings.Order().ToList(),
-            container.GetProperty("Mounts").EnumerateArray()
+            serviceContainer.GetProperty("Mounts").EnumerateArray()
                 .Select(containerMount => $"{containerMount.GetProperty("Type").GetString()}:{containerMount.GetProperty("Name").GetString()}->{containerMount.GetProperty("Destination").GetString()}")
                 .Order()
                 .ToList());
@@ -111,8 +111,8 @@ public sealed class ComposeFixture : IAsyncLifetime
 
     public async Task WaitForNewFixLogonAsync(int logonsAlreadySeen)
     {
-        var deadline = DateTime.UtcNow + AppStartTimeout;
-        while (DateTime.UtcNow < deadline)
+        var fixLogonDeadline = DateTime.UtcNow + AppStartTimeout;
+        while (DateTime.UtcNow < fixLogonDeadline)
         {
             if (await CountFixLogonsFromAcceptorAsync() > logonsAlreadySeen) return;
             await Task.Delay(500);
@@ -120,14 +120,14 @@ public sealed class ComposeFixture : IAsyncLifetime
         Assert.Fail($"o OrderGenerator não recebeu logon novo do OrderAccumulator em {AppStartTimeout}");
     }
 
-    public Task<string> RunComposeCommandAsync(TimeSpan timeout, params string[] composeArguments) =>
-        CaptureCommandOutputAsync("docker", timeout,
+    public Task<string> RunComposeCommandAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
+        CaptureCommandOutputAsync("docker", commandTimeout,
             ["compose", "-p", ComposeProjectName, "-f", Path.Combine(RepoRoot, "docker-compose.yml"), .. composeArguments]);
 
     private async Task WaitForOrderGeneratorHealthAsync()
     {
-        var deadline = DateTime.UtcNow + AppStartTimeout;
-        while (DateTime.UtcNow < deadline)
+        var healthCheckDeadline = DateTime.UtcNow + AppStartTimeout;
+        while (DateTime.UtcNow < healthCheckDeadline)
         {
             try
             {
@@ -141,9 +141,9 @@ public sealed class ComposeFixture : IAsyncLifetime
         Assert.Fail($"/health do OrderGenerator não respondeu em {AppStartTimeout}");
     }
 
-    private async Task<string> CaptureCommandOutputAsync(string executable, TimeSpan timeout, params string[] commandArguments)
+    private async Task<string> CaptureCommandOutputAsync(string commandExecutable, TimeSpan commandTimeout, params string[] commandArguments)
     {
-        var startInfo = new ProcessStartInfo(executable)
+        var startInfo = new ProcessStartInfo(commandExecutable)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -155,11 +155,11 @@ public sealed class ComposeFixture : IAsyncLifetime
         if (sourceRevisionId is not null)
             startInfo.Environment["SOURCE_REVISION_ID"] = sourceRevisionId;
 
-        var commandLine = $"{executable} {string.Join(' ', commandArguments)}";
+        var commandLine = $"{commandExecutable} {string.Join(' ', commandArguments)}";
         using var commandProcess = Process.Start(startInfo)!;
         var standardOutput = commandProcess.StandardOutput.ReadToEndAsync();
         var standardError = commandProcess.StandardError.ReadToEndAsync();
-        using var timeoutSource = new CancellationTokenSource(timeout);
+        using var timeoutSource = new CancellationTokenSource(commandTimeout);
         try
         {
             await commandProcess.WaitForExitAsync(timeoutSource.Token);
@@ -167,7 +167,7 @@ public sealed class ComposeFixture : IAsyncLifetime
         catch (OperationCanceledException)
         {
             commandProcess.Kill(entireProcessTree: true);
-            throw new TimeoutException($"{commandLine} passou de {timeout}");
+            throw new TimeoutException($"{commandLine} passou de {commandTimeout}");
         }
 
         if (commandProcess.ExitCode != 0)
@@ -178,7 +178,7 @@ public sealed class ComposeFixture : IAsyncLifetime
 
 public sealed record ServiceContainerState(
     string ContainerId,
-    string Status,
+    string ContainerStatus,
     string StartedAt,
     string Entrypoint,
     IReadOnlyList<string> PublishedPortBindings,
@@ -188,18 +188,18 @@ public static class RepoPaths
 {
     public static string FindRepoRoot()
     {
-        for (var folder = new DirectoryInfo(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
-            if (File.Exists(Path.Combine(folder.FullName, "docker-compose.yml")) && File.Exists(Path.Combine(folder.FullName, "Flowa.sln")))
-                return folder.FullName;
+        for (var repoRootCandidateDirectory = new DirectoryInfo(AppContext.BaseDirectory); repoRootCandidateDirectory is not null; repoRootCandidateDirectory = repoRootCandidateDirectory.Parent)
+            if (File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "docker-compose.yml")) && File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "Flowa.sln")))
+                return repoRootCandidateDirectory.FullName;
         throw new InvalidOperationException("não achei a raiz do repositório (docker-compose.yml + Flowa.sln)");
     }
 }
 
 // Mensagem FIX crua como o QuickFIX/n escreve no stdout. O separador é SOH (0x01);
 // aceitamos também "|" para o caso de o log já vir trocado.
-public sealed record FixMessage(string RawText, IReadOnlyDictionary<int, string> ValuesByTag)
+public sealed record FixMessage(string RawFixText, IReadOnlyDictionary<int, string> ValuesByFixTag)
 {
-    public string? TagValue(int tag) => ValuesByTag.TryGetValue(tag, out var tagValue) ? tagValue : null;
+    public string? TagValue(int fixTag) => ValuesByFixTag.TryGetValue(fixTag, out var fixTagValue) ? fixTagValue : null;
 }
 
 public static partial class FixLog
@@ -208,23 +208,23 @@ public static partial class FixLog
     private static partial Regex FixMessagePattern();
 
     public static IReadOnlyList<FixMessage> ParseFixMessages(string serviceLog) =>
-        FixMessagePattern().Matches(serviceLog).Select(match => ParseFixMessage(match.Value)).ToList();
+        FixMessagePattern().Matches(serviceLog).Select(fixMessageMatch => ParseFixMessage(fixMessageMatch.Value)).ToList();
 
     private static FixMessage ParseFixMessage(string rawFixText)
     {
-        var valuesByTag = new Dictionary<int, string>();
-        foreach (var tagAndValue in rawFixText.Split(['\u0001', '|'], StringSplitOptions.RemoveEmptyEntries))
+        var valuesByFixTag = new Dictionary<int, string>();
+        foreach (var fixTagAndValue in rawFixText.Split(['\u0001', '|'], StringSplitOptions.RemoveEmptyEntries))
         {
-            var equalsIndex = tagAndValue.IndexOf('=');
-            if (equalsIndex > 0 && int.TryParse(tagAndValue[..equalsIndex], out var tag))
-                valuesByTag.TryAdd(tag, tagAndValue[(equalsIndex + 1)..]);
+            var equalsIndex = fixTagAndValue.IndexOf('=');
+            if (equalsIndex > 0 && int.TryParse(fixTagAndValue[..equalsIndex], out var fixTag))
+                valuesByFixTag.TryAdd(fixTag, fixTagAndValue[(equalsIndex + 1)..]);
         }
-        return new FixMessage(rawFixText.Replace('\u0001', '|'), valuesByTag);
+        return new FixMessage(rawFixText.Replace('\u0001', '|'), valuesByFixTag);
     }
 }
 
-[CollectionDefinition(Name)]
+[CollectionDefinition(CollectionName)]
 public sealed class ComposeCollection : ICollectionFixture<ComposeFixture>
 {
-    public const string Name = "compose";
+    public const string CollectionName = "compose";
 }
