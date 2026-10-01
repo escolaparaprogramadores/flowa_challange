@@ -32,7 +32,7 @@ function acharValoresCrus(nomeDoArquivo, conteudoDoArquivo) {
   const achados = [];
   if (/\.tsx?$/.test(nomeDoArquivo)) {
     conteudoDoArquivo.split(/\r?\n/).forEach((linhaDoArquivo, indice) => {
-      if (JSX_COM_VALOR_CRU.test(linhaDoArquivo)) achados.push(`${nomeDoArquivo}:${indice + 1}: estilo com cor, fonte ou raio no componente`);
+      if (JSX_COM_VALOR_CRU.test(linhaDoArquivo)) achados.push(`${nomeDoArquivo}:${indice + 1}: estilo com cor, fonte, raio, espaço ou letra no componente`);
       if (/#[0-9a-f]{3,8}\b|\brgba?\(/i.test(linhaDoArquivo)) achados.push(`${nomeDoArquivo}:${indice + 1}: cor escrita direto no componente`);
     });
     return achados;
