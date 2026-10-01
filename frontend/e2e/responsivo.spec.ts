@@ -81,15 +81,19 @@ test('RNF-05: o foco pelo teclado é visível em cada controle da boleta, na cor
   await page.goto('/');
   for (const [nomeDoControle, controle] of controlesDaBoleta(page)) {
     await controle.focus();
-    const marcaDoFoco = await controle.evaluate((elemento) => {
-      const estilo = getComputedStyle(elemento);
-      const moldura = elemento.closest('.quantidade');
-      return {
-        contorno: estilo.outlineStyle === 'solid' ? estilo.outlineColor : '',
-        borda: (moldura ? getComputedStyle(moldura) : estilo).borderTopColor,
-      };
-    });
-    expect([marcaDoFoco.contorno, marcaDoFoco.borda], nomeDoControle).toContain(COR_DO_ACENTO);
+    // A borda muda com transição de 180 ms; espera a cor assentar em vez de ler no meio do caminho.
+    await expect
+      .poll(
+        () =>
+          controle.evaluate((elemento) => {
+            const estilo = getComputedStyle(elemento);
+            const moldura = elemento.closest('.quantidade');
+            const contorno = estilo.outlineStyle === 'solid' ? estilo.outlineColor : '';
+            return [contorno, (moldura ? getComputedStyle(moldura) : estilo).borderTopColor];
+          }),
+        { message: nomeDoControle },
+      )
+      .toContain(COR_DO_ACENTO);
   }
 });
 
