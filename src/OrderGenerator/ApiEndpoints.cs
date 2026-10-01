@@ -32,7 +32,7 @@ public static class ApiEndpoints
     private static async Task<IResult> PostOrder(HttpRequest request, FixOrderClient fix)
     {
         var fields = await ReadRawFields(request);
-        var validation = OrderValidator.Validate(fields.Symbol, fields.Side, fields.Quantity, fields.Price);
+        var validation = OrderValidator.ValidateFromJson(fields.Symbol, fields.Side, fields.Quantity, fields.Price);
         if (!validation.IsValid)
         {
             return Results.Json(
