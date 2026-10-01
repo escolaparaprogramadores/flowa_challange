@@ -4,7 +4,9 @@ Este arquivo é o acordo entre o OrderGenerator, o OrderAccumulator, a tela e o 
 Quem implementa segue o que está aqui. Mudou alguma coisa? Sobe a versão e avisa quem usa.
 
 As regras de campo da ordem (símbolo, lado, quantidade e preço) e as mensagens de erro moram em
-`src/Flowa.Shared` (`OrderRules`, `OrderValidator`, `OrderMessages`). Os dois apps usam esse projeto,
+`src/Flowa.Shared` (`OrderRules`, `OrderValidator`, `OrderMessages`). O OrderGenerator chama
+`OrderValidator.ValidateFromJson` com o texto cru do JSON; o OrderAccumulator chama
+`OrderValidator.ValidateFromFix` com os valores da mensagem FIX. Os dois apps usam esse projeto,
 então a regra é uma só.
 
 ## 1. Rotas HTTP
@@ -60,7 +62,7 @@ Devolve a exposição atual dos três símbolos, sempre nesta ordem: `PETR4`, `V
 
 - `exposure` = soma de `preço × quantidade` das compras aceitas menos a das vendas aceitas.
 - `remaining` = `limit - |exposure|`: quanto ainda cabe antes de estourar, para qualquer lado.
-- `limit` é a constante do OrderAccumulator (CA-21). Não vem de configuração.
+- `limit` é a constante do OrderAccumulator. Não vem de configuração nem de variável de ambiente.
 
 ### OrderGenerator — `GET /api/exposures`
 
@@ -108,11 +110,11 @@ Pacotes: `QuickFIXn.Core` e `QuickFIXn.FIX44`, versão `1.14.1` (os dois têm al
 
 O motivo da rejeição em `58`:
 
-- campo inválido (D-13): as mensagens de `OrderMessages` dos campos com erro, separadas por espaço,
+- campo inválido (o OrderAccumulator valida de novo, porque pode receber FIX direto): as mensagens de `OrderMessages` dos campos com erro, separadas por espaço,
   na ordem `symbol`, `side`, `quantity`, `price`. Uma ordem rejeitada aqui não muda a exposição.
 - limite: `Ordem rejeitada: a exposição de <SÍMBOLO> passaria do limite de 100.000.000,00.`
 
-Ordem repetida (mesmo `ClOrdID`, D-11): o OrderAccumulator devolve o `ExecutionReport` original que
+Ordem repetida (mesmo `ClOrdID`): o OrderAccumulator devolve o `ExecutionReport` original que
 gravou (mesmos `37`, `17`, `150`, `39`, `58`) e não conta a ordem de novo.
 
 ## 3. Sessão FIX
@@ -127,7 +129,7 @@ gravou (mesmos `37`, `17`, `150`, `39`, `58`) e não conta a ordem de novo.
 | HeartBtInt | 30 | — (usa o do initiator) |
 | ReconnectInterval | 2 s | — |
 
-Nas duas pontas (D-34):
+Nas duas pontas, para a sessão sobreviver à troca de container:
 
 - `ResetOnLogon=Y`, `ResetOnLogout=Y`, `ResetOnDisconnect=Y`;
 - store de mensagens em memória, nada em disco;
@@ -135,7 +137,7 @@ Nas duas pontas (D-34):
 
 O OrderGenerator confere se a sessão está logada antes de enviar. Sem sessão, responde
 `communication_error` na hora. Com sessão, espera o `ExecutionReport` do mesmo `ClOrdID` por até
-5 s (D-12); passou disso, `communication_error`. Quando o OrderAccumulator volta, o initiator reloga
+5 s; passou disso, `communication_error`. Quando o OrderAccumulator volta, o initiator reloga
 sozinho.
 
 ## 4. Portas e variáveis de ambiente
