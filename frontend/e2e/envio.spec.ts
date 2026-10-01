@@ -121,17 +121,20 @@ test('RF-24: enquanto a ordem viaja, o envio fica desabilitado e mostra "Enviand
   await expect(page.getByRole('button', { name: 'Enviar ordem de compra' })).toBeEnabled();
 });
 
-test('RNF-08: a exposição é lida ao abrir e depois de cada envio, sem leitura contínua', async ({ page }) => {
+test('RNF-08: a exposição é lida ao abrir e depois de cada envio, sem leitura contínua', async ({ context }) => {
+  // Página nova, com o contador ligado antes do primeiro carregamento: a do beforeEach
+  // pode ter uma leitura ainda em voo e contaria duas vezes.
+  const paginaContada = await context.newPage();
   const leiturasDaExposicao: string[] = [];
-  page.on('request', (requisicaoDaPagina) => {
+  paginaContada.on('request', (requisicaoDaPagina) => {
     if (new URL(requisicaoDaPagina.url()).pathname === ROTA_DAS_EXPOSICOES) leiturasDaExposicao.push(requisicaoDaPagina.url());
   });
-  await page.reload();
-  await expect(page.getByTestId('exposicao-PETR4')).toBeVisible();
-  await page.waitForTimeout(3_000);
+  await paginaContada.goto('/');
+  await expect(paginaContada.getByTestId('exposicao-PETR4')).toBeVisible();
+  await paginaContada.waitForTimeout(3_000);
   expect(leiturasDaExposicao).toHaveLength(1);
-  await enviarOrdemPelaBoleta(page, { simbolo: 'VALE3', lado: 'Compra', quantidade: '10', preco: '10,00' });
-  await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
-  await page.waitForTimeout(3_000);
+  await enviarOrdemPelaBoleta(paginaContada, { simbolo: 'VALE3', lado: 'Compra', quantidade: '10', preco: '10,00' });
+  await expect(paginaContada.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await paginaContada.waitForTimeout(3_000);
   expect(leiturasDaExposicao).toHaveLength(2);
 });
