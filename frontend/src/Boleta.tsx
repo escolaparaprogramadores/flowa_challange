@@ -12,13 +12,13 @@ import {
 import type { OrdemParaEnviar } from './ordensService';
 
 type PropsDaBoleta = {
-  enviando: boolean;
+  enviandoOrdem: boolean;
   aoEnviarOrdem: (ordem: OrdemParaEnviar) => void;
 };
 
 type ErrosDaBoleta = { erroDaQuantidade?: string; erroDoPreco?: string };
 
-export function Boleta({ enviando, aoEnviarOrdem }: PropsDaBoleta) {
+export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
   const [simbolo, setSimbolo] = useState<SimboloDaBoleta>('PETR4');
   const [lado, setLado] = useState<LadoDaOrdem>('Compra');
   const [quantidadeDigitada, setQuantidadeDigitada] = useState('100');
@@ -41,13 +41,13 @@ export function Boleta({ enviando, aoEnviarOrdem }: PropsDaBoleta) {
     setErrosDaBoleta((errosAnteriores) => ({ ...errosAnteriores, erroDaQuantidade: undefined }));
   }
 
-  function aoSubmeterBoleta(evento: FormEvent<HTMLFormElement>) {
-    evento.preventDefault();
+  function aoSubmeterBoleta(eventoDeEnvioDaBoleta: FormEvent<HTMLFormElement>) {
+    eventoDeEnvioDaBoleta.preventDefault();
     setErrosDaBoleta({
       erroDaQuantidade: validacaoDaQuantidade.mensagemDeErro,
       erroDoPreco: validacaoDoPreco.mensagemDeErro,
     });
-    if (quantidadeAceita === undefined || precoAceitoEmCentavos === undefined || enviando) return;
+    if (quantidadeAceita === undefined || precoAceitoEmCentavos === undefined || enviandoOrdem) return;
     aoEnviarOrdem({ simbolo, lado, quantidade: quantidadeAceita, precoEmCentavos: precoAceitoEmCentavos });
   }
 
@@ -136,8 +136,8 @@ export function Boleta({ enviando, aoEnviarOrdem }: PropsDaBoleta) {
         </div>
       </dl>
 
-      <button type="submit" className={`botao-enviar ${classeCssDoLado}`} disabled={enviando}>
-        {enviando ? 'Enviando…' : lado === 'Compra' ? 'Enviar ordem de compra' : 'Enviar ordem de venda'}
+      <button type="submit" className={`botao-enviar ${classeCssDoLado}`} disabled={enviandoOrdem}>
+        {enviandoOrdem ? 'Enviando…' : lado === 'Compra' ? 'Enviar ordem de compra' : 'Enviar ordem de venda'}
       </button>
       <p className="nota">Ordem de demonstração: nenhuma operação real é feita.</p>
     </form>

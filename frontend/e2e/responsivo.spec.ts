@@ -132,14 +132,14 @@ for (const largura of [390, 1024, 1179, 1280]) {
     await page.setViewportSize({ width: largura, height: 900 });
     await page.goto('/');
     for (const simbolo of ['PETR4', 'VALE3', 'VIIA4']) {
-      for (const rotulo of ['Exposição atual', 'Falta até o limite']) {
-        const rotuloDoSimbolo = page.getByTestId('exposicao-' + simbolo).locator('dt', { hasText: rotulo });
+      for (const rotuloDaExposicao of ['Exposição atual', 'Falta até o limite']) {
+        const rotuloDoSimbolo = page.getByTestId('exposicao-' + simbolo).locator('dt', { hasText: rotuloDaExposicao });
         await expect(rotuloDoSimbolo).toHaveCount(1);
         // Uma linha mede menos que duas vezes o tamanho da letra; quebrado em duas, passa disso.
         const cabeEmUmaLinha = await rotuloDoSimbolo.evaluate(
           (rotuloNaPagina) => rotuloNaPagina.getBoundingClientRect().height < parseFloat(getComputedStyle(rotuloNaPagina).fontSize) * 2,
         );
-        expect(cabeEmUmaLinha, `${simbolo} / ${rotulo}`).toBe(true);
+        expect(cabeEmUmaLinha, `${simbolo} / ${rotuloDaExposicao}`).toBe(true);
       }
     }
   });

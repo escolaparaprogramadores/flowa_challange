@@ -86,9 +86,9 @@ if (falhasDoAutoteste.length > 0) {
   process.exit(1);
 }
 
-function listarArquivosDaTela(pasta) {
-  return readdirSync(pasta, { withFileTypes: true }).flatMap((entradaDaPasta) =>
-    entradaDaPasta.isDirectory() ? listarArquivosDaTela(join(pasta, entradaDaPasta.name)) : [join(pasta, entradaDaPasta.name)],
+function listarArquivosDaTela(pastaComArquivosDaTela) {
+  return readdirSync(pastaComArquivosDaTela, { withFileTypes: true }).flatMap((entradaDaPasta) =>
+    entradaDaPasta.isDirectory() ? listarArquivosDaTela(join(pastaComArquivosDaTela, entradaDaPasta.name)) : [join(pastaComArquivosDaTela, entradaDaPasta.name)],
   );
 }
 

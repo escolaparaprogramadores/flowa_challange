@@ -20,9 +20,9 @@ function lerNumeroBrasileiro(textoDigitado: string): LeituraDoNumeroBrasileiro {
     const usouPontoComoDecimal = /^-?\d+\.\d+$/.test(textoSemEspacos);
     return { lido: false, motivoDaRecusa: usouPontoComoDecimal ? 'ponto-decimal' : 'formato' };
   }
-  const negativo = textoSemEspacos.startsWith('-');
+  const numeroDigitadoENegativo = textoSemEspacos.startsWith('-');
   const [parteInteiraComPontos, casasDecimais = ''] = textoSemEspacos.replace('-', '').split(',');
-  return { lido: true, parteInteira: parteInteiraComPontos.replaceAll('.', ''), casasDecimais, negativo };
+  return { lido: true, parteInteira: parteInteiraComPontos.replaceAll('.', ''), casasDecimais, negativo: numeroDigitadoENegativo };
 }
 
 export type ValidacaoDaQuantidade =

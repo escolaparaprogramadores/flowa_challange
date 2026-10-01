@@ -16,7 +16,7 @@ type EstadoDasExposicoes =
 
 export function PaginaDaBoletaEExposicao() {
   const [estadoDasExposicoes, setEstadoDasExposicoes] = useState<EstadoDasExposicoes>({ situacao: 'carregando' });
-  const [enviando, setEnviando] = useState(false);
+  const [enviandoOrdem, setEnviandoOrdem] = useState(false);
   const [respostaDaUltimaOrdem, setRespostaDaUltimaOrdem] = useState<RespostaDaOrdem>();
   const numeroDaUltimaLeituraDaExposicao = useRef(0);
 
@@ -36,11 +36,11 @@ export function PaginaDaBoletaEExposicao() {
   }, [atualizarExposicoes]);
 
   async function aoEnviarOrdem(ordem: OrdemParaEnviar) {
-    setEnviando(true);
+    setEnviandoOrdem(true);
     try {
       setRespostaDaUltimaOrdem(await enviarOrdem(ordem));
     } finally {
-      setEnviando(false);
+      setEnviandoOrdem(false);
     }
     // A exposição vem sempre do servidor: a tela não soma nada por conta própria.
     await atualizarExposicoes();
@@ -61,8 +61,8 @@ export function PaginaDaBoletaEExposicao() {
 
       <main className="grade">
         <PainelDeExposicao estadoDasExposicoes={estadoDasExposicoes} />
-        <PainelDeResposta enviando={enviando} respostaDaUltimaOrdem={respostaDaUltimaOrdem} />
-        <Boleta enviando={enviando} aoEnviarOrdem={aoEnviarOrdem} />
+        <PainelDeResposta enviandoOrdem={enviandoOrdem} respostaDaUltimaOrdem={respostaDaUltimaOrdem} />
+        <Boleta enviandoOrdem={enviandoOrdem} aoEnviarOrdem={aoEnviarOrdem} />
       </main>
     </div>
   );
@@ -111,9 +111,9 @@ const ROTULO_DA_SITUACAO_DA_ORDEM = {
   'falha-de-comunicacao': 'Erro de comunicação',
 } as const;
 
-type PropsDoPainelDeResposta = { enviando: boolean; respostaDaUltimaOrdem?: RespostaDaOrdem };
+type PropsDoPainelDeResposta = { enviandoOrdem: boolean; respostaDaUltimaOrdem?: RespostaDaOrdem };
 
-function PainelDeResposta({ enviando, respostaDaUltimaOrdem }: PropsDoPainelDeResposta) {
+function PainelDeResposta({ enviandoOrdem, respostaDaUltimaOrdem }: PropsDoPainelDeResposta) {
   const painelDeResposta = useRef<HTMLElement>(null);
 
   // No celular a resposta fica abaixo da boleta; traz o painel para a vista quando ela chega.
@@ -124,11 +124,11 @@ function PainelDeResposta({ enviando, respostaDaUltimaOrdem }: PropsDoPainelDeRe
   return (
     <section ref={painelDeResposta} className="cartao resposta" aria-labelledby="titulo-resposta" aria-live="polite">
       <h2 className="cartao-titulo" id="titulo-resposta">Resposta da ordem</h2>
-      {enviando && <span className="status status-enviando">Enviando…</span>}
-      {!enviando && !respostaDaUltimaOrdem && (
+      {enviandoOrdem && <span className="status status-enviando">Enviando…</span>}
+      {!enviandoOrdem && !respostaDaUltimaOrdem && (
         <p className="resposta-vazia">Nenhuma ordem enviada ainda. Preencha a boleta e envie para ver a resposta aqui.</p>
       )}
-      {!enviando && respostaDaUltimaOrdem && <DetalheDaResposta respostaDaOrdem={respostaDaUltimaOrdem} />}
+      {!enviandoOrdem && respostaDaUltimaOrdem && <DetalheDaResposta respostaDaOrdem={respostaDaUltimaOrdem} />}
     </section>
   );
 }

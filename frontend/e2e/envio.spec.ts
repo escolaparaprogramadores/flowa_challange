@@ -41,10 +41,10 @@ async function conferirPainelDeExposicao(page: Page, simbolo: string, exposicao:
   await expect(linhaDoSimbolo.getByTestId('exposicao-restante')).toHaveText(formatadorDeReais.format(restante));
 }
 
-function celulaDaResposta(page: Page, rotulo: string) {
+function celulaDaResposta(page: Page, rotuloDaCelula: string) {
   return page
     .locator('.resposta-celula')
-    .filter({ has: page.locator('dt', { hasText: new RegExp('^' + rotulo + '$') }) })
+    .filter({ has: page.locator('dt', { hasText: new RegExp('^' + rotuloDaCelula + '$') }) })
     .locator('dd');
 }
 
@@ -120,7 +120,7 @@ test('CA-16 e CA-17: ordem que estoura o limite aparece rejeitada com o motivo e
 test('RF-24: enquanto a ordem viaja, o envio fica desabilitado e mostra "Enviando…"', async ({ page }) => {
   // Segura a requisição real por um instante, sem trocar a resposta do servidor.
   await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, async (requisicaoSegurada) => {
-    await new Promise((liberar) => setTimeout(liberar, 800));
+    await new Promise((liberarRequisicaoSegurada) => setTimeout(liberarRequisicaoSegurada, 800));
     await requisicaoSegurada.continue();
   });
   await page.getByLabel(/^Quantidade de/).fill('10');
@@ -159,7 +159,7 @@ test('regressão: uma leitura antiga e lenta da exposição não apaga a leitura
     if (primeiraLeituraJaSegurada) return leituraDaExposicao.continue();
     primeiraLeituraJaSegurada = true;
     const respostaDeAntesDaOrdem = await leituraDaExposicao.fetch();
-    await new Promise((liberar) => setTimeout(liberar, 3_000));
+    await new Promise((liberarLeituraSegurada) => setTimeout(liberarLeituraSegurada, 3_000));
     await leituraDaExposicao.fulfill({ response: respostaDeAntesDaOrdem });
   });
   await paginaComLeituraLenta.goto('/');
