@@ -58,27 +58,27 @@ public sealed class AccumulatorApp : WebApplicationFactory<Program>
     {
         var portProbe = new TcpListener(IPAddress.Loopback, 0);
         portProbe.Start();
-        var freePort = ((IPEndPoint)portProbe.LocalEndpoint).Port;
+        var freeFixAcceptorPort = ((IPEndPoint)portProbe.LocalEndpoint).Port;
         portProbe.Stop();
-        return freePort;
+        return freeFixAcceptorPort;
     }
 }
 
 // Guarda o que o app escreveu no log, para conferir o log FIX (D-34).
 public sealed class OrderAccumulatorCapturedLogs : ILoggerProvider
 {
-    private readonly ConcurrentQueue<string> capturedLines = new();
-    public IReadOnlyList<string> CapturedLogLines => capturedLines.ToList();
-    public ILogger CreateLogger(string categoryName) => new OrderAccumulatorLogCaptureLogger(categoryName, capturedLines);
+    private readonly ConcurrentQueue<string> capturedOrderAccumulatorLogLines = new();
+    public IReadOnlyList<string> CapturedLogLines => capturedOrderAccumulatorLogLines.ToList();
+    public ILogger CreateLogger(string categoryName) => new OrderAccumulatorLogCaptureLogger(categoryName, capturedOrderAccumulatorLogLines);
     public void Dispose() { }
 
-    private sealed class OrderAccumulatorLogCaptureLogger(string categoryName, ConcurrentQueue<string> capturedLines) : ILogger
+    private sealed class OrderAccumulatorLogCaptureLogger(string categoryName, ConcurrentQueue<string> capturedOrderAccumulatorLogLines) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter) =>
-            capturedLines.Enqueue($"{logLevel} {categoryName}: {formatter(state, exception)}");
+            capturedOrderAccumulatorLogLines.Enqueue($"{logLevel} {categoryName}: {formatter(state, exception)}");
     }
 }
 
@@ -90,12 +90,12 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     private readonly SocketInitiator fixTestSocketInitiator;
     private readonly TaskCompletionSource fixSessionLoggedOn = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Channel<ExecutionReport> executionReports = Channel.CreateUnbounded<ExecutionReport>();
-    private readonly Channel<BusinessMessageReject> businessRejects = Channel.CreateUnbounded<BusinessMessageReject>();
-    private SessionID? sessionId;
+    private readonly Channel<BusinessMessageReject> businessMessageRejects = Channel.CreateUnbounded<BusinessMessageReject>();
+    private SessionID? fixSessionId;
 
     private FixTestInitiator(int fixAcceptorPort)
     {
-        var initiatorSettings = new SessionSettings(new StringReader($"""
+        var fixTestInitiatorSettings = new SessionSettings(new StringReader($"""
             [DEFAULT]
             ConnectionType=initiator
             ReconnectInterval=1
@@ -115,7 +115,7 @@ public sealed class FixTestInitiator : IApplication, IDisposable
             SocketConnectHost=127.0.0.1
             SocketConnectPort={fixAcceptorPort}
             """));
-        fixTestSocketInitiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, (ILoggerFactory?)null, null);
+        fixTestSocketInitiator = new SocketInitiator(this, new MemoryStoreFactory(), fixTestInitiatorSettings, (ILoggerFactory?)null, null);
     }
 
     public static async Task<FixTestInitiator> LogOnToAcceptorAsync(int fixAcceptorPort)
@@ -139,48 +139,48 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     // Manda a ordem e devolve o ExecutionReport que voltou para ela.
     public async Task<ExecutionReport> SendExpectingExecutionReportAsync(NewOrderSingle newOrderSingle)
     {
-        Assert.True(Session.SendToTarget(newOrderSingle, sessionId!));
-        var executionReport = await executionReports.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
-        Assert.Equal(newOrderSingle.ClOrdID.Value, executionReport.ClOrdID.Value);
-        return executionReport;
+        Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));
+        var receivedExecutionReport = await executionReports.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
+        Assert.Equal(newOrderSingle.ClOrdID.Value, receivedExecutionReport.ClOrdID.Value);
+        return receivedExecutionReport;
     }
 
     // Manda a ordem e confere que nada volta dentro do prazo: nem ExecutionReport, nem BusinessMessageReject.
     public async Task ExpectNoAnswerAsync(NewOrderSingle newOrderSingle, TimeSpan noAnswerWindow)
     {
-        Assert.True(Session.SendToTarget(newOrderSingle, sessionId!));
+        Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));
         // Leitura cancelável: um ReadAsync pendurado depois do prazo engoliria o próximo relatório.
         using var noAnswerTimeout = new CancellationTokenSource(noAnswerWindow);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executionReports.Reader.ReadAsync(noAnswerTimeout.Token).AsTask());
-        Assert.False(businessRejects.Reader.TryRead(out _), "Veio um BusinessMessageReject onde não devia vir resposta nenhuma.");
+        Assert.False(businessMessageRejects.Reader.TryRead(out _), "Veio um BusinessMessageReject onde não devia vir resposta nenhuma.");
     }
 
     // Manda uma mensagem que a aplicação do acceptor não aceita e devolve a recusa (35=j) que voltou.
     public async Task<BusinessMessageReject> SendExpectingBusinessRejectAsync(NewOrderSingle newOrderSingle)
     {
-        Assert.True(Session.SendToTarget(newOrderSingle, sessionId!));
-        return await businessRejects.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
+        Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));
+        return await businessMessageRejects.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
     }
 
     public void Dispose() => fixTestSocketInitiator.Dispose();
 
-    public void OnLogon(SessionID sessionId)
+    public void OnLogon(SessionID fixSessionId)
     {
-        this.sessionId = sessionId;
+        this.fixSessionId = fixSessionId;
         fixSessionLoggedOn.TrySetResult();
     }
 
-    public void FromApp(Message message, SessionID sessionId)
+    public void FromApp(Message fixMessage, SessionID fixSessionId)
     {
-        if (message is ExecutionReport executionReport)
-            executionReports.Writer.TryWrite(executionReport);
-        else if (message is BusinessMessageReject businessReject)
-            businessRejects.Writer.TryWrite(businessReject);
+        if (fixMessage is ExecutionReport receivedExecutionReport)
+            executionReports.Writer.TryWrite(receivedExecutionReport);
+        else if (fixMessage is BusinessMessageReject businessReject)
+            businessMessageRejects.Writer.TryWrite(businessReject);
     }
 
-    public void OnCreate(SessionID sessionId) { }
-    public void OnLogout(SessionID sessionId) { }
-    public void ToAdmin(Message message, SessionID sessionId) { }
-    public void FromAdmin(Message message, SessionID sessionId) { }
-    public void ToApp(Message message, SessionID sessionId) { }
+    public void OnCreate(SessionID fixSessionId) { }
+    public void OnLogout(SessionID fixSessionId) { }
+    public void ToAdmin(Message fixMessage, SessionID fixSessionId) { }
+    public void FromAdmin(Message fixMessage, SessionID fixSessionId) { }
+    public void ToApp(Message fixMessage, SessionID fixSessionId) { }
 }

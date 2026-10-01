@@ -34,14 +34,14 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
         await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("venda-vale3", "VALE3", '2', 20, 25.00m));
         var exposuresAfterAccepted = ReadExposureEntries(await GetExposuresJsonAsync(orderAccumulatorTestApp));
 
-        var rejectedReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
+        var rejectedOrderExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
         var exposuresAfterRejected = ReadExposureEntries(await GetExposuresJsonAsync(orderAccumulatorTestApp));
 
         Assert.Equal(
             [("PETR4", 1_050.00m, 99_998_950.00m), ("VALE3", -500.00m, 99_999_500.00m), ("VIIA4", 0m, 100_000_000m)],
             exposuresAfterAccepted);
-        Assert.Equal(QuickFix.Fields.ExecType.REJECTED, rejectedReport.ExecType.Value);
-        Assert.Equal("A quantidade deve ser menor que 100.000.", rejectedReport.Text.Value);
+        Assert.Equal(QuickFix.Fields.ExecType.REJECTED, rejectedOrderExecutionReport.ExecType.Value);
+        Assert.Equal("A quantidade deve ser menor que 100.000.", rejectedOrderExecutionReport.Text.Value);
         Assert.Equal(exposuresAfterAccepted, exposuresAfterRejected);
     }
 

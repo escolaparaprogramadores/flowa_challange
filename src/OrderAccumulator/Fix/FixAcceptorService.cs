@@ -52,16 +52,16 @@ public sealed class FixAcceptorService(
             ?? throw new InvalidOperationException("Defina a porta do acceptor FIX em Fix__AcceptorPort.");
         var fixAcceptorBindHost = appConfiguration["Fix:AcceptorBindHost"];
 
-        var acceptorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, AcceptorSettingsFile));
-        foreach (var sessionId in acceptorSettings.GetSessions())
+        var loadedFixAcceptorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, AcceptorSettingsFile));
+        foreach (var fixSessionId in loadedFixAcceptorSettings.GetSessions())
         {
-            var sessionSettings = acceptorSettings.Get(sessionId);
-            sessionSettings.SetLong("SocketAcceptPort", fixAcceptorPort);
-            sessionSettings.SetString("DataDictionary", Path.Combine(AppContext.BaseDirectory, Fix44DictionaryFile));
+            var fixSessionSettings = loadedFixAcceptorSettings.Get(fixSessionId);
+            fixSessionSettings.SetLong("SocketAcceptPort", fixAcceptorPort);
+            fixSessionSettings.SetString("DataDictionary", Path.Combine(AppContext.BaseDirectory, Fix44DictionaryFile));
             if (!string.IsNullOrWhiteSpace(fixAcceptorBindHost))
-                sessionSettings.SetString("SocketAcceptHost", fixAcceptorBindHost);
+                fixSessionSettings.SetString("SocketAcceptHost", fixAcceptorBindHost);
         }
 
-        return acceptorSettings;
+        return loadedFixAcceptorSettings;
     }
 }

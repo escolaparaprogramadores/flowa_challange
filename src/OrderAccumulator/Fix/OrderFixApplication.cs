@@ -11,9 +11,9 @@ namespace OrderAccumulator.Fix;
 public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<OrderFixApplication> orderFixLogger)
     : MessageCracker, IApplication
 {
-    public void FromApp(Message message, SessionID sessionId) => Crack(message, sessionId);
+    public void FromApp(Message fixMessage, SessionID fixSessionId) => Crack(fixMessage, fixSessionId);
 
-    public void OnMessage(NewOrderSingle newOrderSingle, SessionID sessionId)
+    public void OnMessage(NewOrderSingle newOrderSingle, SessionID fixSessionId)
     {
         var incomingOrder = new IncomingOrder(
             newOrderSingle.ClOrdID.Value, newOrderSingle.Symbol.Value, newOrderSingle.Side.Value, newOrderSingle.OrderQty.Value, newOrderSingle.Price.Value);
@@ -39,7 +39,7 @@ public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<
 
         // A ordem já está gravada. Se a sessão caiu antes da resposta, reenviar o mesmo ClOrdID devolve
         // a resposta gravada (D-11); o aviso deixa o caso visível no log.
-        if (!Session.SendToTarget(BuildExecutionReport(orderOutcome), sessionId))
+        if (!Session.SendToTarget(BuildExecutionReport(orderOutcome), fixSessionId))
             orderFixLogger.LogWarning("ExecutionReport da ordem {ClOrdId} não foi enviado: a sessão FIX não está logada.", orderOutcome.ClOrdId);
     }
 
@@ -67,10 +67,10 @@ public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<
         return executionReport;
     }
 
-    public void OnCreate(SessionID sessionId) { }
-    public void OnLogon(SessionID sessionId) { }
-    public void OnLogout(SessionID sessionId) { }
-    public void ToAdmin(Message message, SessionID sessionId) { }
-    public void FromAdmin(Message message, SessionID sessionId) { }
-    public void ToApp(Message message, SessionID sessionId) { }
+    public void OnCreate(SessionID fixSessionId) { }
+    public void OnLogon(SessionID fixSessionId) { }
+    public void OnLogout(SessionID fixSessionId) { }
+    public void ToAdmin(Message fixMessage, SessionID fixSessionId) { }
+    public void FromAdmin(Message fixMessage, SessionID fixSessionId) { }
+    public void ToApp(Message fixMessage, SessionID fixSessionId) { }
 }
