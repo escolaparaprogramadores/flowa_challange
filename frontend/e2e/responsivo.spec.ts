@@ -1,10 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// Quebras do tema Base: três colunas a partir de 1180 px, duas até 860 px e uma no celular.
+// Quebras do tema Base (max-width inclui o próprio valor): uma coluna até 860 px,
+// duas de 861 a 1180 px e três a partir de 1181 px. Cada fronteira é medida dos dois lados.
 const LARGURAS_DO_TEMA = [
   { largura: 390, colunasEsperadas: 1 },
   { largura: 860, colunasEsperadas: 1 },
-  { largura: 1000, colunasEsperadas: 2 },
+  { largura: 861, colunasEsperadas: 2 },
+  { largura: 1180, colunasEsperadas: 2 },
+  { largura: 1181, colunasEsperadas: 3 },
   { largura: 1280, colunasEsperadas: 3 },
 ];
 

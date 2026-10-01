@@ -138,3 +138,46 @@ test('RNF-08: a exposição é lida ao abrir e depois de cada envio, sem leitura
   await paginaContada.waitForTimeout(3_000);
   expect(leiturasDaExposicao).toHaveLength(2);
 });
+
+test('regressão: uma leitura antiga e lenta da exposição não apaga a leitura feita depois do envio', async ({ context, page }) => {
+  const exposicaoAntes = await lerExposicaoNoServidor(page, 'PETR4');
+  const paginaComLeituraLenta = await context.newPage();
+  let primeiraLeituraJaSegurada = false;
+  // A primeira leitura busca o valor real na hora, mas só o entrega 3 s depois, já com a ordem aceita.
+  await paginaComLeituraLenta.route('**' + ROTA_DAS_EXPOSICOES, async (leituraDaExposicao) => {
+    if (primeiraLeituraJaSegurada) return leituraDaExposicao.continue();
+    primeiraLeituraJaSegurada = true;
+    const respostaDeAntesDaOrdem = await leituraDaExposicao.fetch();
+    await new Promise((liberar) => setTimeout(liberar, 3_000));
+    await leituraDaExposicao.fulfill({ response: respostaDeAntesDaOrdem });
+  });
+  await paginaComLeituraLenta.goto('/');
+  await enviarOrdemPelaBoleta(paginaComLeituraLenta, { simbolo: 'PETR4', lado: 'Compra', quantidade: '1.000', preco: '10,00' });
+  await expect(paginaComLeituraLenta.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await paginaComLeituraLenta.waitForTimeout(3_500);
+  const exposicaoEsperada = exposicaoAntes.exposure + 10_000;
+  await conferirPainelDeExposicao(paginaComLeituraLenta, 'PETR4', exposicaoEsperada, LIMITE - Math.abs(exposicaoEsperada));
+});
+
+test('RNF-02: cada número da tela usa algarismos tabulares', async ({ page }) => {
+  await enviarOrdemPelaBoleta(page, { simbolo: 'VALE3', lado: 'Compra', quantidade: '300', preco: '12,34' });
+  await expect(page.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  const numerosDaTela = [
+    page.getByLabel(/^Quantidade de/),
+    page.getByLabel('Preço por ação (R$)'),
+    page.locator('.resumo-linha').filter({ hasText: 'Preço por ação' }).locator('dd'),
+    page.getByTestId('total-estimado'),
+    celulaDaResposta(page, 'Quantidade'),
+    celulaDaResposta(page, 'Preço'),
+    celulaDaResposta(page, 'Número da ordem'),
+    celulaDaResposta(page, 'Identificador do envio'),
+    ...['PETR4', 'VALE3', 'VIIA4'].flatMap((simbolo) => [
+      page.getByTestId('exposicao-' + simbolo).getByTestId('exposicao-atual'),
+      page.getByTestId('exposicao-' + simbolo).getByTestId('exposicao-restante'),
+    ]),
+  ];
+  for (const numeroDaTela of numerosDaTela) {
+    await expect(numeroDaTela).toHaveCount(1);
+    await expect(numeroDaTela).toHaveCSS('font-variant-numeric', 'tabular-nums');
+  }
+});

@@ -5,8 +5,8 @@ export const ROTA_DE_CRIACAO_DE_ORDEM = '/api/orders';
 export const ROTA_DAS_EXPOSICOES = '/api/exposures';
 
 // O OrderGenerator já responde 503 depois de 5 s sem resposta do OrderAccumulator.
-// Este prazo é só uma rede de segurança para a tela nunca ficar presa esperando.
-const PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS = 7_000;
+// Este prazo é a rede de segurança para a tela nunca ficar presa se o próprio Generator calar.
+export const PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS = 6_000;
 
 const MENSAGEM_DE_SERVIDOR_SEM_RESPOSTA = 'Não foi possível falar com o servidor. Tente de novo em instantes.';
 const MENSAGEM_DE_EXPOSICAO_INDISPONIVEL = 'Não foi possível ler a exposição. Tente de novo em instantes.';
@@ -35,46 +35,30 @@ export type RespostaDaOrdem =
 export type ExposicaoDoSimbolo = { simbolo: string; exposicao: number; restanteAteOLimite: number };
 
 type CorpoDaRespostaDaOrdem = {
-  status?: string;
-  message?: string;
-  clOrdId?: string;
-  orderId?: string;
-  symbol?: string;
-  side?: string;
-  quantity?: number;
-  price?: number;
-  errors?: Array<{ field: string; message: string }>;
+  status?: string; message?: string; clOrdId?: string; orderId?: string; symbol?: string; side?: string;
+  quantity?: number; price?: number; errors?: Array<{ field: string; message: string }>;
 };
 
-type CorpoDasExposicoes = {
-  limit?: number;
-  exposures?: Array<{ symbol: string; exposure: number; remaining: number }>;
-  message?: string;
-};
+type CorpoDasExposicoes = { exposures?: Array<{ symbol: string; exposure: number; remaining: number }>; message?: string };
 
-async function chamarApiComPrazo(rotaDaApi: string, opcoesDaRequisicao: RequestInit = {}): Promise<Response> {
+// O prazo vale até o corpo terminar de chegar: um servidor que manda os cabeçalhos e trava
+// no corpo também é abandonado. Corpo vazio, HTML ou cortado vira "sem corpo".
+async function chamarApiComPrazo<CorpoEsperado>(rotaDaApi: string, opcoesDaRequisicao: RequestInit = {}) {
   const cancelamentoPorPrazo = new AbortController();
   const temporizadorDoPrazo = setTimeout(() => cancelamentoPorPrazo.abort(), PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS);
   try {
-    return await fetch(rotaDaApi, { ...opcoesDaRequisicao, signal: cancelamentoPorPrazo.signal });
+    const respostaHttp = await fetch(rotaDaApi, { ...opcoesDaRequisicao, signal: cancelamentoPorPrazo.signal });
+    const corpoDaResposta = (await respostaHttp.json().catch(() => undefined)) as CorpoEsperado | undefined;
+    return { respostaHttp, corpoDaResposta };
   } finally {
     clearTimeout(temporizadorDoPrazo);
   }
 }
 
-// Proxy ou erro de rede podem devolver corpo vazio ou HTML; nesses casos vale a mensagem padrão.
-async function lerCorpoJsonOuNada<CorpoEsperado>(respostaHttp: Response): Promise<CorpoEsperado | undefined> {
-  try {
-    return (await respostaHttp.json()) as CorpoEsperado;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrdem> {
-  let respostaHttp: Response;
+  let respostaDaCriacao: Awaited<ReturnType<typeof chamarApiComPrazo<CorpoDaRespostaDaOrdem>>>;
   try {
-    respostaHttp = await chamarApiComPrazo(ROTA_DE_CRIACAO_DE_ORDEM, {
+    respostaDaCriacao = await chamarApiComPrazo<CorpoDaRespostaDaOrdem>(ROTA_DE_CRIACAO_DE_ORDEM, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -88,7 +72,7 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
     return { situacao: 'falha-de-comunicacao', mensagemDoServidor: MENSAGEM_DE_SERVIDOR_SEM_RESPOSTA };
   }
 
-  const corpoDaResposta = await lerCorpoJsonOuNada<CorpoDaRespostaDaOrdem>(respostaHttp);
+  const { respostaHttp, corpoDaResposta } = respostaDaCriacao;
   if (respostaHttp.ok && (corpoDaResposta?.status === 'accepted' || corpoDaResposta?.status === 'rejected')) {
     return {
       situacao: corpoDaResposta.status === 'accepted' ? 'aceita' : 'rejeitada',
@@ -112,13 +96,9 @@ export async function enviarOrdem(ordem: OrdemParaEnviar): Promise<RespostaDaOrd
 }
 
 export async function lerExposicoes(): Promise<ExposicaoDoSimbolo[]> {
-  let respostaHttp: Response;
-  try {
-    respostaHttp = await chamarApiComPrazo(ROTA_DAS_EXPOSICOES);
-  } catch {
+  const { respostaHttp, corpoDaResposta } = await chamarApiComPrazo<CorpoDasExposicoes>(ROTA_DAS_EXPOSICOES).catch(() => {
     throw new Error(MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
-  }
-  const corpoDaResposta = await lerCorpoJsonOuNada<CorpoDasExposicoes>(respostaHttp);
+  });
   if (!respostaHttp.ok || !corpoDaResposta?.exposures) {
     throw new Error(corpoDaResposta?.message ?? MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
   }

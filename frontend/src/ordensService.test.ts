@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { enviarOrdem, lerExposicoes, type OrdemParaEnviar } from './ordensService';
+import { PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS, enviarOrdem, lerExposicoes, type OrdemParaEnviar } from './ordensService';
 
 const ordemDeCompra: OrdemParaEnviar = { simbolo: 'PETR4', lado: 'Compra', quantidade: 100, precoEmCentavos: 1_050 };
 
@@ -52,15 +52,38 @@ describe('enviarOrdem', () => {
     });
   });
 
-  it('RF-23: servidor que não responde é abandonado em 7 s e vira falha de comunicação', async () => {
+  it('RF-23: servidor que não responde é esperado até 6 s, e não menos, e vira falha de comunicação', async () => {
     vi.useFakeTimers();
     const fetchQueNuncaResponde = (...[, opcoesDaChamada]: [string, RequestInit]) =>
       new Promise<Response>((...[, recusarChamada]: [unknown, (motivo: unknown) => void]) => {
         opcoesDaChamada.signal?.addEventListener('abort', () => recusarChamada(new DOMException('abortada', 'AbortError')));
       });
     vi.stubGlobal('fetch', vi.fn(fetchQueNuncaResponde));
+    let ordemTerminou = false;
+    const respostaPendente = enviarOrdem(ordemDeCompra).finally(() => { ordemTerminou = true; });
+    await vi.advanceTimersByTimeAsync(PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS - 1);
+    expect(ordemTerminou).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await respostaPendente).toEqual({
+      situacao: 'falha-de-comunicacao',
+      mensagemDoServidor: 'Não foi possível falar com o servidor. Tente de novo em instantes.',
+    });
+    expect(PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS).toBe(6_000);
+  });
+
+  it('RF-23: cabeçalho que chega com corpo travado também é abandonado no prazo', async () => {
+    vi.useFakeTimers();
+    const fetchComCorpoTravado = async (...[, opcoesDaChamada]: [string, RequestInit]) => {
+      const corpoQueNuncaTermina = new ReadableStream({
+        start(controleDoCorpo) {
+          opcoesDaChamada.signal?.addEventListener('abort', () => controleDoCorpo.error(new DOMException('abortada', 'AbortError')));
+        },
+      });
+      return new Response(corpoQueNuncaTermina, { status: 200 });
+    };
+    vi.stubGlobal('fetch', vi.fn(fetchComCorpoTravado));
     const respostaPendente = enviarOrdem(ordemDeCompra);
-    await vi.advanceTimersByTimeAsync(7_000);
+    await vi.advanceTimersByTimeAsync(PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS);
     expect(await respostaPendente).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'Não foi possível falar com o servidor. Tente de novo em instantes.',

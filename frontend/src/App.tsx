@@ -18,13 +18,17 @@ export function App() {
   const [estadoDasExposicoes, setEstadoDasExposicoes] = useState<EstadoDasExposicoes>({ situacao: 'carregando' });
   const [enviando, setEnviando] = useState(false);
   const [respostaDaUltimaOrdem, setRespostaDaUltimaOrdem] = useState<RespostaDaOrdem>();
+  const numeroDaUltimaLeituraDaExposicao = useRef(0);
 
+  // Duas leituras podem estar abertas ao mesmo tempo; só a última pedida pode mudar o painel,
+  // senão uma resposta antiga e lenta apagaria a exposição já atualizada depois de um envio.
   const atualizarExposicoes = useCallback(async () => {
-    try {
-      setEstadoDasExposicoes({ situacao: 'pronto', exposicoesPorSimbolo: await lerExposicoes() });
-    } catch (falhaNaLeitura) {
-      setEstadoDasExposicoes({ situacao: 'erro', mensagemDeErro: (falhaNaLeitura as Error).message });
-    }
+    const numeroDestaLeitura = ++numeroDaUltimaLeituraDaExposicao.current;
+    const estadoLido: EstadoDasExposicoes = await lerExposicoes().then(
+      (exposicoesPorSimbolo) => ({ situacao: 'pronto', exposicoesPorSimbolo }),
+      (falhaNaLeitura: Error) => ({ situacao: 'erro', mensagemDeErro: falhaNaLeitura.message }),
+    );
+    if (numeroDestaLeitura === numeroDaUltimaLeituraDaExposicao.current) setEstadoDasExposicoes(estadoLido);
   }, []);
 
   useEffect(() => {
