@@ -12,7 +12,8 @@ permissions:
   id-token: write
   contents: read
 
-# Um apply por vez. O que chegar depois espera; nada é cancelado no meio.
+# Um apply por vez, e o que está rodando nunca é cancelado. Se chegarem dois merges durante um
+# apply, só o mais novo fica na fila (o GitHub descarta o pendente mais antigo); ele já contém o outro.
 concurrency:
   group: deploy-dev
   cancel-in-progress: false
@@ -72,7 +73,8 @@ jobs:
             shift
             TERRAFORM_LOG="$RUNNER_TEMP/terraform-$subcomando-$(date +%s%N).log"
             if ! terraform "$subcomando" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
-              grep -E 'Error' "$TERRAFORM_LOG" >&2 || true
+              # Erro da AWS costuma trazer o ARN de quem chamou; no log público ele vira <arn oculto>.
+              grep -E 'Error' "$TERRAFORM_LOG" | sed -E 's/arn:aws[^ "]*/<arn oculto>/g' >&2 || true
               echo "terraform $subcomando falhou; a saída completa fica só no runner" >&2
               return 1
             fi
