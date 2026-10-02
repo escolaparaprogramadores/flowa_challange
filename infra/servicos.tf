@@ -12,12 +12,12 @@ locals {
   nome_dns_do_accumulator = "${aws_service_discovery_service.registro_dns_do_order_accumulator.name}.${aws_service_discovery_private_dns_namespace.descoberta_privada_dos_servicos_flowa.name}"
 
   # A imagem não tem curl nem wget; o bash abre o socket e confere se o /health respondeu 200.
-  comando_health_check_por_servico = {
-    for servico, porta_http_do_servico in { generator = local.porta_http_do_generator, accumulator = local.porta_http_do_accumulator } :
-    servico => "exec 3<>/dev/tcp/127.0.0.1/${porta_http_do_servico} && printf 'GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"
+  comando_health_check_por_servico_flowa = {
+    for nome_do_servico_flowa, porta_http_do_servico_flowa in { generator = local.porta_http_do_generator, accumulator = local.porta_http_do_accumulator } :
+    nome_do_servico_flowa => "exec 3<>/dev/tcp/127.0.0.1/${porta_http_do_servico_flowa} && printf 'GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"
   }
 
-  log_group_por_servico = {
+  log_group_por_servico_flowa = {
     generator   = local.log_group_generator
     accumulator = local.log_group_accumulator
   }
@@ -126,7 +126,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
     ]
 
     healthCheck = {
-      command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico.generator]
+      command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico_flowa.generator]
       interval    = 15
       timeout     = 5
       retries     = 3
@@ -136,7 +136,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        awslogs-group         = local.log_group_por_servico.generator
+        awslogs-group         = local.log_group_por_servico_flowa.generator
         awslogs-region        = var.region
         awslogs-stream-prefix = "app"
       }
@@ -179,7 +179,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
     ]
 
     healthCheck = {
-      command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico.accumulator]
+      command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico_flowa.accumulator]
       interval    = 15
       timeout     = 5
       retries     = 3
@@ -189,7 +189,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        awslogs-group         = local.log_group_por_servico.accumulator
+        awslogs-group         = local.log_group_por_servico_flowa.accumulator
         awslogs-region        = var.region
         awslogs-stream-prefix = "app"
       }
