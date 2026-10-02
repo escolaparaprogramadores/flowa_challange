@@ -69,13 +69,13 @@ jobs:
         run: |
           cat > "$RUNNER_TEMP/terraform-quieto.sh" <<'FIM'
           terraform_quieto() {
-            subcomando=$1
+            subcomando_terraform=$1
             shift
-            TERRAFORM_LOG="$RUNNER_TEMP/terraform-$subcomando-$(date +%s%N).log"
-            if ! terraform "$subcomando" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
+            TERRAFORM_LOG="$RUNNER_TEMP/terraform-$subcomando_terraform-$(date +%s%N).log"
+            if ! terraform "$subcomando_terraform" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
               # Erro da AWS costuma trazer o ARN de quem chamou; no log público ele vira <arn oculto>.
               grep -E 'Error' "$TERRAFORM_LOG" | sed -E 's/arn:aws[^ "]*/<arn oculto>/g' >&2 || true
-              echo "terraform $subcomando falhou; a saída completa fica só no runner" >&2
+              echo "terraform $subcomando_terraform falhou; a saída completa fica só no runner" >&2
               return 1
             fi
           }
@@ -96,14 +96,14 @@ jobs:
           echo "terraform init ok"
 
           # O ECR precisa existir antes do push das imagens.
-          mapfile -t alvos_ecr < <(grep -hoE '^resource "aws_ecr_repository" "[A-Za-z0-9_-]+"' ./*.tf |
+          mapfile -t alvos_terraform_dos_repositorios_ecr < <(grep -hoE '^resource "aws_ecr_repository" "[A-Za-z0-9_-]+"' ./*.tf |
             awk -F'"' '{ print "-target=aws_ecr_repository." $4 }')
-          if [ "${#alvos_ecr[@]}" -eq 0 ]; then
+          if [ "${#alvos_terraform_dos_repositorios_ecr[@]}" -eq 0 ]; then
             echo "nenhum resource \"aws_ecr_repository\" em infra/*.tf" >&2
             exit 1
           fi
-          terraform_quieto apply -auto-approve "${alvos_ecr[@]}"
-          printf '%s\n' "${alvos_ecr[@]}" | sed 's/^-target=/ECR: /'
+          terraform_quieto apply -auto-approve "${alvos_terraform_dos_repositorios_ecr[@]}"
+          printf '%s\n' "${alvos_terraform_dos_repositorios_ecr[@]}" | sed 's/^-target=/ECR: /'
           grep -E '^Apply complete!' "$TERRAFORM_LOG"
 
       - name: Imagens ARM64 no ECR
@@ -111,19 +111,19 @@ jobs:
         env:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
         run: |
-          for app in OrderGenerator:flowa-challenge-order-generator OrderAccumulator:flowa-challenge-order-accumulator; do
-            projeto=${app%%:*}
-            imagem="$ECR_REGISTRY/${app#*:}:$IMAGE_TAG"
+          for servico_e_repositorio_ecr in OrderGenerator:flowa-challenge-order-generator OrderAccumulator:flowa-challenge-order-accumulator; do
+            servico_flowa=${servico_e_repositorio_ecr%%:*}
+            imagem_do_servico_no_ecr="$ECR_REGISTRY/${servico_e_repositorio_ecr#*:}:$IMAGE_TAG"
             # Rodar de novo no mesmo commit não refaz a imagem que já está lá.
-            if docker manifest inspect "$imagem" > /dev/null 2>&1; then
-              echo "$projeto: imagem deste commit já está no ECR"
+            if docker manifest inspect "$imagem_do_servico_no_ecr" > /dev/null 2>&1; then
+              echo "$servico_flowa: imagem deste commit já está no ECR"
               continue
             fi
             # Sem o SHA o app não sobe e o /version volta vazio.
             docker build --platform linux/arm64 --build-arg SOURCE_REVISION_ID="$IMAGE_TAG" \
-              -f "src/$projeto/Dockerfile" -t "$imagem" .
-            docker push --quiet "$imagem" > /dev/null
-            echo "$projeto: imagem enviada com a tag $IMAGE_TAG"
+              -f "src/$servico_flowa/Dockerfile" -t "$imagem_do_servico_no_ecr" .
+            docker push --quiet "$imagem_do_servico_no_ecr" > /dev/null
+            echo "$servico_flowa: imagem enviada com a tag $IMAGE_TAG"
           done
 
       - name: terraform plan e apply
