@@ -19,7 +19,9 @@ resource "aws_db_instance" "banco" {
 
   engine         = "postgres"
   engine_version = "17"
-  instance_class = "db.t4g.micro"
+  # A conta do Flowa não oferece db.t4g.micro (nenhuma oferta no describe-orderable-db-instance-options);
+  # a db.t3.micro é a menor classe disponível para o PostgreSQL 17 aqui.
+  instance_class = "db.t3.micro"
   multi_az       = false
 
   allocated_storage = 20
