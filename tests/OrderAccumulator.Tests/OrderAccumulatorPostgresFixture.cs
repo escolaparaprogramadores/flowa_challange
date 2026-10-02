@@ -15,6 +15,10 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
         .WithCommand("-c", "max_connections=300")
         .Build();
 
+    // Com a máquina carregada, uma rodada de 200 ordens já passou dos 30 s padrão do Npgsql
+    // esperando a linha de exposição. O teste dá mais folga; o código de produção não muda.
+    public const int OrderDatabaseTestCommandTimeoutSeconds = 120;
+
     public string OrderDatabaseConnectionString { get; private set; } = null!;
     public NpgsqlDataSource OrderDatabaseDataSource { get; private set; } = null!;
     public IOrderProcessor OrderProcessor { get; private set; } = null!;
@@ -26,7 +30,8 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
 
         OrderDatabaseConnectionString = new NpgsqlConnectionStringBuilder(orderAccumulatorPostgresContainer.GetConnectionString())
         {
-            MaxPoolSize = 250
+            MaxPoolSize = 250,
+            CommandTimeout = OrderDatabaseTestCommandTimeoutSeconds
         }.ConnectionString;
         OrderDatabaseDataSource = NpgsqlDataSource.Create(OrderDatabaseConnectionString);
         await OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();

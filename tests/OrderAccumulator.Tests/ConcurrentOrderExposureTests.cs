@@ -73,6 +73,15 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
             Assert.True(Math.Abs(TestOrders.ExposureDeltaOf(rejectedAnswer)) > ExposureLimit.RemainingExposureCapacity(finalExposure)));
     }
 
+    // Regressão do teste instável: com 30 s (padrão do Npgsql) uma rodada lenta estourava a leitura.
+    [Fact]
+    public async Task Order_database_connections_of_the_tests_wait_120_seconds_per_command()
+    {
+        await using var orderDatabaseConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
+
+        Assert.Equal(120, orderDatabaseConnection.CommandTimeout);
+    }
+
     // Espera até todas as transações estarem paradas no lock da linha, ou 30 s.
     private async Task<long> WaitForTransactionsWaitingOnExposureRowAsync(int expectedWaitingTransactions)
     {
