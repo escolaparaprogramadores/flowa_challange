@@ -61,7 +61,6 @@ resource "aws_secretsmanager_secret_version" "banco" {
   secret_id = aws_secretsmanager_secret.banco.id
   secret_string = jsonencode({
     username          = local.banco_usuario
-    password          = "${random_password.banco.result}"
     host              = aws_db_instance.banco.address
     port              = local.banco_porta
     dbname            = local.banco_nome
