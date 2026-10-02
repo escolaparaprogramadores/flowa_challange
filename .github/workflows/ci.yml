@@ -57,6 +57,7 @@ jobs:
           npm ci
           npx playwright install --with-deps chromium
       - name: Subir o compose
+        id: compose
         run: docker compose up -d --build --wait --wait-timeout 180
       # O OrderGenerator não tem healthcheck no compose, e a ordem só sai depois do logon FIX.
       - name: Esperar a página e a sessão FIX
@@ -74,10 +75,12 @@ jobs:
       - name: E2E da tela com tudo de pé
         working-directory: frontend
         run: npx playwright test
-      # CA-19: a tela com o OrderAccumulator fora do ar.
+      # CA-19: a tela com o OrderAccumulator fora do ar. Roda mesmo se a suíte de cima falhar.
       - name: Parar o OrderAccumulator
+        if: ${{ !cancelled() && steps.compose.outcome == 'success' }}
         run: docker compose stop orderaccumulator
       - name: E2E da tela sem o OrderAccumulator
+        if: ${{ !cancelled() && steps.compose.outcome == 'success' }}
         working-directory: frontend
         run: npx playwright test -c playwright.sem-accumulator.config.ts
       - name: Log dos apps em caso de falha

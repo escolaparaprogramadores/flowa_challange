@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   deploy:
+    # O disparo manual também só publica o que está em develop.
+    if: github.ref == 'refs/heads/develop'
     # ARM64 nativo: as imagens rodam em Fargate ARM64 e o build não precisa de emulação.
     runs-on: ubuntu-24.04-arm
     environment: dev
@@ -128,7 +130,7 @@ jobs:
         run: |
           source "$RUNNER_TEMP/terraform-quieto.sh"
           terraform_quieto plan -out=tfplan -var "image_tag=$IMAGE_TAG"
-          grep -E '^(Plan:|No changes)' "$TERRAFORM_LOG"
+          grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan sem linha de resumo"
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
           terraform_quieto apply tfplan
