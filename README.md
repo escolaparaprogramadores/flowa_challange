@@ -3,6 +3,8 @@
 Duas aplicações em C# que conversam por FIX: o OrderGenerator manda ordens de compra e venda montadas
 numa tela, e o OrderAccumulator aceita ou rejeita cada uma conforme o limite de exposição por ativo.
 
+Está no ar em https://h2asgc2sce.execute-api.us-east-1.amazonaws.com (veja [Na nuvem](#na-nuvem-aws)).
+
 ## Tecnologias
 
 - C# no .NET 10 (ASP.NET Core) para as duas aplicações
@@ -11,7 +13,8 @@ numa tela, e o OrderAccumulator aceita ou rejeita cada uma conforme o limite de 
 - React 19, TypeScript e Vite na tela
 - xUnit e Testcontainers nos testes do .NET; Vitest e Playwright nos testes da tela
 - Docker Compose para subir tudo junto
-- GitHub Actions, que compila e testa as regras de campo (`Flowa.Shared`) em cada PR
+- GitHub Actions: build e todos os testes em cada PR, e deploy na AWS a cada merge em `develop`
+- AWS (API Gateway, ECS Fargate, RDS), criada só com Terraform
 
 ## Como rodar com Docker
 
@@ -128,8 +131,8 @@ confere de novo o que chega pelo FIX.
 - A proteção contra ordem repetida vale para o `ClOrdID` no FIX. Se a tela enviar a mesma ordem de novo,
   ela ganha um `ClOrdID` novo e conta como outra ordem.
 - Não há migrações versionadas do banco: o esquema é criado na subida do OrderAccumulator.
-- O CI do GitHub só compila e testa `Flowa.Shared`. Os testes dos dois apps, os de integração e os da
-  tela rodam na máquina, com os comandos de "Como testar".
+- Na AWS cada serviço roda uma cópia só. No deploy a cópia velha para antes de a nova subir, então a
+  aplicação fica fora do ar por alguns instantes.
 
 ## Como funciona
 
@@ -144,5 +147,26 @@ quando não aceita. O OrderGenerator devolve essa resposta para a tela.
 O painel de exposição chama `GET /api/exposures` no OrderGenerator, que só repassa a pergunta para o
 OrderAccumulator. A fonte do desenho fica em `docs/arquitetura/arquitetura-local.drawio` e o contrato
 entre as partes (rotas, mensagens FIX, portas) em `docs/contracts/contracts.md`.
+
+## Na nuvem (AWS)
+
+A aplicação está publicada em https://h2asgc2sce.execute-api.us-east-1.amazonaws.com. É a mesma tela
+da versão local, e as ordens vão para um PostgreSQL de verdade na AWS.
+
+![Desenho da arquitetura na AWS](docs/arquitetura/arquitetura-aws.png)
+
+O navegador fala só com o API Gateway. Ele passa o pedido por um VPC Link para o OrderGenerator, que
+roda no ECS Fargate. O OrderGenerator acha o OrderAccumulator pelo Cloud Map e conversa com ele por FIX,
+como na versão local. O OrderAccumulator grava num RDS PostgreSQL que fica numa subnet sem saída para
+fora. Nenhuma tarefa aceita conexão vinda da internet. Cada serviço roda uma cópia com 0,25 vCPU e
+0,5 GB, o banco é um `db.t3.micro` numa zona só, e o API Gateway aceita até 20 pedidos por segundo
+(rajada de 40); acima disso responde 429.
+
+**Como publica.** Os serviços, a rede, o banco, o ECR e os logs são criados pelo Terraform de `infra/`.
+A role que a esteira assume e o bucket do state vêm de uma base Terraform separada, fora deste
+repositório. Nada é criado pelo console. Quando um PR é mesclado em `develop`, o workflow
+`.github/workflows/2-develop-deploy.yml` constrói as duas imagens, manda para o ECR e roda o
+`terraform apply` sozinho. O GitHub entra na AWS por OIDC, com uma credencial temporária, sem chave
+guardada no repositório. A fonte do desenho fica em `docs/arquitetura/arquitetura-aws.drawio`.
 
 This is a challenge by [Coodesh](https://coodesh.com/)
