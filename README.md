@@ -3,8 +3,6 @@
 Duas aplicações em C# que conversam por FIX: o OrderGenerator manda ordens de compra e venda montadas
 numa tela, e o OrderAccumulator aceita ou rejeita cada uma conforme o limite de exposição por ativo.
 
-This is a challenge by [Coodesh](https://coodesh.com/)
-
 ## Tecnologias
 
 - C# no .NET 10 (ASP.NET Core) para as duas aplicações
@@ -14,20 +12,6 @@ This is a challenge by [Coodesh](https://coodesh.com/)
 - xUnit e Testcontainers nos testes do .NET; Vitest e Playwright nos testes da tela
 - Docker Compose para subir tudo junto
 - GitHub Actions para rodar build e testes em cada PR
-
-## Como funciona
-
-![Desenho da arquitetura local](docs/arquitetura/arquitetura-local.png)
-
-A tela é servida pelo próprio OrderGenerator. Quando você envia uma ordem, a tela chama
-`POST /api/orders`. O OrderGenerator confere os campos e, se estiverem certos, manda uma
-`NewOrderSingle` (35=D) por FIX para o OrderAccumulator. O OrderAccumulator aplica a regra do limite no
-PostgreSQL e responde com um `ExecutionReport` (35=8): `New` quando aceita, `Rejected` com o motivo
-quando não aceita. O OrderGenerator devolve essa resposta para a tela.
-
-O painel de exposição chama `GET /api/exposures` no OrderGenerator, que só repassa a pergunta para o
-OrderAccumulator. A fonte do desenho fica em `docs/arquitetura/arquitetura-local.drawio` e o contrato
-entre as partes (rotas, mensagens FIX, portas) em `docs/contracts/contracts.md`.
 
 ## Como rodar com Docker
 
@@ -143,3 +127,19 @@ confere de novo o que chega pelo FIX.
 - A proteção contra ordem repetida vale para o `ClOrdID` no FIX. Se a tela enviar a mesma ordem de novo,
   ela ganha um `ClOrdID` novo e conta como outra ordem.
 - Não há migrações versionadas do banco: o esquema é criado na subida do OrderAccumulator.
+
+## Como funciona
+
+![Desenho da arquitetura local](docs/arquitetura/arquitetura-local.png)
+
+A tela é servida pelo próprio OrderGenerator. Quando você envia uma ordem, a tela chama
+`POST /api/orders`. O OrderGenerator confere os campos e, se estiverem certos, manda uma
+`NewOrderSingle` (35=D) por FIX para o OrderAccumulator. O OrderAccumulator aplica a regra do limite no
+PostgreSQL e responde com um `ExecutionReport` (35=8): `New` quando aceita, `Rejected` com o motivo
+quando não aceita. O OrderGenerator devolve essa resposta para a tela.
+
+O painel de exposição chama `GET /api/exposures` no OrderGenerator, que só repassa a pergunta para o
+OrderAccumulator. A fonte do desenho fica em `docs/arquitetura/arquitetura-local.drawio` e o contrato
+entre as partes (rotas, mensagens FIX, portas) em `docs/contracts/contracts.md`.
+
+This is a challenge by [Coodesh](https://coodesh.com/)
