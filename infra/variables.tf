@@ -37,6 +37,6 @@ locals {
   banco_usuario = "flowa"
   banco_porta   = 5432
 
-  porta_fix  = 9876
-  porta_http = 8081
+  porta_fix                 = 9876
+  porta_http_do_accumulator = 8081
 }

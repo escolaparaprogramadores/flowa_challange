@@ -141,8 +141,8 @@ resource "aws_vpc_security_group_ingress_rule" "accumulator_http" {
   security_group_id            = aws_security_group.accumulator.id
   description                  = "GET /api/exposures repassado pelo generator"
   ip_protocol                  = "tcp"
-  from_port                    = local.porta_http
-  to_port                      = local.porta_http
+  from_port                    = local.porta_http_do_accumulator
+  to_port                      = local.porta_http_do_accumulator
   referenced_security_group_id = aws_security_group.generator.id
 }
 
@@ -180,8 +180,8 @@ resource "aws_vpc_security_group_egress_rule" "generator_http" {
   security_group_id            = aws_security_group.generator.id
   description                  = "GET /api/exposures do generator para o accumulator"
   ip_protocol                  = "tcp"
-  from_port                    = local.porta_http
-  to_port                      = local.porta_http
+  from_port                    = local.porta_http_do_accumulator
+  to_port                      = local.porta_http_do_accumulator
   referenced_security_group_id = aws_security_group.accumulator.id
 }
 
