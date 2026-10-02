@@ -23,7 +23,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = local.prefixo
+      Project   = local.prefixo_dos_recursos_flowa
       ManagedBy = "terraform"
     }
   }

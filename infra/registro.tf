@@ -1,7 +1,7 @@
 # Repositórios das imagens e log groups dos dois apps.
 
-resource "aws_ecr_repository" "app" {
-  for_each = local.apps
+resource "aws_ecr_repository" "imagens_dos_servicos_flowa" {
+  for_each = local.nomes_dos_servicos_flowa
 
   name = each.value
 
@@ -16,8 +16,8 @@ resource "aws_ecr_repository" "app" {
   }
 }
 
-resource "aws_ecr_lifecycle_policy" "app" {
-  for_each = aws_ecr_repository.app
+resource "aws_ecr_lifecycle_policy" "limpeza_das_imagens_dos_servicos_flowa" {
+  for_each = aws_ecr_repository.imagens_dos_servicos_flowa
 
   repository = each.value.name
   policy = jsonencode({
@@ -48,8 +48,8 @@ resource "aws_ecr_lifecycle_policy" "app" {
 }
 
 # Um dia de retenção (R-04): o padrão da AWS guarda para sempre, e isso cobra.
-resource "aws_cloudwatch_log_group" "app" {
-  for_each = local.apps
+resource "aws_cloudwatch_log_group" "logs_dos_servicos_flowa" {
+  for_each = local.nomes_dos_servicos_flowa
 
   name              = each.value
   retention_in_days = 1

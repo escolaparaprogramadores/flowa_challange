@@ -9,13 +9,13 @@ resource "random_password" "banco" {
 }
 
 resource "aws_db_subnet_group" "banco" {
-  name        = "${local.prefixo}-banco"
+  name        = "${local.prefixo_dos_recursos_flowa}-banco"
   description = "Subnets isoladas do banco do Flowa"
   subnet_ids  = aws_subnet.banco[*].id
 }
 
 resource "aws_db_instance" "banco" {
-  identifier = "${local.prefixo}-banco"
+  identifier = "${local.prefixo_dos_recursos_flowa}-banco"
 
   engine         = "postgres"
   engine_version = "17"
@@ -49,7 +49,7 @@ resource "aws_db_instance" "banco" {
 }
 
 resource "aws_secretsmanager_secret" "banco" {
-  name        = "${local.prefixo}/${local.ambiente}/banco"
+  name        = "${local.prefixo_dos_recursos_flowa}/${local.ambiente_dos_recursos_flowa}/banco"
   description = "Credenciais do PostgreSQL do Flowa"
 
   # Sem janela de recuperação: recriar o ambiente com o mesmo nome não fica preso por 7 a 30 dias.

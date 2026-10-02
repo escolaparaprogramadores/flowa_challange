@@ -10,10 +10,10 @@ locals {
   namespace_id          = aws_service_discovery_private_dns_namespace.principal.id
   db_endpoint           = aws_db_instance.banco.address
   db_secret_arn         = aws_secretsmanager_secret.banco.arn
-  log_group_generator   = aws_cloudwatch_log_group.app["generator"].name
-  log_group_accumulator = aws_cloudwatch_log_group.app["accumulator"].name
-  ecr_generator_url     = aws_ecr_repository.app["generator"].repository_url
-  ecr_accumulator_url   = aws_ecr_repository.app["accumulator"].repository_url
+  log_group_generator   = aws_cloudwatch_log_group.logs_dos_servicos_flowa["generator"].name
+  log_group_accumulator = aws_cloudwatch_log_group.logs_dos_servicos_flowa["accumulator"].name
+  ecr_generator_url     = aws_ecr_repository.imagens_dos_servicos_flowa["generator"].repository_url
+  ecr_accumulator_url   = aws_ecr_repository.imagens_dos_servicos_flowa["accumulator"].repository_url
 }
 
 output "vpc_id" {

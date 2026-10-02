@@ -23,13 +23,13 @@ variable "image_tag" {
 }
 
 locals {
-  prefixo  = "flowa-challenge"
-  ambiente = "dev"
+  prefixo_dos_recursos_flowa  = "flowa-challenge"
+  ambiente_dos_recursos_flowa = "dev"
 
   # Um repositório de imagem e um log group por app, com o mesmo nome.
-  apps = {
-    generator   = "${local.prefixo}-order-generator"
-    accumulator = "${local.prefixo}-order-accumulator"
+  nomes_dos_servicos_flowa = {
+    generator   = "${local.prefixo_dos_recursos_flowa}-order-generator"
+    accumulator = "${local.prefixo_dos_recursos_flowa}-order-accumulator"
   }
 
   # Banco e usuário iguais aos do compose (docs/contracts/contracts.md, seção 4).

@@ -12,7 +12,7 @@ data "aws_availability_zones" "disponiveis" {
 }
 
 locals {
-  azs = slice(data.aws_availability_zones.disponiveis.names, 0, 2)
+  zonas_de_disponibilidade_da_rede_flowa = slice(data.aws_availability_zones.disponiveis.names, 0, 2)
 
   cidr_vpc            = "10.40.0.0/16"
   cidrs_tarefas       = ["10.40.0.0/24", "10.40.1.0/24"]
@@ -27,7 +27,7 @@ resource "aws_vpc" "principal" {
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = { Name = "${local.prefixo}-vpc" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-vpc" }
 }
 
 # O security group padrão da VPC aceita tudo que vem dele mesmo. Fica sem regra nenhuma, para ninguém
@@ -35,38 +35,38 @@ resource "aws_vpc" "principal" {
 resource "aws_default_security_group" "padrao" {
   vpc_id = aws_vpc.principal.id
 
-  tags = { Name = "${local.prefixo}-padrao-sem-regras" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-padrao-sem-regras" }
 }
 
 resource "aws_internet_gateway" "principal" {
   vpc_id = aws_vpc.principal.id
 
-  tags = { Name = "${local.prefixo}-igw" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-igw" }
 }
 
 resource "aws_subnet" "tarefas" {
   count = 2
 
   vpc_id            = aws_vpc.principal.id
-  availability_zone = local.azs[count.index]
+  availability_zone = local.zonas_de_disponibilidade_da_rede_flowa[count.index]
   cidr_block        = local.cidrs_tarefas[count.index]
 
   # O IP público é pedido pela task (assign_public_ip no serviço), não dado a tudo que nascer aqui.
   map_public_ip_on_launch = false
 
-  tags = { Name = "${local.prefixo}-tarefas-${local.sufixos_das_subnets[count.index]}" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-tarefas-${local.sufixos_das_subnets[count.index]}" }
 }
 
 resource "aws_subnet" "banco" {
   count = 2
 
   vpc_id            = aws_vpc.principal.id
-  availability_zone = local.azs[count.index]
+  availability_zone = local.zonas_de_disponibilidade_da_rede_flowa[count.index]
   cidr_block        = local.cidrs_banco[count.index]
 
   map_public_ip_on_launch = false
 
-  tags = { Name = "${local.prefixo}-banco-${local.sufixos_das_subnets[count.index]}" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-banco-${local.sufixos_das_subnets[count.index]}" }
 }
 
 resource "aws_route_table" "tarefas" {
@@ -77,7 +77,7 @@ resource "aws_route_table" "tarefas" {
     gateway_id = aws_internet_gateway.principal.id
   }
 
-  tags = { Name = "${local.prefixo}-tarefas" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-tarefas" }
 }
 
 resource "aws_route_table_association" "tarefas" {
@@ -91,7 +91,7 @@ resource "aws_route_table_association" "tarefas" {
 resource "aws_route_table" "banco" {
   vpc_id = aws_vpc.principal.id
 
-  tags = { Name = "${local.prefixo}-banco-isolada" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-banco-isolada" }
 }
 
 resource "aws_route_table_association" "banco" {
@@ -105,27 +105,27 @@ resource "aws_route_table_association" "banco" {
 # é da fatia de serviços (infra/borda.tf).
 
 resource "aws_security_group" "generator" {
-  name        = "${local.prefixo}-generator"
+  name        = "${local.prefixo_dos_recursos_flowa}-generator"
   description = "OrderGenerator: sem entrada da internet."
   vpc_id      = aws_vpc.principal.id
 
-  tags = { Name = "${local.prefixo}-generator" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-generator" }
 }
 
 resource "aws_security_group" "accumulator" {
-  name        = "${local.prefixo}-accumulator"
+  name        = "${local.prefixo_dos_recursos_flowa}-accumulator"
   description = "OrderAccumulator: FIX e HTTP so a partir do generator."
   vpc_id      = aws_vpc.principal.id
 
-  tags = { Name = "${local.prefixo}-accumulator" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-accumulator" }
 }
 
 resource "aws_security_group" "banco" {
-  name        = "${local.prefixo}-banco"
+  name        = "${local.prefixo_dos_recursos_flowa}-banco"
   description = "PostgreSQL: 5432 so a partir do accumulator."
   vpc_id      = aws_vpc.principal.id
 
-  tags = { Name = "${local.prefixo}-banco" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-banco" }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "accumulator_fix" {
@@ -206,7 +206,7 @@ resource "aws_vpc_security_group_egress_rule" "accumulator_postgres" {
 # Namespace DNS privado para o generator achar o accumulator pelo nome. Os serviços (e o TTL curto)
 # são registrados pela fatia de serviços.
 resource "aws_service_discovery_private_dns_namespace" "principal" {
-  name        = "${local.prefixo}.local"
+  name        = "${local.prefixo_dos_recursos_flowa}.local"
   description = "Descoberta interna do Flowa"
   vpc         = aws_vpc.principal.id
 }
