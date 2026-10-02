@@ -29,7 +29,7 @@ data "aws_partition" "particao_da_conta" {}
 
 # Pelo ARN montado com o nome, e não pelo argumento `name`: a busca por nome lista todas as policies da conta
 # (iam:ListPolicies), e a esteira só pode ler a boundary.
-data "aws_iam_policy" "boundary_das_roles_do_app" {
+data "aws_iam_policy" "boundary_das_roles_dos_servicos_flowa" {
   arn = "arn:${data.aws_partition.particao_da_conta.partition}:iam::${data.aws_caller_identity.conta_do_flowa.account_id}:policy/${local.nome_da_boundary_das_roles_flowa}"
 }
 
@@ -45,12 +45,12 @@ resource "aws_ecs_cluster" "cluster_dos_servicos_flowa" {
 
 # Execution role: é o ECS quem a usa para puxar a imagem, escrever o log e ler o segredo. Os apps não
 # chamam a AWS, então não há task role.
-resource "aws_iam_role" "role_de_execucao_das_tasks" {
+resource "aws_iam_role" "role_de_execucao_dos_servicos_flowa" {
   for_each = local.nomes_dos_servicos_flowa
 
   name                 = "${each.value}-execucao"
   path                 = local.path_das_roles_dos_servicos_flowa
-  permissions_boundary = data.aws_iam_policy.boundary_das_roles_do_app.arn
+  permissions_boundary = data.aws_iam_policy.boundary_das_roles_dos_servicos_flowa.arn
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -63,11 +63,11 @@ resource "aws_iam_role" "role_de_execucao_das_tasks" {
 }
 
 # Só policy inline: a esteira não cria policy gerenciada nem anexa as da AWS.
-resource "aws_iam_role_policy" "permissoes_de_execucao_das_tasks" {
+resource "aws_iam_role_policy" "permissoes_de_execucao_dos_servicos_flowa" {
   for_each = local.nomes_dos_servicos_flowa
 
   name = "${each.value}-execucao"
-  role = aws_iam_role.role_de_execucao_das_tasks[each.key].id
+  role = aws_iam_role.role_de_execucao_dos_servicos_flowa[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -104,7 +104,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
   network_mode             = "awsvpc"
   cpu                      = 256
   memory                   = 512
-  execution_role_arn       = aws_iam_role.role_de_execucao_das_tasks["generator"].arn
+  execution_role_arn       = aws_iam_role.role_de_execucao_dos_servicos_flowa["generator"].arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -150,7 +150,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
   network_mode             = "awsvpc"
   cpu                      = 256
   memory                   = 512
-  execution_role_arn       = aws_iam_role.role_de_execucao_das_tasks["accumulator"].arn
+  execution_role_arn       = aws_iam_role.role_de_execucao_dos_servicos_flowa["accumulator"].arn
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -267,7 +267,7 @@ resource "aws_ecs_service" "servico_do_order_accumulator" {
   wait_for_steady_state = true
 
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
-  depends_on = [aws_iam_role_policy.permissoes_de_execucao_das_tasks]
+  depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]
 }
 
 resource "aws_ecs_service" "servico_do_order_generator" {
@@ -300,5 +300,5 @@ resource "aws_ecs_service" "servico_do_order_generator" {
   wait_for_steady_state = true
 
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
-  depends_on = [aws_iam_role_policy.permissoes_de_execucao_das_tasks]
+  depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]
 }

@@ -73,7 +73,7 @@ resource "aws_apigatewayv2_route" "tudo_para_o_generator" {
 }
 
 # Throttling no stage inteiro (R-02): acima do limite o API Gateway devolve 429 sem acordar a task.
-resource "aws_apigatewayv2_stage" "stage_padrao_com_throttling" {
+resource "aws_apigatewayv2_stage" "stage_da_api_publica_do_flowa" {
   api_id      = aws_apigatewayv2_api.api_publica_do_flowa.id
   name        = "$default"
   auto_deploy = true
@@ -86,5 +86,5 @@ resource "aws_apigatewayv2_stage" "stage_padrao_com_throttling" {
 
 output "url_publica_do_flowa" {
   description = "Endereço público do Flowa (página e API)."
-  value       = aws_apigatewayv2_stage.stage_padrao_com_throttling.invoke_url
+  value       = aws_apigatewayv2_stage.stage_da_api_publica_do_flowa.invoke_url
 }
