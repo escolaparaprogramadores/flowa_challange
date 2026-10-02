@@ -11,7 +11,7 @@ numa tela, e o OrderAccumulator aceita ou rejeita cada uma conforme o limite de 
 - React 19, TypeScript e Vite na tela
 - xUnit e Testcontainers nos testes do .NET; Vitest e Playwright nos testes da tela
 - Docker Compose para subir tudo junto
-- GitHub Actions para rodar build e testes em cada PR
+- GitHub Actions, que compila e testa as regras de campo (`Flowa.Shared`) em cada PR
 
 ## Como rodar com Docker
 
@@ -74,8 +74,9 @@ dotnet build Flowa.sln
 dotnet test Flowa.sln --filter "Category!=Integration"
 ```
 
-Os testes de integração sobem o compose inteiro num projeto separado (porta 18080). Eles conferem a ida
-e volta FIX entre os containers e a religação depois de recriar o OrderAccumulator:
+Os testes de integração sobem o compose inteiro em projetos separados (portas 18080 e 18093). Eles
+conferem a ida e volta FIX entre os containers e a religação depois de recriar o OrderAccumulator. Um
+deles clona o repositório, então também precisa do `git`:
 
 ```bash
 dotnet test tests/Flowa.IntegrationTests/Flowa.IntegrationTests.csproj
@@ -127,6 +128,8 @@ confere de novo o que chega pelo FIX.
 - A proteção contra ordem repetida vale para o `ClOrdID` no FIX. Se a tela enviar a mesma ordem de novo,
   ela ganha um `ClOrdID` novo e conta como outra ordem.
 - Não há migrações versionadas do banco: o esquema é criado na subida do OrderAccumulator.
+- O CI do GitHub só compila e testa `Flowa.Shared`. Os testes dos dois apps, os de integração e os da
+  tela rodam na máquina, com os comandos de "Como testar".
 
 ## Como funciona
 
