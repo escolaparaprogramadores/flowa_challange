@@ -1,0 +1,60 @@
+# Sobe tudo com um comando: docker compose up
+# Só a página (OrderGenerator) fica exposta, e só nesta máquina (127.0.0.1); o FIX, a API do
+# OrderAccumulator e o banco ficam na rede interna do compose.
+name: flowa
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: flowa
+      POSTGRES_USER: flowa
+      # Valor só de desenvolvimento local (ver README). Troque com POSTGRES_PASSWORD=...
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flowa_dev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowa -d flowa"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  orderaccumulator:
+    build:
+      context: .
+      dockerfile: src/OrderAccumulator/Dockerfile
+      args:
+        SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
+    # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
+    pull_policy: build
+    environment:
+      ASPNETCORE_HTTP_PORTS: "8081"
+      Fix__AcceptorPort: "9876"
+      ConnectionStrings__Flowa: "Host=postgres;Port=5432;Database=flowa;Username=flowa;Password=${POSTGRES_PASSWORD:-flowa_dev}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ordergenerator:
+    build:
+      context: .
+      dockerfile: src/OrderGenerator/Dockerfile
+      args:
+        SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
+    # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
+    pull_policy: build
+    environment:
+      ASPNETCORE_HTTP_PORTS: "8080"
+      Fix__AcceptorHost: orderaccumulator
+      Fix__AcceptorPort: "9876"
+      OrderAccumulator__BaseUrl: http://orderaccumulator:8081
+    ports:
+      - "127.0.0.1:${FLOWA_HTTP_PORT:-8080}:8080"
+    depends_on:
+      - orderaccumulator
+    restart: unless-stopped
+
+volumes:
+  pgdata:

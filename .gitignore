@@ -1,0 +1,30 @@
+# Saída do build .NET
+bin/
+obj/
+*.user
+
+# Resultados de teste e cobertura
+TestResults/
+coverage/
+*.trx
+
+# Frontend
+node_modules/
+dist/
+playwright-report/
+test-results/
+
+# Build do Vite servido pelo OrderGenerator (gerado)
+src/OrderGenerator/wwwroot/
+
+# Editores e sistema
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Artefatos locais
+*.log
+.env
+.env.*
