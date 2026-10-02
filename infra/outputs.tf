@@ -1,13 +1,13 @@
 # Contrato com a fatia de serviços. Ela mora no mesmo módulo raiz, então usa estes `local` direto; os
 # `output` com os mesmos nomes servem à esteira e a quem lê o state.
 locals {
-  vpc_id                = aws_vpc.principal.id
+  vpc_id                = aws_vpc.rede_flowa.id
   subnets_tarefas       = aws_subnet.tarefas[*].id
   subnets_banco         = aws_subnet.banco[*].id
   sg_generator          = aws_security_group.generator.id
   sg_accumulator        = aws_security_group.accumulator.id
   sg_banco              = aws_security_group.banco.id
-  namespace_id          = aws_service_discovery_private_dns_namespace.principal.id
+  namespace_id          = aws_service_discovery_private_dns_namespace.descoberta_privada_dos_servicos_flowa.id
   db_endpoint           = aws_db_instance.banco.address
   db_secret_arn         = aws_secretsmanager_secret.banco.arn
   log_group_generator   = aws_cloudwatch_log_group.logs_dos_servicos_flowa["generator"].name
