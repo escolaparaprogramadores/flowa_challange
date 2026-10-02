@@ -155,20 +155,52 @@ resource "aws_vpc_security_group_ingress_rule" "banco_postgres" {
   referenced_security_group_id = aws_security_group.accumulator.id
 }
 
-# Saída livre só nas tasks: puxar imagem do ECR e ler o segredo passam pela internet (não há endpoint
-# de VPC), e o generator fala com o accumulator. O banco não tem regra de saída.
-resource "aws_vpc_security_group_egress_rule" "generator_saida" {
+# Saída só do necessário. HTTPS para fora: puxar imagem do ECR, ler o segredo e mandar log passam pela
+# internet (não há endpoint de VPC). Dentro da VPC, cada um fala só com o vizinho. O banco não tem saída.
+# DNS e horário usam o resolvedor da VPC, que o security group não filtra.
+resource "aws_vpc_security_group_egress_rule" "generator_https" {
   security_group_id = aws_security_group.generator.id
-  description       = "Saida das tasks do generator"
-  ip_protocol       = "-1"
+  description       = "HTTPS do generator (ECR, segredos, logs)"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
   cidr_ipv4         = "0.0.0.0/0"
 }
 
-resource "aws_vpc_security_group_egress_rule" "accumulator_saida" {
+resource "aws_vpc_security_group_egress_rule" "generator_fix" {
+  security_group_id            = aws_security_group.generator.id
+  description                  = "FIX do generator para o accumulator"
+  ip_protocol                  = "tcp"
+  from_port                    = local.porta_fix
+  to_port                      = local.porta_fix
+  referenced_security_group_id = aws_security_group.accumulator.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "generator_http" {
+  security_group_id            = aws_security_group.generator.id
+  description                  = "GET /api/exposures do generator para o accumulator"
+  ip_protocol                  = "tcp"
+  from_port                    = local.porta_http
+  to_port                      = local.porta_http
+  referenced_security_group_id = aws_security_group.accumulator.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "accumulator_https" {
   security_group_id = aws_security_group.accumulator.id
-  description       = "Saida das tasks do accumulator"
-  ip_protocol       = "-1"
+  description       = "HTTPS do accumulator (ECR, segredos, logs)"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
   cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "accumulator_postgres" {
+  security_group_id            = aws_security_group.accumulator.id
+  description                  = "PostgreSQL do accumulator para o banco"
+  ip_protocol                  = "tcp"
+  from_port                    = local.banco_porta
+  to_port                      = local.banco_porta
+  referenced_security_group_id = aws_security_group.banco.id
 }
 
 # Namespace DNS privado para o generator achar o accumulator pelo nome. Os serviços (e o TTL curto)
