@@ -84,7 +84,7 @@ resource "aws_apigatewayv2_stage" "stage_padrao_com_throttling" {
   }
 }
 
-output "url_publica" {
+output "url_publica_do_flowa" {
   description = "Endereço público do Flowa (página e API)."
   value       = aws_apigatewayv2_stage.stage_padrao_com_throttling.invoke_url
 }
