@@ -14,20 +14,20 @@ variable "limite_rajada_de_requisicoes" {
 }
 
 # O VPC Link só manda tráfego para o generator, e só na porta da página e da API.
-resource "aws_security_group" "vpc_link" {
-  name        = "${local.prefixo}-vpc-link"
+resource "aws_security_group" "firewall_do_vpc_link_da_api_publica" {
+  name        = "${local.prefixo_dos_recursos_flowa}-vpc-link"
   description = "VPC Link do HTTP API: sai so para o generator na 8080."
   vpc_id      = local.vpc_id
 
-  tags = { Name = "${local.prefixo}-vpc-link" }
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-vpc-link" }
 }
 
 resource "aws_vpc_security_group_egress_rule" "vpc_link_para_generator" {
-  security_group_id            = aws_security_group.vpc_link.id
+  security_group_id            = aws_security_group.firewall_do_vpc_link_da_api_publica.id
   description                  = "Pagina e API do generator"
   ip_protocol                  = "tcp"
-  from_port                    = local.porta_generator
-  to_port                      = local.porta_generator
+  from_port                    = local.porta_http_do_generator
+  to_port                      = local.porta_http_do_generator
   referenced_security_group_id = local.sg_generator
 }
 
@@ -36,45 +36,45 @@ resource "aws_vpc_security_group_ingress_rule" "generator_do_vpc_link" {
   security_group_id            = local.sg_generator
   description                  = "Pagina e API vindas do VPC Link"
   ip_protocol                  = "tcp"
-  from_port                    = local.porta_generator
-  to_port                      = local.porta_generator
-  referenced_security_group_id = aws_security_group.vpc_link.id
+  from_port                    = local.porta_http_do_generator
+  to_port                      = local.porta_http_do_generator
+  referenced_security_group_id = aws_security_group.firewall_do_vpc_link_da_api_publica.id
 }
 
-resource "aws_apigatewayv2_vpc_link" "generator" {
-  name               = "${local.prefixo}-vpc-link"
+resource "aws_apigatewayv2_vpc_link" "vpc_link_ate_o_order_generator" {
+  name               = "${local.prefixo_dos_recursos_flowa}-vpc-link"
   subnet_ids         = local.subnets_tarefas
-  security_group_ids = [aws_security_group.vpc_link.id]
+  security_group_ids = [aws_security_group.firewall_do_vpc_link_da_api_publica.id]
 }
 
-resource "aws_apigatewayv2_api" "publica" {
-  name          = "${local.prefixo}-api"
+resource "aws_apigatewayv2_api" "api_publica_do_flowa" {
+  name          = "${local.prefixo_dos_recursos_flowa}-api"
   protocol_type = "HTTP"
   description   = "Entrada publica do Flowa: pagina e /api do OrderGenerator"
 }
 
 # A integração consulta o Cloud Map (registro SRV) e manda a requisição para o IP e a porta do generator.
-resource "aws_apigatewayv2_integration" "generator" {
-  api_id             = aws_apigatewayv2_api.publica.id
+resource "aws_apigatewayv2_integration" "integracao_com_o_order_generator" {
+  api_id             = aws_apigatewayv2_api.api_publica_do_flowa.id
   integration_type   = "HTTP_PROXY"
   integration_method = "ANY"
   connection_type    = "VPC_LINK"
-  connection_id      = aws_apigatewayv2_vpc_link.generator.id
-  integration_uri    = aws_service_discovery_service.generator.arn
+  connection_id      = aws_apigatewayv2_vpc_link.vpc_link_ate_o_order_generator.id
+  integration_uri    = aws_service_discovery_service.registro_srv_do_order_generator.arn
 
   # O generator espera até 5 s pelo ExecutionReport; 10 s cobre essa espera com folga.
   timeout_milliseconds = 10000
 }
 
 resource "aws_apigatewayv2_route" "tudo_para_o_generator" {
-  api_id    = aws_apigatewayv2_api.publica.id
+  api_id    = aws_apigatewayv2_api.api_publica_do_flowa.id
   route_key = "$default"
-  target    = "integrations/${aws_apigatewayv2_integration.generator.id}"
+  target    = "integrations/${aws_apigatewayv2_integration.integracao_com_o_order_generator.id}"
 }
 
 # Throttling no stage inteiro (R-02): acima do limite o API Gateway devolve 429 sem acordar a task.
-resource "aws_apigatewayv2_stage" "padrao" {
-  api_id      = aws_apigatewayv2_api.publica.id
+resource "aws_apigatewayv2_stage" "stage_padrao_com_throttling" {
+  api_id      = aws_apigatewayv2_api.api_publica_do_flowa.id
   name        = "$default"
   auto_deploy = true
 
@@ -86,5 +86,5 @@ resource "aws_apigatewayv2_stage" "padrao" {
 
 output "url_publica" {
   description = "Endereço público do Flowa (página e API)."
-  value       = aws_apigatewayv2_stage.padrao.invoke_url
+  value       = aws_apigatewayv2_stage.stage_padrao_com_throttling.invoke_url
 }
