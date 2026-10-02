@@ -162,10 +162,11 @@ fora. Nenhuma tarefa aceita conexão vinda da internet. Cada serviço roda uma c
 0,5 GB, o banco é um `db.t3.micro` numa zona só, e o API Gateway aceita até 20 pedidos por segundo
 (rajada de 40); acima disso responde 429.
 
-**Como publica.** Tudo na AWS é criado pelo Terraform de `infra/`; nada é criado pelo console. Quando
-um PR é mesclado em `develop`, o workflow `.github/workflows/2-develop-deploy.yml` constrói as duas
-imagens, manda para o ECR e roda o `terraform apply` sozinho. O GitHub entra na AWS por OIDC, com uma
-credencial temporária, sem chave guardada no repositório. A fonte do desenho fica em
-`docs/arquitetura/arquitetura-aws.drawio`.
+**Como publica.** Os serviços, a rede, o banco, o ECR e os logs são criados pelo Terraform de `infra/`.
+A role que a esteira assume e o bucket do state vêm de uma base Terraform separada, fora deste
+repositório. Nada é criado pelo console. Quando um PR é mesclado em `develop`, o workflow
+`.github/workflows/2-develop-deploy.yml` constrói as duas imagens, manda para o ECR e roda o
+`terraform apply` sozinho. O GitHub entra na AWS por OIDC, com uma credencial temporária, sem chave
+guardada no repositório. A fonte do desenho fica em `docs/arquitetura/arquitetura-aws.drawio`.
 
 This is a challenge by [Coodesh](https://coodesh.com/)
