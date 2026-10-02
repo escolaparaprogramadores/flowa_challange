@@ -265,6 +265,9 @@ resource "aws_ecs_service" "accumulator" {
   }
 
   wait_for_steady_state = true
+
+  # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
+  depends_on = [aws_iam_role_policy.execucao_das_tasks]
 }
 
 resource "aws_ecs_service" "generator" {
@@ -295,4 +298,7 @@ resource "aws_ecs_service" "generator" {
   }
 
   wait_for_steady_state = true
+
+  # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
+  depends_on = [aws_iam_role_policy.execucao_das_tasks]
 }
