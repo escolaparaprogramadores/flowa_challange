@@ -1,0 +1,135 @@
+name: Deploy dev
+
+# A cada merge em develop: as duas imagens vão para o ECR e o terraform apply roda na conta do
+# flowa (D-41). O repositório é público, então nada da conta aparece no log: role, bucket e
+# registro vêm de secrets, e a saída do Terraform fica num arquivo do runner, com só o resumo no log.
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+# Um apply por vez. O que chegar depois espera; nada é cancelado no meio.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # ARM64 nativo: as imagens rodam em Fargate ARM64 e o build não precisa de emulação.
+    runs-on: ubuntu-24.04-arm
+    environment: dev
+    timeout-minutes: 45
+    env:
+      AWS_REGION: us-east-1
+      IMAGE_TAG: ${{ github.sha }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Conferir se há infra
+        id: infra
+        run: |
+          if [ -d infra ]; then
+            echo "existe=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "nada a aplicar: infra/ não existe"
+            echo "existe=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Credencial AWS por OIDC
+        if: steps.infra.outputs.existe == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          mask-aws-account-id: true
+
+      - name: Login no ECR
+        if: steps.infra.outputs.existe == 'true'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      # Sem o wrapper: ele repetiria a saída inteira do Terraform no log.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        if: steps.infra.outputs.existe == 'true'
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      # Roda o Terraform com a saída num arquivo. Se falhar, o log mostra só as linhas de erro.
+      - name: Preparar o Terraform sem eco no log
+        if: steps.infra.outputs.existe == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/terraform-quieto.sh" <<'FIM'
+          terraform_quieto() {
+            subcomando=$1
+            shift
+            TERRAFORM_LOG="$RUNNER_TEMP/terraform-$subcomando-$(date +%s%N).log"
+            if ! terraform "$subcomando" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
+              grep -E 'Error' "$TERRAFORM_LOG" >&2 || true
+              echo "terraform $subcomando falhou; a saída completa fica só no runner" >&2
+              return 1
+            fi
+          }
+          FIM
+
+      - name: terraform init e repositórios ECR
+        if: steps.infra.outputs.existe == 'true'
+        working-directory: infra
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          source "$RUNNER_TEMP/terraform-quieto.sh"
+          terraform_quieto init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=flowa/dev.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+          echo "terraform init ok"
+
+          # O ECR precisa existir antes do push das imagens.
+          mapfile -t alvos_ecr < <(grep -hoE '^resource "aws_ecr_repository" "[A-Za-z0-9_-]+"' ./*.tf |
+            awk -F'"' '{ print "-target=aws_ecr_repository." $4 }')
+          if [ "${#alvos_ecr[@]}" -eq 0 ]; then
+            echo "nenhum resource \"aws_ecr_repository\" em infra/*.tf" >&2
+            exit 1
+          fi
+          terraform_quieto apply -auto-approve "${alvos_ecr[@]}"
+          printf '%s\n' "${alvos_ecr[@]}" | sed 's/^-target=/ECR: /'
+          grep -E '^Apply complete!' "$TERRAFORM_LOG"
+
+      - name: Imagens ARM64 no ECR
+        if: steps.infra.outputs.existe == 'true'
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: |
+          for app in OrderGenerator:flowa-challenge-order-generator OrderAccumulator:flowa-challenge-order-accumulator; do
+            projeto=${app%%:*}
+            imagem="$ECR_REGISTRY/${app#*:}:$IMAGE_TAG"
+            # Rodar de novo no mesmo commit não refaz a imagem que já está lá.
+            if docker manifest inspect "$imagem" > /dev/null 2>&1; then
+              echo "$projeto: imagem deste commit já está no ECR"
+              continue
+            fi
+            # Sem o SHA o app não sobe e o /version volta vazio.
+            docker build --platform linux/arm64 --build-arg SOURCE_REVISION_ID="$IMAGE_TAG" \
+              -f "src/$projeto/Dockerfile" -t "$imagem" .
+            docker push --quiet "$imagem" > /dev/null
+            echo "$projeto: imagem enviada com a tag $IMAGE_TAG"
+          done
+
+      - name: terraform plan e apply
+        if: steps.infra.outputs.existe == 'true'
+        working-directory: infra
+        run: |
+          source "$RUNNER_TEMP/terraform-quieto.sh"
+          terraform_quieto plan -out=tfplan -var "image_tag=$IMAGE_TAG"
+          grep -E '^(Plan:|No changes)' "$TERRAFORM_LOG"
+          grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
+
+          terraform_quieto apply tfplan
+          grep -E '^Apply complete!' "$TERRAFORM_LOG"
