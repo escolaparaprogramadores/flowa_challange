@@ -358,7 +358,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         public override ITimer CreateTimer(TimerCallback timerCallback, object? timerState, TimeSpan dueTime, TimeSpan period) =>
             gaugeTimer = new ManualGaugeTimer(timerCallback, timerState, dueTime, period);
 
-        public void TickGaugeTimer() => gaugeTimer!.Fire();
+        public void TickGaugeTimer() => gaugeTimer!.RunGaugeTimerCallback();
     }
 
     private sealed class ManualGaugeTimer(TimerCallback timerCallback, object? timerState, TimeSpan dueTime, TimeSpan period) : ITimer
@@ -366,7 +366,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         public TimeSpan DueTime { get; private set; } = dueTime;
         public TimeSpan Period { get; private set; } = period;
 
-        public void Fire() => timerCallback(timerState);
+        public void RunGaugeTimerCallback() => timerCallback(timerState);
 
         public bool Change(TimeSpan newDueTime, TimeSpan newPeriod)
         {
