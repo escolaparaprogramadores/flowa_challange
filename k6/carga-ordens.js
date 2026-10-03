@@ -111,8 +111,8 @@ export default function enviarOrdemDoPar(contextoDaCarga) {
 
 function lerEstatisticaDaMetrica(resultadoDoTeste, nomeDaMetrica, nomeDaEstatistica) {
   const metricaDoTeste = resultadoDoTeste.metrics[nomeDaMetrica];
-  const estatistica = metricaDoTeste && metricaDoTeste.values ? metricaDoTeste.values[nomeDaEstatistica] : undefined;
-  return typeof estatistica === 'number' ? estatistica : 0;
+  const estatisticaDaMetrica = metricaDoTeste && metricaDoTeste.values ? metricaDoTeste.values[nomeDaEstatistica] : undefined;
+  return typeof estatisticaDaMetrica === 'number' ? estatisticaDaMetrica : 0;
 }
 
 function formatarMilissegundos(milissegundos) {
@@ -147,13 +147,13 @@ export function handleSummary(resultadoDoTeste) {
     fechamentos_nao_aceitos: lerEstatisticaDaMetrica(resultadoDoTeste, 'flowa_fechamentos_nao_aceitos', 'count'),
   };
 
-  const latencia = resumoDaCarga.latencia_ordem_ms;
+  const percentisDaLatencia = resumoDaCarga.latencia_ordem_ms;
   const tabelaDoReadme = [
     '| Data (UTC) | Commit no ar | P80 | P90 | P95 | P99 | Requisições por minuto | Taxa de erro |',
     '|---|---|---|---|---|---|---|---|',
     `| ${resumoDaCarga.data.slice(0, 16).replace('T', ' ')} | ${(resumoDaCarga.commit || '?').slice(0, 7)} `
-      + `| ${formatarMilissegundos(latencia.p80)} | ${formatarMilissegundos(latencia.p90)} `
-      + `| ${formatarMilissegundos(latencia.p95)} | ${formatarMilissegundos(latencia.p99)} `
+      + `| ${formatarMilissegundos(percentisDaLatencia.p80)} | ${formatarMilissegundos(percentisDaLatencia.p90)} `
+      + `| ${formatarMilissegundos(percentisDaLatencia.p95)} | ${formatarMilissegundos(percentisDaLatencia.p99)} `
       + `| ${resumoDaCarga.requisicoes_por_minuto.toFixed(0)} | ${(resumoDaCarga.taxa_de_erro * 100).toFixed(2)}% |`,
   ].join('\n');
 

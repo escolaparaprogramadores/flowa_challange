@@ -66,9 +66,10 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            const pasta = process.env.PASTA_DO_RESULTADO;
-            const lerExposicaoPorSimbolo = (arquivo) => Object.fromEntries(
-              JSON.parse(fs.readFileSync(`${pasta}/${arquivo}`, "utf8")).exposures.map((item) => [item.symbol, item.exposure]));
+            const pastaDosResultadosDaCarga = process.env.PASTA_DO_RESULTADO;
+            const lerExposicaoPorSimbolo = (arquivoDeExposicao) => Object.fromEntries(
+              JSON.parse(fs.readFileSync(`${pastaDosResultadosDaCarga}/${arquivoDeExposicao}`, "utf8")).exposures
+                .map((exposicaoDoSimbolo) => [exposicaoDoSimbolo.symbol, exposicaoDoSimbolo.exposure]));
             const exposicaoAntes = lerExposicaoPorSimbolo("exposicao-antes.json");
             const exposicaoDepois = lerExposicaoPorSimbolo("exposicao-depois.json");
             const diferencaPorSimbolo = Object.keys(exposicaoAntes).map((simbolo) => ({
@@ -77,11 +78,12 @@ jobs:
               depois: exposicaoDepois[simbolo],
               diferenca: Math.round((exposicaoDepois[simbolo] - exposicaoAntes[simbolo]) * 100) / 100,
             }));
-            fs.writeFileSync(`${pasta}/diferenca-exposicao.json`, JSON.stringify(diferencaPorSimbolo, null, 2));
+            fs.writeFileSync(`${pastaDosResultadosDaCarga}/diferenca-exposicao.json`, JSON.stringify(diferencaPorSimbolo, null, 2));
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
               "", "## Exposição antes e depois", "",
               "| Símbolo | Antes | Depois | Diferença |", "|---|---|---|---|",
-              ...diferencaPorSimbolo.map((linha) => `| ${linha.symbol} | ${linha.antes} | ${linha.depois} | ${linha.diferenca} |`), "",
+              ...diferencaPorSimbolo.map((diferencaDeExposicaoDoSimbolo) => `| ${diferencaDeExposicaoDoSimbolo.symbol} `
+                + `| ${diferencaDeExposicaoDoSimbolo.antes} | ${diferencaDeExposicaoDoSimbolo.depois} | ${diferencaDeExposicaoDoSimbolo.diferenca} |`), "",
             ].join("\n"));
           '
 
