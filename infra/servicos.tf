@@ -93,7 +93,8 @@ resource "aws_iam_role_policy" "permissoes_de_execucao_dos_servicos_flowa" {
         Effect   = "Allow"
         Action   = "secretsmanager:GetSecretValue"
         Resource = local.db_secret_arn
-      }] : []
+      }] : [],
+      local.permissao_de_ler_a_chave_do_datadog,
     )
   })
 }
@@ -102,8 +103,8 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
   family                   = local.nomes_dos_servicos_flowa.generator
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = local.cpu_da_task_flowa
+  memory                   = local.memoria_da_task_flowa
   execution_role_arn       = aws_iam_role.role_de_execucao_dos_servicos_flowa["generator"].arn
 
   runtime_platform {
@@ -111,19 +112,19 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
     cpu_architecture        = "ARM64"
   }
 
-  container_definitions = jsonencode([{
+  container_definitions = jsonencode(concat([{
     name      = "generator"
-    image     = "${local.ecr_generator_url}:${var.image_tag}"
+    image     = "${local.ecr_generator_url}:${var.generator_image_tag}"
     essential = true
 
     portMappings = [{ containerPort = local.porta_http_do_generator, protocol = "tcp" }]
 
-    environment = [
+    environment = concat([
       { name = "ASPNETCORE_HTTP_PORTS", value = tostring(local.porta_http_do_generator) },
       { name = "Fix__AcceptorHost", value = local.nome_dns_do_accumulator },
       { name = "Fix__AcceptorPort", value = tostring(local.porta_fix) },
       { name = "OrderAccumulator__BaseUrl", value = "http://${local.nome_dns_do_accumulator}:${local.porta_http_do_accumulator}" },
-    ]
+    ], local.variaveis_datadog_do_app_por_servico_flowa.generator)
 
     healthCheck = {
       command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico_flowa.generator]
@@ -141,15 +142,15 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
         awslogs-stream-prefix = "app"
       }
     }
-  }])
+  }], local.containers_do_agente_por_servico_flowa.generator))
 }
 
 resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
   family                   = local.nomes_dos_servicos_flowa.accumulator
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = local.cpu_da_task_flowa
+  memory                   = local.memoria_da_task_flowa
   execution_role_arn       = aws_iam_role.role_de_execucao_dos_servicos_flowa["accumulator"].arn
 
   runtime_platform {
@@ -157,9 +158,9 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
     cpu_architecture        = "ARM64"
   }
 
-  container_definitions = jsonencode([{
+  container_definitions = jsonencode(concat([{
     name      = "accumulator"
-    image     = "${local.ecr_accumulator_url}:${var.image_tag}"
+    image     = "${local.ecr_accumulator_url}:${var.accumulator_image_tag}"
     essential = true
 
     portMappings = [
@@ -167,10 +168,10 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
       { containerPort = local.porta_fix, protocol = "tcp" },
     ]
 
-    environment = [
+    environment = concat([
       { name = "ASPNETCORE_HTTP_PORTS", value = tostring(local.porta_http_do_accumulator) },
       { name = "Fix__AcceptorPort", value = tostring(local.porta_fix) },
-    ]
+    ], local.variaveis_datadog_do_app_por_servico_flowa.accumulator)
 
     # A connection string (com a senha) vem do segredo no momento em que a task sobe; nunca fica na task
     # definition nem no state desta parte.
@@ -194,7 +195,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
         awslogs-stream-prefix = "app"
       }
     }
-  }])
+  }], local.containers_do_agente_por_servico_flowa.accumulator))
 }
 
 # Registro A com TTL de 10 s: depois de um deploy o accumulator troca de IP, e o QuickFIX/n resolve o nome
@@ -212,8 +213,11 @@ resource "aws_service_discovery_service" "registro_dns_do_order_accumulator" {
     }
   }
 
-  # O ECS tira a instância do Cloud Map quando a task para.
-  health_check_custom_config {}
+  # O ECS tira a instância do Cloud Map quando a task para. O failure_threshold explícito (a AWS sempre
+  # grava 1) evita que o provider troque o registro a cada plan e deixe o Cloud Map sem as tasks.
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 
   force_destroy = true
 }
@@ -232,7 +236,9 @@ resource "aws_service_discovery_service" "registro_srv_do_order_generator" {
     }
   }
 
-  health_check_custom_config {}
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 
   force_destroy = true
 }
@@ -266,6 +272,13 @@ resource "aws_ecs_service" "servico_do_order_accumulator" {
 
   wait_for_steady_state = true
 
+  # Uma vez, para as tasks voltarem ao Cloud Map recriado no deploy de 03/10/2026. Mudar o valor força
+  # um novo deploy do serviço sem trocar a imagem.
+  force_new_deployment = true
+  triggers = {
+    registro_no_cloud_map = "2026-10-03"
+  }
+
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
   depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]
 }
@@ -298,6 +311,13 @@ resource "aws_ecs_service" "servico_do_order_generator" {
   }
 
   wait_for_steady_state = true
+
+  # Uma vez, para as tasks voltarem ao Cloud Map recriado no deploy de 03/10/2026. Mudar o valor força
+  # um novo deploy do serviço sem trocar a imagem.
+  force_new_deployment = true
+  triggers = {
+    registro_no_cloud_map = "2026-10-03"
+  }
 
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
   depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]

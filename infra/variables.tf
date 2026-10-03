@@ -9,16 +9,30 @@ variable "region" {
   }
 }
 
-variable "image_tag" {
-  description = "Tag das imagens no ECR (o SHA do commit). A esteira passa em todo apply."
+# Uma tag por serviço (CA-O24): o SHA do último commit que mudou o que a imagem daquele serviço copia.
+# A esteira passa as duas em todo apply; o serviço que não mudou recebe a tag que já roda, e a task dele
+# não é trocada.
+variable "generator_image_tag" {
+  description = "Tag da imagem do OrderGenerator no ECR (SHA completo do commit que a construiu)."
   type        = string
-  # Sem default útil: o null deixa o `apply -target` dos ECR rodar antes de existir imagem, e qualquer
-  # task definition que use a tag sem ela ser passada falha alto no plan.
+  # Sem default útil: o null deixa o `apply -target` dos ECR rodar antes de existir imagem, e a task
+  # definition que use a tag sem ela ser passada falha alto no plan.
   default = null
 
   validation {
-    condition     = var.image_tag == null || length(trimspace(coalesce(var.image_tag, " "))) > 0
-    error_message = "image_tag não pode ser texto vazio."
+    condition     = var.generator_image_tag == null || can(regex("^[0-9a-f]{40}$", coalesce(var.generator_image_tag, "-")))
+    error_message = "generator_image_tag tem de ser o SHA completo do commit (40 caracteres hexadecimais)."
+  }
+}
+
+variable "accumulator_image_tag" {
+  description = "Tag da imagem do OrderAccumulator no ECR (SHA completo do commit que a construiu)."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.accumulator_image_tag == null || can(regex("^[0-9a-f]{40}$", coalesce(var.accumulator_image_tag, "-")))
+    error_message = "accumulator_image_tag tem de ser o SHA completo do commit (40 caracteres hexadecimais)."
   }
 }
 
