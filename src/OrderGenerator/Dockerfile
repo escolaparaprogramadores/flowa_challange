@@ -15,12 +15,12 @@ ARG DD_TRACE_DOTNET_SHA256_ARM64=8fd6213cafc85a9df3bbc22f9c357450bb85e1f144dfc28
 ARG DD_TRACE_DOTNET_SHA256_AMD64=8bbaa079e53a16b4cdee80e419e01c6dfd134a6670411c17eb8cebc83f69fedd
 ARG TARGETARCH
 RUN case "$TARGETARCH" in \
-        arm64) pacote="datadog-dotnet-apm-${DD_TRACE_DOTNET_VERSION}.arm64.tar.gz"; sha="$DD_TRACE_DOTNET_SHA256_ARM64" ;; \
-        amd64) pacote="datadog-dotnet-apm-${DD_TRACE_DOTNET_VERSION}.tar.gz"; sha="$DD_TRACE_DOTNET_SHA256_AMD64" ;; \
+        arm64) pacoteDoTracerDatadog="datadog-dotnet-apm-${DD_TRACE_DOTNET_VERSION}.arm64.tar.gz"; sha256DoPacoteDoTracerDatadog="$DD_TRACE_DOTNET_SHA256_ARM64" ;; \
+        amd64) pacoteDoTracerDatadog="datadog-dotnet-apm-${DD_TRACE_DOTNET_VERSION}.tar.gz"; sha256DoPacoteDoTracerDatadog="$DD_TRACE_DOTNET_SHA256_AMD64" ;; \
         *) echo "Sem pacote do tracer para a arquitetura '$TARGETARCH'" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL -o /tmp/tracer.tar.gz "https://github.com/DataDog/dd-trace-dotnet/releases/download/v${DD_TRACE_DOTNET_VERSION}/${pacote}" \
-    && echo "${sha}  /tmp/tracer.tar.gz" | sha256sum -c - \
+    curl -fsSL -o /tmp/tracer.tar.gz "https://github.com/DataDog/dd-trace-dotnet/releases/download/v${DD_TRACE_DOTNET_VERSION}/${pacoteDoTracerDatadog}" \
+    && echo "${sha256DoPacoteDoTracerDatadog}  /tmp/tracer.tar.gz" | sha256sum -c - \
     && mkdir -p /opt/datadog /var/log/datadog/dotnet \
     && tar -C /opt/datadog -xzf /tmp/tracer.tar.gz \
     && chmod a+rwx /var/log/datadog/dotnet
