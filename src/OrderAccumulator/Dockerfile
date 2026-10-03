@@ -1,4 +1,22 @@
 # Build a partir da raiz do repositório: docker build -f src/OrderAccumulator/Dockerfile .
+# Tracer do Datadog (dd-trace-dotnet). Mesma versão e mesmos SHA-256 nas duas imagens; pacote que não
+# bate com o SHA da arquitetura derruba o build. Baixa na arquitetura de quem constrói: é só um tar.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS tracer
+ARG DD_TRACE_DOTNET_VERSION=3.54.0
+ARG DD_TRACE_DOTNET_SHA256_ARM64=8fd6213cafc85a9df3bbc22f9c357450bb85e1f144dfc286e1e32b6833aeafbc
+ARG DD_TRACE_DOTNET_SHA256_AMD64=8bbaa079e53a16b4cdee80e419e01c6dfd134a6670411c17eb8cebc83f69fedd
+ARG TARGETARCH
+RUN case "$TARGETARCH" in \
+        arm64) pacote="datadog-dotnet-apm-${DD_TRACE_DOTNET_VERSION}.arm64.tar.gz"; sha="$DD_TRACE_DOTNET_SHA256_ARM64" ;; \
+        amd64) pacote="datadog-dotnet-apm-${DD_TRACE_DOTNET_VERSION}.tar.gz"; sha="$DD_TRACE_DOTNET_SHA256_AMD64" ;; \
+        *) echo "Sem pacote do tracer para a arquitetura '$TARGETARCH'" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/tracer.tar.gz "https://github.com/DataDog/dd-trace-dotnet/releases/download/v${DD_TRACE_DOTNET_VERSION}/${pacote}" \
+    && echo "${sha}  /tmp/tracer.tar.gz" | sha256sum -c - \
+    && mkdir -p /opt/datadog /var/log/datadog/dotnet \
+    && tar -C /opt/datadog -xzf /tmp/tracer.tar.gz \
+    && chmod a+rwx /var/log/datadog/dotnet
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY Directory.Build.props ./
@@ -19,6 +37,15 @@ RUN --mount=type=bind,source=.git,target=/repo/.git \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app ./
+COPY --from=tracer /opt/datadog /opt/datadog
+# O tracer grava o próprio log em arquivo nesta pasta, não no stdout do app (o usuário do app não é root).
+COPY --from=tracer /var/log/datadog /var/log/datadog
+ENV CORECLR_ENABLE_PROFILING=1 \
+    CORECLR_PROFILER={846F5F1C-F9AE-4B07-969E-05C26BC060D8} \
+    CORECLR_PROFILER_PATH=/opt/datadog/Datadog.Trace.ClrProfiler.Native.so \
+    DD_DOTNET_TRACER_HOME=/opt/datadog \
+    DD_TRACE_OTEL_ENABLED=true \
+    DD_TRACE_SAMPLE_RATE=1.0
 USER $APP_UID
 EXPOSE 8081 9876
 ENTRYPOINT ["dotnet", "OrderAccumulator.dll"]
