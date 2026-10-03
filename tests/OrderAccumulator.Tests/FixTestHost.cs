@@ -104,7 +104,7 @@ public sealed class FixTestInitiator : IApplication, IDisposable
             StartTime=00:00:00
             EndTime=00:00:00
             UseDataDictionary=Y
-            DataDictionary={Path.Combine(AppContext.BaseDirectory, "FIX44.xml")}
+            DataDictionary={Path.Combine(AppContext.BaseDirectory, "FIX44-flowa.xml")}
             ResetOnLogon=Y
             ResetOnLogout=Y
             ResetOnDisconnect=Y

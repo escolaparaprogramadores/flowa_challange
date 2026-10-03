@@ -89,7 +89,8 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
         var recusaDaSessao = await fixTestInitiator.SendExpectingSessionRejectAsync(ordemComCampoDesconhecido);
 
         Assert.Equal(5101, recusaDaSessao.RefTagID.Value);
-        Assert.Equal(SessionRejectReason.TAG_NOT_DEFINED_FOR_THIS_MESSAGE_TYPE, recusaDaSessao.SessionRejectReason.Value);
+        // Tag que o dicionário nem define: o QuickFIX recusa como número de tag inválido (373=0).
+        Assert.Equal(SessionRejectReason.INVALID_TAG_NUMBER, recusaDaSessao.SessionRejectReason.Value);
         Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("campo-5101"));
     }
 
