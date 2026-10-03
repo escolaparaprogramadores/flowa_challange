@@ -233,17 +233,47 @@ jobs:
             echo "$servico_flowa: imagem enviada com a tag $GITHUB_SHA"
           done
 
+      # Liga o agente do Datadog só quando o cofre já tem a chave: sem ela o agente não sobe e a task ficaria
+      # maior à toa. Lê só os estágios das versões; o valor a esteira nem pode ler.
+      - name: Conferir se o cofre do Datadog tem a chave
+        id: datadog
+        if: steps.infra.outputs.existe == 'true'
+        env:
+          # Para tirar o agente das tasks, troque para "false".
+          AGENTE_DATADOG_DESEJADO: "true"
+        run: |
+          if [ "$AGENTE_DATADOG_DESEJADO" != "true" ]; then
+            echo "agente do Datadog desligado na esteira"
+            echo "ligado=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Erro da AWS traz ARN e conta; por isso a saída dele não vai para o log.
+          if ! estagios_das_versoes=$(aws secretsmanager describe-secret --secret-id flowa-challenge/dev/datadog/api-key \
+               --query VersionIdsToStages --output json 2> /dev/null); then
+            echo "não deu para consultar o cofre do Datadog; o deploy para antes do plan" >&2
+            exit 1
+          fi
+          if grep -q '"AWSCURRENT"' <<< "$estagios_das_versoes"; then
+            echo "cofre do Datadog com chave: o agente sobe nas duas tasks"
+            echo "ligado=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::O cofre do Datadog ainda não tem a chave; as tasks sobem sem o agente."
+            echo "ligado=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: terraform plan e apply
         if: steps.infra.outputs.existe == 'true'
         working-directory: infra
         env:
           TAG_DA_IMAGEM_DO_GENERATOR: ${{ steps.tags.outputs.generator_tag }}
           TAG_DA_IMAGEM_DO_ACCUMULATOR: ${{ steps.tags.outputs.accumulator_tag }}
+          AGENTE_DATADOG_LIGADO: ${{ steps.datadog.outputs.ligado }}
         run: |
           source "$RUNNER_TEMP/terraform-quieto.sh"
           terraform_quieto plan -out=tfplan \
             -var "generator_image_tag=$TAG_DA_IMAGEM_DO_GENERATOR" \
-            -var "accumulator_image_tag=$TAG_DA_IMAGEM_DO_ACCUMULATOR"
+            -var "accumulator_image_tag=$TAG_DA_IMAGEM_DO_ACCUMULATOR" \
+            -var "datadog_ligado=$AGENTE_DATADOG_LIGADO"
           grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan sem linha de resumo"
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
