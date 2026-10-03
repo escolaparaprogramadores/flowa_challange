@@ -1,11 +1,13 @@
 name: CI
 
-# Roda o build e todos os testes em cada PR e em cada push para develop e main.
+# Roda o build e todos os testes em cada PR para develop e main e em cada push para main. Em develop quem
+# chama este CI é a esteira de deploy (2-develop-deploy.yml), que só publica com ele verde no mesmo commit.
 on:
   pull_request:
     branches: [develop, main]
   push:
-    branches: [develop, main]
+    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
