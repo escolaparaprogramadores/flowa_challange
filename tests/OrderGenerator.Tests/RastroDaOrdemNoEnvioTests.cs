@@ -38,6 +38,36 @@ public sealed class RastroDaOrdemNoEnvioTests : IClassFixture<LoggedOnOrderGener
     }
 
     [Fact]
+    public async Task Log_da_sessao_FIX_mostra_a_tag_5100_sem_o_trace_id()
+    {
+        var enviosDaOrdem = new ConcurrentQueue<Activity>();
+        using var ouvinteDoRastroDaOrdem = OuvirEnviosDaOrdem(enviosDaOrdem);
+        // O ScreenLog do QuickFIX escreve no stdout, que é o que o docker compose logs e o CloudWatch recebem.
+        var stdoutOriginal = Console.Out;
+        var stdoutCapturado = new StringWriter();
+        Console.SetOut(TextWriter.Synchronized(stdoutCapturado));
+        HttpResponseMessage respostaDaOrdem;
+        try
+        {
+            respostaDaOrdem = await EnviarOrdemDeCompraDePetr4();
+        }
+        finally
+        {
+            Console.SetOut(stdoutOriginal);
+        }
+
+        Assert.Equal(HttpStatusCode.OK, respostaDaOrdem.StatusCode);
+        var envioDaOrdem = Assert.Single(enviosDaOrdem);
+        // A mensagem que saiu leva o traceparent inteiro; só o log fica sem ele.
+        var ordemRecebidaPeloAcceptor = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
+        Assert.Equal($"00-{envioDaOrdem.TraceId}-{envioDaOrdem.SpanId}-01", ordemRecebidaPeloAcceptor.GetString(RastroDaOrdemFix.TagTraceParent));
+        var linhasDoStdout = stdoutCapturado.ToString().Split('\n');
+        Assert.Single(linhasDoStdout, linhaDoStdout => linhaDoStdout.StartsWith("<outgoing> ") && linhaDoStdout.Contains("|35=D|") && linhaDoStdout.Contains("|5100=***|"));
+        Assert.DoesNotContain(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains(envioDaOrdem.TraceId.ToHexString()));
+        Assert.DoesNotContain(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains(envioDaOrdem.SpanId.ToHexString()));
+    }
+
+    [Fact]
     public async Task Sem_ninguem_ouvindo_o_rastro_a_ordem_sai_sem_a_tag_5100()
     {
         var respostaDaOrdem = await EnviarOrdemDeCompraDePetr4();

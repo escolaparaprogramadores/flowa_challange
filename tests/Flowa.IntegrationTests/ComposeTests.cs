@@ -86,6 +86,38 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(acceptedOrder.GetProperty("orderId").GetString(), executionReport.ReadFixTagValue(37));
     }
 
+    // CA-O4 da onda 3: o tracer do Datadog vem nas duas imagens, com a amostragem padrão em 1.0.
+    [Theory]
+    [InlineData("ordergenerator")]
+    [InlineData("orderaccumulator")]
+    public async Task A_imagem_carrega_o_tracer_do_Datadog_com_amostragem_padrao_1(string serviceName)
+    {
+        Assert.Equal("1", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "CORECLR_ENABLE_PROFILING"));
+        Assert.Equal("{846F5F1C-F9AE-4B07-969E-05C26BC060D8}", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "CORECLR_PROFILER"));
+        Assert.Equal("/opt/datadog/Datadog.Trace.ClrProfiler.Native.so", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "CORECLR_PROFILER_PATH"));
+        Assert.Equal("/opt/datadog", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "DD_DOTNET_TRACER_HOME"));
+        Assert.Equal("true", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "DD_TRACE_OTEL_ENABLED"));
+        Assert.Equal("1.0", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "DD_TRACE_SAMPLE_RATE"));
+    }
+
+    // CA-O5 da onda 3: com o tracer carregado (sem agente), a ordem sai com a 5100, e o log das duas
+    // pontas mostra a tag sem o valor: o trace id não vai ao log (decisão 17).
+    [Fact]
+    public async Task Ordem_sai_com_a_tag_5100_e_o_log_das_duas_pontas_nao_mostra_o_trace_id()
+    {
+        var acceptedOrder = await PostOrderAsync("PETR4", "buy", 7, 10.10m);
+        var clOrdId = acceptedOrder.GetProperty("clOrdId").GetString()!;
+
+        var sentNewOrderSingle = await FindSingleFixMessageAsync("ordergenerator", "D", clOrdId, senderCompId: "ORDERGENERATOR");
+        var receivedNewOrderSingle = await FindSingleFixMessageAsync("orderaccumulator", "D", clOrdId, senderCompId: "ORDERGENERATOR");
+        Assert.Equal("***", sentNewOrderSingle.ReadFixTagValue(5100));
+        Assert.Equal("***", receivedNewOrderSingle.ReadFixTagValue(5100));
+        Assert.DoesNotMatch(TraceParentW3C, await composeUnderTest.ReadServiceLogAsync("ordergenerator"));
+        Assert.DoesNotMatch(TraceParentW3C, await composeUnderTest.ReadServiceLogAsync("orderaccumulator"));
+    }
+
+    private static readonly Regex TraceParentW3C = new("[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}");
+
     [Fact]
     public async Task Ordem_que_passa_do_limite_volta_rejeitada_com_150_8_e_o_texto_do_contrato()
     {

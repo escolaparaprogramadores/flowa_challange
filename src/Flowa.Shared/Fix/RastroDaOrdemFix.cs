@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace Flowa.Shared.Fix;
 
@@ -24,4 +25,15 @@ public static class RastroDaOrdemFix
         ActivityContext.TryParse(traceParentRecebido, null, out var contextoDoEnvio);
         return FonteDoRastro.StartActivity("fix.recebimento_da_ordem", ActivityKind.Consumer, contextoDoEnvio);
     }
+
+    // O log da sessão FIX escreve a mensagem crua, e o traceparent da 5100 leva o trace id, que não vai
+    // ao log (decisão 17). A tag continua na linha, só o valor some; a mensagem enviada não muda.
+    public static string OcultarTraceParentNoLog(string linhaDoLogFix) =>
+        linhaDoLogFix.Contains(PrefixoDaTagTraceParent, StringComparison.Ordinal)
+            ? ValorDaTagTraceParent.Replace(linhaDoLogFix, PrefixoDaTagTraceParent + ValorOcultoNoLog)
+            : linhaDoLogFix;
+
+    public const string ValorOcultoNoLog = "***";
+    private const string PrefixoDaTagTraceParent = "5100=";
+    private static readonly Regex ValorDaTagTraceParent = new("(?<=^|\u0001)5100=[^\u0001]*", RegexOptions.CultureInvariant);
 }

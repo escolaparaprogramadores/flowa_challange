@@ -40,6 +40,44 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
     }
 
     [Fact]
+    public async Task Log_da_sessao_FIX_mostra_a_tag_5100_sem_o_trace_id()
+    {
+        // Lê o stdout de verdade, como o FixAcceptorTests: é o que o docker compose logs e o CloudWatch recebem.
+        var stdoutCapturado = new StringWriter();
+        var stdoutOriginal = Console.Out;
+        Console.SetOut(TextWriter.Synchronized(stdoutCapturado));
+        string traceIdDoEnvio;
+        string spanIdDoEnvio;
+        try
+        {
+            using var spansDoRastro = new SpansDoRastroDaOrdemCapturados();
+            await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+            using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+            using var envioDaOrdem = RastroDaOrdemFix.IniciarEnvioDaOrdem();
+            Assert.NotNull(envioDaOrdem);
+            traceIdDoEnvio = envioDaOrdem.TraceId.ToHexString();
+            spanIdDoEnvio = envioDaOrdem.SpanId.ToHexString();
+            var ordemComRastro = FixTestInitiator.NewOrder("log-sem-trace-id", "PETR4", '1', 100, 10.50m);
+            ordemComRastro.SetField(new StringField(RastroDaOrdemFix.TagTraceParent, RastroDaOrdemFix.TraceParentDoEnvio(envioDaOrdem)!));
+
+            var relatorioDaOrdem = await fixTestInitiator.SendExpectingExecutionReportAsync(ordemComRastro);
+
+            Assert.Equal(ExecType.NEW, relatorioDaOrdem.ExecType.Value);
+            Assert.Equal(envioDaOrdem.TraceId, Assert.Single(spansDoRastro.RecebimentosDaOrdem).TraceId);
+        }
+        finally
+        {
+            Console.SetOut(stdoutOriginal);
+        }
+
+        var linhasDoStdout = stdoutCapturado.ToString().Split(Environment.NewLine);
+        Assert.Single(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains("\u000135=D\u0001")
+            && linhaDoStdout.Contains("\u000111=log-sem-trace-id\u0001") && linhaDoStdout.Contains("\u00015100=***\u0001"));
+        Assert.DoesNotContain(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains(traceIdDoEnvio));
+        Assert.DoesNotContain(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains(spanIdDoEnvio));
+    }
+
+    [Fact]
     public async Task Ordem_sem_a_tag_5100_e_aceita_e_abre_um_rastro_novo()
     {
         using var spansDoRastro = new SpansDoRastroDaOrdemCapturados();

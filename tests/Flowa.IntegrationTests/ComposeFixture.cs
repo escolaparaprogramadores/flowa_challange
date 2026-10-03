@@ -96,6 +96,9 @@ public sealed class ComposeFixture : IAsyncLifetime
     public async Task<string> ReadContainerProcessUserIdAsync(string serviceName) =>
         (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", serviceName, "id", "-u")).Trim();
 
+    public async Task<string> ReadContainerEnvironmentVariableAsync(string serviceName, string variableName) =>
+        (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", serviceName, "printenv", variableName)).Trim();
+
     public async Task<JsonDocument> ReadResolvedComposeConfigAsync() =>
         JsonDocument.Parse(await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "config", "--format", "json"));
 

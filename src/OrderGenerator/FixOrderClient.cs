@@ -33,7 +33,8 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     public FixOrderClient(IConfiguration orderGeneratorConfiguration)
     {
         var initiatorSettings = LoadInitiatorSessionSettings(orderGeneratorConfiguration);
-        _fixSocketInitiator = new SocketInitiator(this, new MemoryStoreFactory(), initiatorSettings, new ScreenLogFactory(initiatorSettings), null);
+        _fixSocketInitiator = new SocketInitiator(
+            this, new MemoryStoreFactory(), initiatorSettings, new LogDaSessaoFixSemTraceParent(new ScreenLogFactory(initiatorSettings)), null);
     }
 
     internal int OrdersAwaitingExecutionReportCount => _ordersAwaitingExecutionReport.Count;
@@ -153,4 +154,25 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     }
 
     public void Dispose() => _fixSocketInitiator.Dispose();
+
+    // O ScreenLog escreve a mensagem FIX crua no stdout; o valor da 5100 (trace id) fica de fora.
+    private sealed class LogDaSessaoFixSemTraceParent(ILogFactory logDaTela) : ILogFactory
+    {
+        public ILog Create(SessionID sessaoFix) => new LogSemTraceParent(logDaTela.Create(sessaoFix));
+
+        public ILog CreateNonSessionLog() => new LogSemTraceParent(logDaTela.CreateNonSessionLog());
+    }
+
+    private sealed class LogSemTraceParent(ILog logDaSessaoFix) : ILog
+    {
+        public void Clear() => logDaSessaoFix.Clear();
+
+        public void OnIncoming(string mensagemRecebida) => logDaSessaoFix.OnIncoming(RastroDaOrdemFix.OcultarTraceParentNoLog(mensagemRecebida));
+
+        public void OnOutgoing(string mensagemEnviada) => logDaSessaoFix.OnOutgoing(RastroDaOrdemFix.OcultarTraceParentNoLog(mensagemEnviada));
+
+        public void OnEvent(string eventoDaSessao) => logDaSessaoFix.OnEvent(RastroDaOrdemFix.OcultarTraceParentNoLog(eventoDaSessao));
+
+        public void Dispose() => logDaSessaoFix.Dispose();
+    }
 }
