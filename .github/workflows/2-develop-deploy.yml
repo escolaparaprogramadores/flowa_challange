@@ -97,6 +97,9 @@ jobs:
             echo .dockerignore
             # Origens de cada COPY/ADD que lê do repositório (não de outro estágio), sem as opções --x.
             awk 'toupper($1) == "COPY" || toupper($1) == "ADD" {
+                   # Forma JSON, linha quebrada com "\" ou heredoc: sem ler as origens com certeza, vale o
+                   # repositório inteiro, e qualquer mudança refaz a imagem.
+                   if ($0 ~ /\[|\\[[:space:]]*$|<</) { print "."; next }
                    copia_de_outro_estagio = 0; quantidade_de_argumentos = 0
                    for (i = 2; i <= NF; i++) {
                      if ($i ~ /^--from=/) copia_de_outro_estagio = 1
