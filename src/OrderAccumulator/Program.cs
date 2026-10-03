@@ -2,6 +2,7 @@ using System.Reflection;
 using Npgsql;
 using OrderAccumulator.Exposure;
 using OrderAccumulator.Fix;
+using OrderAccumulator.Observabilidade;
 using OrderAccumulator.Persistence;
 
 var orderAccumulatorWebBuilder = WebApplication.CreateBuilder(args);
@@ -15,6 +16,7 @@ var buildCommitSha = ReadBuildCommitSha() is { Length: 40 } shaFromBuild
 var flowaConnectionString = orderAccumulatorWebBuilder.Configuration.GetConnectionString("Flowa")
     ?? throw new InvalidOperationException("Defina ConnectionStrings__Flowa com a conexão do PostgreSQL.");
 orderAccumulatorWebBuilder.Services.AddOrderAccumulatorPersistence(flowaConnectionString);
+orderAccumulatorWebBuilder.Services.AddOrderMetrics(orderAccumulatorWebBuilder.Configuration);
 
 // Acceptor FIX 4.4: sobe junto com o app, depois da migração abaixo.
 orderAccumulatorWebBuilder.Services.AddSingleton<OrderFixApplication>();
@@ -24,6 +26,7 @@ var orderAccumulatorApp = orderAccumulatorWebBuilder.Build();
 
 // As tabelas precisam existir antes de a primeira ordem chegar.
 await orderAccumulatorApp.Services.GetRequiredService<NpgsqlDataSource>().ApplyOrderAccumulatorSchemaAsync();
+await orderAccumulatorApp.Services.LoadSymbolExposureMemoryAsync();
 
 orderAccumulatorApp.MapGet("/health", () => "Healthy");
 orderAccumulatorApp.MapGet("/version", () => new { commit = buildCommitSha });

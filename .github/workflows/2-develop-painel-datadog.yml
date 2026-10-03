@@ -1,0 +1,93 @@
+name: Painel do Datadog (dev)
+
+# O painel tem state, lock e esteira próprios: chave do Datadog com problema não trava o deploy
+# do app (decisão 14). Só roda quando o painel muda. Nunca em pull_request: o PR não recebe as
+# chaves do environment dev. O repositório é público, então só o resumo do Terraform vai ao log.
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "observabilidade/datadog/**"
+      - ".github/workflows/2-develop-painel-datadog.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+# Um apply do painel por vez; o que está rodando nunca é cancelado.
+concurrency:
+  group: painel-datadog-dev
+  cancel-in-progress: false
+
+jobs:
+  painel:
+    # O disparo manual também só aplica o que está em develop.
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-24.04
+    environment: dev
+    timeout-minutes: 15
+    env:
+      AWS_REGION: us-east-1
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A credencial da AWS serve só para o state no S3; o painel em si fala com o Datadog.
+      - name: Credencial AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          mask-aws-account-id: true
+
+      # Sem o wrapper: ele repetiria a saída inteira do Terraform no log.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      # Mesmo padrão do 2-develop-deploy.yml: saída num arquivo do runner e só o erro no log.
+      - name: Preparar o Terraform sem eco no log
+        run: |
+          cat > "$RUNNER_TEMP/terraform-quieto.sh" <<'FIM'
+          terraform_quieto() {
+            subcomando_terraform=$1
+            shift
+            TERRAFORM_LOG="$RUNNER_TEMP/terraform-$subcomando_terraform-$(date +%s%N).log"
+            if ! terraform "$subcomando_terraform" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
+              # Erro da AWS costuma trazer o ARN de quem chamou; no log público ele vira <arn oculto>.
+              grep -E 'Error' "$TERRAFORM_LOG" | sed -E 's/arn:aws[^ "]*/<arn oculto>/g' >&2 || true
+              echo "terraform $subcomando_terraform falhou; a saída completa fica só no runner" >&2
+              return 1
+            fi
+          }
+          FIM
+
+      - name: terraform init
+        working-directory: observabilidade/datadog
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          source "$RUNNER_TEMP/terraform-quieto.sh"
+          terraform_quieto init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=flowa/datadog-dev.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+          echo "terraform init ok"
+
+      - name: terraform plan e apply
+        working-directory: observabilidade/datadog
+        env:
+          DD_API_KEY: ${{ secrets.DATADOG_API_KEY }}
+          DD_APP_KEY: ${{ secrets.DATADOG_APP_KEY }}
+        run: |
+          source "$RUNNER_TEMP/terraform-quieto.sh"
+          terraform_quieto plan -out=tfplan
+          grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan sem linha de resumo"
+          grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
+
+          terraform_quieto apply tfplan
+          grep -E '^Apply complete!' "$TERRAFORM_LOG"
