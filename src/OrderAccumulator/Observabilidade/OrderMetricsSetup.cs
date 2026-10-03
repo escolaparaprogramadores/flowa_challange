@@ -16,6 +16,7 @@ public static class OrderMetricsSetup
         orderAccumulatorServices.AddSingleton<IDogStatsd>(_ =>
             CreateOrderMetricsClient(DatadogAgentDogStatsdPort, orderAccumulatorConfiguration));
         orderAccumulatorServices.AddSingleton<SymbolExposureMemory>();
+        orderAccumulatorServices.TryAddSingleton(TimeProvider.System);
         orderAccumulatorServices.AddSingleton<PostgresOrderProcessor>();
         orderAccumulatorServices.Replace(ServiceDescriptor.Singleton<IOrderProcessor>(orderAccumulatorServiceProvider =>
             new OrderProcessorWithMetrics(

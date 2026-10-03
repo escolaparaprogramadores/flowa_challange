@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using OrderAccumulator.Exposure;
 using OrderAccumulator.Observabilidade;
 
 namespace OrderAccumulator.Tests;
@@ -35,13 +36,25 @@ public sealed class PainelDatadogStaticTests
     }
 
     [Fact]
-    public void Workflow_uses_the_dev_environment_its_own_concurrency_and_the_datadog_secrets()
+    public void Workflow_has_its_own_concurrency_that_never_cancels_a_running_apply()
     {
-        Assert.Contains("    environment: dev\n", PainelWorkflow);
-        Assert.Contains("concurrency:\n  group: painel-datadog-dev\n  cancel-in-progress: false\n", PainelWorkflow);
-        Assert.Contains("DD_API_KEY: ${{ secrets.DATADOG_API_KEY }}", PainelWorkflow);
-        Assert.Contains("DD_APP_KEY: ${{ secrets.DATADOG_APP_KEY }}", PainelWorkflow);
-        Assert.Contains("if: github.ref == 'refs/heads/develop'", PainelWorkflow);
+        Assert.Contains("\nconcurrency:\n  group: painel-datadog-dev\n  cancel-in-progress: false\n", PainelWorkflow);
+    }
+
+    [Fact]
+    public void Workflow_has_a_single_job_guarded_by_develop_in_the_dev_environment_with_the_keys_only_in_the_apply_step()
+    {
+        var jobsBlock = PainelWorkflow[PainelWorkflow.IndexOf("\njobs:\n", StringComparison.Ordinal)..];
+        var jobNames = Regex.Matches(jobsBlock, @"^  (?<job>[A-Za-z0-9_-]+):", RegexOptions.Multiline).Select(job => job.Groups["job"].Value);
+        var applyStep = jobsBlock[jobsBlock.IndexOf("      - name: terraform plan e apply\n", StringComparison.Ordinal)..];
+
+        Assert.Equal(["painel"], jobNames);
+        Assert.Contains(
+            "\n  painel:\n    # O disparo manual também só aplica o que está em develop.\n    if: github.ref == 'refs/heads/develop'\n    runs-on: ubuntu-24.04\n    environment: dev\n",
+            jobsBlock);
+        Assert.Contains("        env:\n          DD_API_KEY: ${{ secrets.DATADOG_API_KEY }}\n          DD_APP_KEY: ${{ secrets.DATADOG_APP_KEY }}\n", applyStep);
+        Assert.Single(Regex.Matches(PainelWorkflow, @"secrets\.DATADOG_API_KEY"));
+        Assert.Single(Regex.Matches(PainelWorkflow, @"secrets\.DATADOG_APP_KEY"));
     }
 
     [Fact]
@@ -94,7 +107,38 @@ public sealed class PainelDatadogStaticTests
         Assert.Contains($@"""sum:{OrderMetricNames.AcceptedOrders}{{${{local.filtro_do_order_accumulator}}}}.as_count()""", PainelTf);
         Assert.Contains($@"""sum:{OrderMetricNames.RejectedOrders}{{${{local.filtro_do_order_accumulator}}}}.as_count()""", PainelTf);
         Assert.Contains($@"""max:{OrderMetricNames.SymbolExposure}{{${{local.filtro_do_order_accumulator}}}} by {{symbol}}""", PainelTf);
-        Assert.Contains(@"formula_expression = ""100 * aceitas / (aceitas + rejeitadas)""", PainelTf);
+    }
+
+    [Fact]
+    public void Each_widget_reads_its_own_query_and_the_exposure_chart_marks_both_limits()
+    {
+        var dashboardWidgets = PainelTf.Split("\n  widget {\n").Skip(1).ToList();
+        const string acceptedOrdersQuery = "            name        = \"aceitas\"\n            data_source = \"metrics\"\n            query       = local.ordens_aceitas\n";
+        const string rejectedOrdersQuery = "            name        = \"rejeitadas\"\n            data_source = \"metrics\"\n            query       = local.ordens_rejeitadas\n";
+        var exposureLimit = ExposureLimit.PerSymbol.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.Equal(4, dashboardWidgets.Count);
+
+        var acceptanceRateWidget = dashboardWidgets[0];
+        Assert.StartsWith("    query_value_definition {\n      title       = \"Taxa de aceite no período\"\n", acceptanceRateWidget);
+        Assert.Contains("          formula_expression = \"100 * aceitas / (aceitas + rejeitadas)\"\n", acceptanceRateWidget);
+        Assert.Contains(acceptedOrdersQuery, acceptanceRateWidget);
+        Assert.Contains(rejectedOrdersQuery, acceptanceRateWidget);
+
+        var ordersOverTimeWidget = dashboardWidgets[1];
+        Assert.StartsWith("    timeseries_definition {\n      title       = \"Ordens aceitas e rejeitadas\"\n", ordersOverTimeWidget);
+        Assert.Contains(acceptedOrdersQuery, ordersOverTimeWidget);
+        Assert.Contains(rejectedOrdersQuery, ordersOverTimeWidget);
+
+        var exposureOverTimeWidget = dashboardWidgets[2];
+        Assert.StartsWith("    timeseries_definition {\n      title       = \"Exposição por símbolo\"\n", exposureOverTimeWidget);
+        Assert.Contains("        q            = local.exposicao_por_simbolo\n", exposureOverTimeWidget);
+        Assert.Contains($"        value        = \"y = {exposureLimit}\"\n", exposureOverTimeWidget);
+        Assert.Contains($"        value        = \"y = -{exposureLimit}\"\n", exposureOverTimeWidget);
+
+        var exposureNowWidget = dashboardWidgets[3];
+        Assert.StartsWith("    toplist_definition {\n      title = \"Exposição agora\"\n", exposureNowWidget);
+        Assert.Contains("        q = local.exposicao_por_simbolo\n", exposureNowWidget);
     }
 
     [Fact]
