@@ -113,7 +113,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
 
   container_definitions = jsonencode([{
     name      = "generator"
-    image     = "${local.ecr_generator_url}:${var.image_tag}"
+    image     = "${local.ecr_generator_url}:${var.generator_image_tag}"
     essential = true
 
     portMappings = [{ containerPort = local.porta_http_do_generator, protocol = "tcp" }]
@@ -159,7 +159,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
 
   container_definitions = jsonencode([{
     name      = "accumulator"
-    image     = "${local.ecr_accumulator_url}:${var.image_tag}"
+    image     = "${local.ecr_accumulator_url}:${var.accumulator_image_tag}"
     essential = true
 
     portMappings = [
