@@ -1,0 +1,94 @@
+# Teste de carga com o k6 OSS contra a URL pública. Só roda por disparo manual: cada run gera ~4.500
+# ordens de verdade no ambiente dev, então não pode disparar a cada push.
+name: k6-carga
+
+on:
+  workflow_dispatch:
+    inputs:
+      url_publica:
+        description: Origem da API pública do Flowa, sem barra no fim
+        required: true
+        type: string
+        default: https://h2asgc2sce.execute-api.us-east-1.amazonaws.com
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k6-carga
+  cancel-in-progress: false
+
+jobs:
+  carga:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      FLOWA_URL: ${{ inputs.url_publica }}
+      PASTA_DO_RESULTADO: resultado-k6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: grafana/setup-k6-action@43b9fc21641a76002687994433dd586f56e791b1 # v1.2.2
+        with:
+          k6-version: '2.3.0'
+
+      - name: Confere a URL e lê a exposição antes
+        id: antes
+        run: |
+          if ! printf '%s' "$FLOWA_URL" | grep -Eq '^https://[A-Za-z0-9.-]+$'; then
+            echo "url_publica precisa ser https://<host>, sem caminho nem barra no fim." >&2
+            exit 1
+          fi
+          mkdir -p "$PASTA_DO_RESULTADO"
+          curl -fsS --max-time 15 "$FLOWA_URL/version" | tee "$PASTA_DO_RESULTADO/version.json"; echo
+          curl -fsS --max-time 15 "$FLOWA_URL/api/exposures" | tee "$PASTA_DO_RESULTADO/exposicao-antes.json"; echo
+
+      - name: Roda o k6
+        run: k6 run --no-usage-report -e FLOWA_URL="$FLOWA_URL" -e FLOWA_RESUMO_DIR="$PASTA_DO_RESULTADO" k6/carga-ordens.js
+
+      - name: Lê a exposição depois
+        id: depois
+        if: always() && steps.antes.outcome == 'success'
+        run: curl -fsS --max-time 15 "$FLOWA_URL/api/exposures" | tee "$PASTA_DO_RESULTADO/exposicao-depois.json"; echo
+
+      - name: Mostra o resumo na página do run
+        if: always() && steps.antes.outcome == 'success'
+        run: |
+          if [ -f "$PASTA_DO_RESULTADO/resumo-carga.md" ]; then
+            cat "$PASTA_DO_RESULTADO/resumo-carga.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Só mostra a diferença por símbolo; quem reprova o run é a taxa de erro do k6.
+      - name: Compara a exposição de antes e de depois
+        if: always() && steps.depois.outcome == 'success'
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pasta = process.env.PASTA_DO_RESULTADO;
+            const lerExposicaoPorSimbolo = (arquivo) => Object.fromEntries(
+              JSON.parse(fs.readFileSync(`${pasta}/${arquivo}`, "utf8")).exposures.map((item) => [item.symbol, item.exposure]));
+            const exposicaoAntes = lerExposicaoPorSimbolo("exposicao-antes.json");
+            const exposicaoDepois = lerExposicaoPorSimbolo("exposicao-depois.json");
+            const diferencaPorSimbolo = Object.keys(exposicaoAntes).map((simbolo) => ({
+              symbol: simbolo,
+              antes: exposicaoAntes[simbolo],
+              depois: exposicaoDepois[simbolo],
+              diferenca: Math.round((exposicaoDepois[simbolo] - exposicaoAntes[simbolo]) * 100) / 100,
+            }));
+            fs.writeFileSync(`${pasta}/diferenca-exposicao.json`, JSON.stringify(diferencaPorSimbolo, null, 2));
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, [
+              "", "## Exposição antes e depois", "",
+              "| Símbolo | Antes | Depois | Diferença |", "|---|---|---|---|",
+              ...diferencaPorSimbolo.map((linha) => `| ${linha.symbol} | ${linha.antes} | ${linha.depois} | ${linha.diferenca} |`), "",
+            ].join("\n"));
+          '
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.antes.outcome == 'success'
+        with:
+          name: resultado-k6-${{ github.run_id }}
+          path: ${{ env.PASTA_DO_RESULTADO }}/
+          if-no-files-found: error
+          retention-days: 30
