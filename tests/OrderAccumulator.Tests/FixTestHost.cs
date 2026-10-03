@@ -91,6 +91,7 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     private readonly TaskCompletionSource fixSessionLoggedOn = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Channel<ExecutionReport> executionReports = Channel.CreateUnbounded<ExecutionReport>();
     private readonly Channel<BusinessMessageReject> businessMessageRejects = Channel.CreateUnbounded<BusinessMessageReject>();
+    private readonly Channel<Reject> sessionRejects = Channel.CreateUnbounded<Reject>();
     private SessionID? fixSessionId;
 
     private FixTestInitiator(int fixAcceptorPort)
@@ -162,6 +163,13 @@ public sealed class FixTestInitiator : IApplication, IDisposable
         return await businessMessageRejects.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
     }
 
+    // Manda uma mensagem que a validação da sessão FIX barra e devolve a recusa de sessão (35=3).
+    public async Task<Reject> SendExpectingSessionRejectAsync(NewOrderSingle newOrderSingle)
+    {
+        Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));
+        return await sessionRejects.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
+    }
+
     public void Dispose() => fixTestSocketInitiator.Dispose();
 
     public void OnLogon(SessionID fixSessionId)
@@ -181,6 +189,10 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     public void OnCreate(SessionID fixSessionId) { }
     public void OnLogout(SessionID fixSessionId) { }
     public void ToAdmin(Message fixMessage, SessionID fixSessionId) { }
-    public void FromAdmin(Message fixMessage, SessionID fixSessionId) { }
+    public void FromAdmin(Message fixMessage, SessionID fixSessionId)
+    {
+        if (fixMessage is Reject receivedSessionReject)
+            sessionRejects.Writer.TryWrite(receivedSessionReject);
+    }
     public void ToApp(Message fixMessage, SessionID fixSessionId) { }
 }

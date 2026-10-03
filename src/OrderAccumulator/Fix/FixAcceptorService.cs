@@ -9,7 +9,7 @@ public sealed class FixAcceptorService(
     : IHostedService, IDisposable
 {
     private const string AcceptorSettingsFile = "acceptor.cfg";
-    private const string Fix44DictionaryFile = "FIX44.xml";
+    private const string Fix44DictionaryFile = "FIX44-flowa.xml";
 
     private ThreadedSocketAcceptor? fixAcceptor;
 

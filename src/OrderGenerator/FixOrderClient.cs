@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Flowa.Shared;
+using Flowa.Shared.Fix;
 using QuickFix;
 using QuickFix.Fields;
 using QuickFix.Logger;
@@ -40,6 +41,7 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     public async Task<OrderResult> SendNewOrderSingleAsync(ValidOrder order)
     {
         var clOrdId = Guid.NewGuid().ToString("N");
+        using var envioDaOrdem = RastroDaOrdemFix.IniciarEnvioDaOrdem();
 
         // Sem sessão logada a ordem não sai: o QuickFIX a guardaria na store e mandaria depois do logon (D-34).
         var initiatorSessionId = _initiatorSessionId;
@@ -52,7 +54,7 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         _ordersAwaitingExecutionReport[clOrdId] = executionReportWaiter;
         try
         {
-            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order), initiatorSessionId))
+            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order, RastroDaOrdemFix.TraceParentDoEnvio(envioDaOrdem)), initiatorSessionId))
                 return new OrderResult(OrderOutcome.NoLoggedOnSession, clOrdId);
 
             return ToOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
@@ -81,13 +83,13 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
             configuredSession.SetString(SessionSettings.SOCKET_CONNECT_HOST, acceptorHost);
             configuredSession.SetLong(SessionSettings.SOCKET_CONNECT_PORT, acceptorPort);
             // Caminho absoluto: o processo pode subir de qualquer pasta.
-            configuredSession.SetString(SessionSettings.DATA_DICTIONARY, Path.Combine(AppContext.BaseDirectory, "FIX44.xml"));
+            configuredSession.SetString(SessionSettings.DATA_DICTIONARY, Path.Combine(AppContext.BaseDirectory, "FIX44-flowa.xml"));
         }
 
         return initiatorSettings;
     }
 
-    private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, ValidOrder order)
+    private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, ValidOrder order, string? traceParentDoEnvio)
     {
         var newOrderSingle = new QuickFix.FIX44.NewOrderSingle(
             new ClOrdID(clOrdId),
@@ -97,6 +99,8 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
             new OrdType(OrdType.LIMIT));
         newOrderSingle.Set(new OrderQty(order.OrderQuantity));
         newOrderSingle.Set(new Price(order.OrderPrice));
+        if (traceParentDoEnvio is not null)
+            newOrderSingle.SetField(new StringField(RastroDaOrdemFix.TagTraceParent, traceParentDoEnvio));
         return newOrderSingle;
     }
 
