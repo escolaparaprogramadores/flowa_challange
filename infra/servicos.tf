@@ -212,8 +212,11 @@ resource "aws_service_discovery_service" "registro_dns_do_order_accumulator" {
     }
   }
 
-  # O ECS tira a instância do Cloud Map quando a task para.
-  health_check_custom_config {}
+  # O ECS tira a instância do Cloud Map quando a task para. O failure_threshold explícito (a AWS sempre
+  # grava 1) evita que o provider troque o registro a cada plan e deixe o Cloud Map sem as tasks.
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 
   force_destroy = true
 }
@@ -232,7 +235,9 @@ resource "aws_service_discovery_service" "registro_srv_do_order_generator" {
     }
   }
 
-  health_check_custom_config {}
+  health_check_custom_config {
+    failure_threshold = 1
+  }
 
   force_destroy = true
 }
@@ -266,6 +271,13 @@ resource "aws_ecs_service" "servico_do_order_accumulator" {
 
   wait_for_steady_state = true
 
+  # Uma vez, para as tasks voltarem ao Cloud Map recriado no deploy de 03/10/2026. Mudar o valor força
+  # um novo deploy do serviço sem trocar a imagem.
+  force_new_deployment = true
+  triggers = {
+    registro_no_cloud_map = "2026-10-03"
+  }
+
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
   depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]
 }
@@ -298,6 +310,13 @@ resource "aws_ecs_service" "servico_do_order_generator" {
   }
 
   wait_for_steady_state = true
+
+  # Uma vez, para as tasks voltarem ao Cloud Map recriado no deploy de 03/10/2026. Mudar o valor força
+  # um novo deploy do serviço sem trocar a imagem.
+  force_new_deployment = true
+  triggers = {
+    registro_no_cloud_map = "2026-10-03"
+  }
 
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
   depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]
