@@ -10,19 +10,18 @@
 
   <ItemGroup>
     <PackageReference Include="QuickFIXn.Core" Version="1.14.1" />
-    <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" GeneratePathProperty="true" />
+    <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="OrderGenerator.Tests" />
   </ItemGroup>
 
-  <!-- A sessão e o dicionário FIX 4.4 vão junto do binário; o código lê os dois de lá. -->
+  <!-- A sessão vai junto do binário; o dicionário (FIX44-flowa.xml) chega pelo Flowa.Shared. -->
   <ItemGroup>
     <!-- O build do Vite (F5) também vai para a saída, para dotnet run e o build comum servirem a página. -->
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="initiator.cfg" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="$(PkgQuickFIXn_FIX44)/DataDictionary/FIX44.xml" Link="FIX44.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

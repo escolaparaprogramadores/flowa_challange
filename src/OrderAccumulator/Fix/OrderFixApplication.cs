@@ -1,3 +1,4 @@
+using Flowa.Shared.Fix;
 using OrderAccumulator.Exposure;
 using QuickFix;
 using QuickFix.Fields;
@@ -15,6 +16,11 @@ public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<
 
     public void OnMessage(NewOrderSingle newOrderSingle, SessionID fixSessionId)
     {
+        var traceParentRecebido = newOrderSingle.IsSetField(RastroDaOrdemFix.TagTraceParent)
+            ? newOrderSingle.GetString(RastroDaOrdemFix.TagTraceParent)
+            : null;
+        using var recebimentoDaOrdem = RastroDaOrdemFix.IniciarRecebimentoDaOrdem(traceParentRecebido);
+
         var incomingOrder = new IncomingOrder(
             newOrderSingle.ClOrdID.Value, newOrderSingle.Symbol.Value, newOrderSingle.Side.Value, newOrderSingle.OrderQty.Value, newOrderSingle.Price.Value);
 
