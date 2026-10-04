@@ -167,12 +167,15 @@ for (const larguraDaJanela of [861, 1280, 1440, 1920]) {
 }
 
 const SIMBOLOS_DOS_ATIVOS = ['PETR4', 'VALE3', 'VIIA4'];
+// Cada ativo é um cartão separado do vizinho por 14 px de CSS (maquete 01), 12,6 px na tela.
+const ESPACO_ENTRE_ATIVOS_EM_CSS = 14;
 
 for (const { larguraDaJanela, ladoALado } of [
   { larguraDaJanela: 375, ladoALado: false },
   { larguraDaJanela: 860, ladoALado: false },
   { larguraDaJanela: 861, ladoALado: true },
   { larguraDaJanela: 1440, ladoALado: true },
+  { larguraDaJanela: 1920, ladoALado: true },
 ]) {
   test(`ASSUMI-09: em ${larguraDaJanela} px os três ativos ficam ${ladoALado ? 'lado a lado, do mesmo tamanho' : 'um embaixo do outro, na largura toda'}`, async ({ page }) => {
     await abrirBoletaNaLargura(page, larguraDaJanela);
@@ -180,16 +183,18 @@ for (const { larguraDaJanela, ladoALado } of [
     const caixasDosAtivos = [];
     for (const simboloDoAtivo of SIMBOLOS_DOS_ATIVOS) caixasDosAtivos.push(await medirCaixaDoElementoNaTela(page.getByTestId(`exposicao-${simboloDoAtivo}`)));
     const [caixaDoPrimeiro, caixaDoSegundo, caixaDoTerceiro] = caixasDosAtivos;
+    const espacoEntreAtivosNaTela = ESPACO_ENTRE_ATIVOS_EM_CSS * ESCALA_DA_PAGINA;
     if (ladoALado) {
       expect(caixaDoSegundo.topo).toBeCloseTo(caixaDoPrimeiro.topo, 1);
       expect(caixaDoTerceiro.topo).toBeCloseTo(caixaDoPrimeiro.topo, 1);
-      expect(caixaDoSegundo.esquerda).toBeCloseTo(caixaDoPrimeiro.direita, 1);
-      expect(caixaDoTerceiro.esquerda).toBeCloseTo(caixaDoSegundo.direita, 1);
+      expect(caixaDoPrimeiro.esquerda).toBeCloseTo(caixaDaLista.esquerda, 1);
+      expect(caixaDoSegundo.esquerda).toBeCloseTo(caixaDoPrimeiro.direita + espacoEntreAtivosNaTela, 1);
+      expect(caixaDoTerceiro.esquerda).toBeCloseTo(caixaDoSegundo.direita + espacoEntreAtivosNaTela, 1);
       expect(caixaDoTerceiro.direita).toBeCloseTo(caixaDaLista.direita, 1);
-      for (const caixaDoAtivo of caixasDosAtivos) expect(caixaDoAtivo.largura).toBeCloseTo(caixaDaLista.largura / 3, 0);
+      for (const caixaDoAtivo of caixasDosAtivos) expect(caixaDoAtivo.largura).toBeCloseTo((caixaDaLista.largura - 2 * espacoEntreAtivosNaTela) / 3, 0);
     } else {
-      expect(caixaDoSegundo.topo).toBeCloseTo(caixaDoPrimeiro.fim, 1);
-      expect(caixaDoTerceiro.topo).toBeCloseTo(caixaDoSegundo.fim, 1);
+      expect(caixaDoSegundo.topo).toBeCloseTo(caixaDoPrimeiro.fim + espacoEntreAtivosNaTela, 1);
+      expect(caixaDoTerceiro.topo).toBeCloseTo(caixaDoSegundo.fim + espacoEntreAtivosNaTela, 1);
       for (const caixaDoAtivo of caixasDosAtivos) {
         expect(caixaDoAtivo.esquerda).toBeCloseTo(caixaDaLista.esquerda, 1);
         expect(caixaDoAtivo.largura).toBeCloseTo(caixaDaLista.largura, 1);
