@@ -217,6 +217,8 @@ for (const larguraDaJanela of [1440, 1920]) {
       expect(await linkDoPainel.getAttribute('href')).toBe(painelEsperado.enderecoDoPainel);
       await expect(linkDoPainel).toHaveAttribute('target', '_blank');
       await expect(linkDoPainel).toHaveAttribute('rel', 'noopener noreferrer');
+      // Quem usa leitor de tela ouve a marca, o painel e o aviso de que abre outra aba.
+      await expect(linkDoPainel).toHaveAccessibleName(`Datadog ${painelEsperado.nomeDoPainel} (abre em nova aba)`);
       await expect(linkDoPainel).toHaveCSS('border-radius', '14px');
       expect(await lerMedidaDoCssEmPx(linkDoPainel, 'height')).toBeCloseTo(46, 1);
       await expect(linkDoPainel).toHaveCSS('background-color', COR_DO_FUNDO_DO_LINK);
@@ -437,6 +439,31 @@ test('CA-6 e CA-39: o uso do limite vem do servidor, corta sem arredondar, fica 
     larguraDaBarrinha: 'marca-minima',
   });
   expect(await lerExposicaoEmCentavosNoServidor(request, 'PETR4')).toBe(-95_000);
+});
+
+test('CA-6: na tela, 89,99% fica verde e 99,997…% aparece 99,99% âmbar, sem arredondar para 100%', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // Valores em que cortar e arredondar dão resultados diferentes, um de cada lado do limiar de 90%.
+  await levarExposicaoDoSimboloAte(request, 'VIIA4', 8_999_999_999);
+  await levarExposicaoDoSimboloAte(request, 'VALE3', 9_999_799_701);
+  await page.goto('/');
+
+  await conferirCartaoDoAtivo(page, 'VIIA4', {
+    exposicaoAtual: 'R$ 89.999.999,99',
+    faltaAteOLimite: 'R$ 10.000.000,01',
+    usoDoLimite: '89,99%',
+    barrinha: BARRINHA_VERDE,
+    valorDoMedidor: '89.99',
+    larguraDaBarrinha: 0.8999,
+  });
+  await conferirCartaoDoAtivo(page, 'VALE3', {
+    exposicaoAtual: 'R$ 99.997.997,01',
+    faltaAteOLimite: 'R$ 2.002,99',
+    usoDoLimite: '99,99%',
+    barrinha: BARRINHA_AMBAR,
+    valorDoMedidor: '99.99',
+    larguraDaBarrinha: 0.9999,
+  });
 });
 
 for (const larguraDaJanela of [860, 375]) {
