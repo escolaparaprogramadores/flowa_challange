@@ -1,0 +1,46 @@
+/* Boleta (Nova ordem). Os tokens moram no :root de tema-base.css. */
+.alternador { display: grid; grid-template-columns: 1fr 1fr; gap: var(--espaco-1); padding: var(--espaco-1-5); margin: 0; border-radius: var(--raio-aba); border: 1px solid var(--cor-borda); background: var(--cor-afundado); }
+.alternador-opcao {
+  height: var(--altura-aba);
+  border: 0;
+  border-radius: var(--raio-aba-interna);
+  background: transparent;
+  color: var(--cor-texto-secundario);
+  font-size: var(--texto-corpo-menor);
+  font-weight: 700;
+  transition: background var(--transicao), color var(--transicao);
+}
+.alternador-opcao:hover { background: var(--cor-hover); }
+.alternador-opcao.compra[aria-pressed='true'] { background: var(--cor-acento); color: var(--cor-texto-sobre-acento); }
+.alternador-opcao.venda[aria-pressed='true'] { background: var(--cor-venda); color: var(--cor-texto-sobre-venda); }
+.campo { display: flex; flex-direction: column; gap: var(--espaco-2); }
+.campo-rotulo { font-size: var(--texto-rotulo); font-weight: 700; color: var(--cor-texto-terciario); }
+.seletor, .entrada {
+  height: var(--altura-botao);
+  border-radius: var(--raio-botao);
+  border: 1.5px solid var(--cor-borda-forte);
+  background: var(--cor-fundo);
+  color: var(--cor-texto);
+  padding: 0 var(--espaco-3-5);
+  font-size: var(--texto-corpo);
+  font-weight: 700;
+  transition: border-color var(--transicao);
+}
+.entrada::placeholder { color: var(--cor-texto-apagado); }
+.seletor:focus, .entrada:focus { border-color: var(--cor-acento); outline: none; }
+.quantidade { display: grid; grid-template-columns: var(--largura-passo-quantidade) minmax(0, 1fr) var(--largura-passo-quantidade); border: 1.5px solid var(--cor-borda-forte); border-radius: var(--raio-quantidade); overflow: hidden; transition: border-color var(--transicao); }
+.quantidade:focus-within { border-color: var(--cor-acento); }
+.quantidade button { border: 0; background: var(--cor-afundado); color: var(--cor-texto); font-size: var(--texto-numero-grande); height: var(--altura-quantidade); transition: background var(--transicao); }
+.quantidade button:hover { background: var(--cor-hover); }
+.quantidade input { border: 0; background: var(--cor-fundo); color: var(--cor-texto); text-align: center; font-family: var(--fonte-display); font-size: var(--texto-numero-grande); font-weight: 600; min-width: 0; outline: none; }
+.entrada[aria-invalid='true'], .quantidade.invalida { border-color: var(--cor-perigo-texto); }
+.erro-campo { margin: 0; font-size: var(--texto-rotulo); font-weight: 700; color: var(--cor-perigo-texto); line-height: 1.4; }
+.resumo { margin: 0; }
+.resumo-linha { display: flex; justify-content: space-between; gap: var(--espaco-3); font-size: var(--texto-corpo-menor); color: var(--cor-texto-terciario); padding: var(--espaco-1-5) 0; }
+.resumo-linha dd { margin: 0; color: var(--cor-texto); font-weight: 700; text-align: right; }
+.botao-enviar { height: var(--altura-botao); border: 0; border-radius: var(--raio-botao); font-size: var(--texto-corpo); font-weight: 800; transition: filter var(--transicao), background var(--transicao), color var(--transicao); }
+.botao-enviar.compra { background: var(--cor-acento); color: var(--cor-texto-sobre-acento); }
+.botao-enviar.venda { background: var(--cor-venda); color: var(--cor-texto-sobre-venda); }
+.botao-enviar:hover { filter: brightness(1.07); }
+.botao-enviar:disabled { background: var(--cor-desabilitado-fundo); color: var(--cor-desabilitado-texto); cursor: progress; filter: none; }
+.nota { margin: 0; color: var(--cor-texto-rotulo); font-size: var(--texto-rotulo); line-height: 1.5; }

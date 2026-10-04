@@ -1,14 +1,15 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-// Quebras do tema Base (spec RNF-03 e ASSUMI-05): uma coluna até 860 px, duas de 861 a 1179 px
-// e três a partir de 1180 px. Cada fronteira é medida dos dois lados.
+// Quebras da casca (CA-7 e CA-26): uma coluna até 860 px e duas a partir de 861 px.
+// A fronteira é medida dos dois lados; 375, 1440 e 1920 são larguras de prova da rodada.
 const LARGURAS_DO_TEMA = [
+  { largura: 375, colunasEsperadas: 1 },
   { largura: 390, colunasEsperadas: 1 },
   { largura: 860, colunasEsperadas: 1 },
   { largura: 861, colunasEsperadas: 2 },
-  { largura: 1179, colunasEsperadas: 2 },
-  { largura: 1180, colunasEsperadas: 3 },
-  { largura: 1280, colunasEsperadas: 3 },
+  { largura: 1280, colunasEsperadas: 2 },
+  { largura: 1440, colunasEsperadas: 2 },
+  { largura: 1920, colunasEsperadas: 2 },
 ];
 const LARGURAS_DO_CA_23 = [390, 860, 1280];
 const COR_DO_ACENTO = 'rgb(79, 227, 176)';
@@ -64,28 +65,49 @@ test('RF-01/RF-02: página única sem login, com logo, boleta, resposta e exposi
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await expect(page.getByRole('navigation')).toHaveCount(0);
   await expect(page.getByRole('table')).toHaveCount(0);
-  await expect(page.getByRole('link')).toHaveCount(0);
+  // Os links do Datadog moram no topo (CA-9, F4); dentro do conteúdo não há link.
+  await expect(page.getByRole('main').getByRole('link')).toHaveCount(0);
 });
 
-test('ASSUMI-05: no celular a boleta vem primeiro, depois a resposta e por último a exposição', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.goto('/');
-  const topoDaBoleta = (await page.getByRole('form', { name: 'Boleta de ordem' }).boundingBox())!.y;
-  const topoDaResposta = (await page.getByRole('heading', { name: 'Resposta da ordem' }).boundingBox())!.y;
-  const topoDaExposicao = (await page.getByRole('heading', { name: 'Exposição por ativo' }).boundingBox())!.y;
-  expect(topoDaBoleta).toBeLessThan(topoDaResposta);
-  expect(topoDaResposta).toBeLessThan(topoDaExposicao);
-});
-
-for (const larguraDaJanela of LARGURAS_DO_CA_23) {
-  test(`RNF-05: em ${larguraDaJanela} px cada controle da boleta tem área de toque de pelo menos 44 px`, async ({ page }) => {
+for (const larguraDaJanela of [375, 860]) {
+  test(`G-1 e CA-26: em ${larguraDaJanela} px a ordem empilhada é ativos, Nova ordem e resposta, sem nada fora da tela`, async ({ page }) => {
     await page.setViewportSize({ width: larguraDaJanela, height: 900 });
     await page.goto('/');
+    await expect(page.getByTestId('exposicao-PETR4')).toBeVisible();
+    const caixaDaExposicao = (await page.locator('section.exposicao').boundingBox())!;
+    const caixaDaNovaOrdem = (await page.getByRole('form', { name: 'Boleta de ordem' }).boundingBox())!;
+    const caixaDaResposta = (await page.locator('section.resposta').boundingBox())!;
+    expect(caixaDaExposicao.y + caixaDaExposicao.height).toBeLessThanOrEqual(caixaDaNovaOrdem.y);
+    expect(caixaDaNovaOrdem.y + caixaDaNovaOrdem.height).toBeLessThanOrEqual(caixaDaResposta.y);
+    const caixasDosCartoes = [
+      ['Exposição', caixaDaExposicao],
+      ['Nova ordem', caixaDaNovaOrdem],
+      ['Resposta', caixaDaResposta],
+    ] as const;
+    for (const [nomeDoCartao, caixaDoCartao] of caixasDosCartoes) {
+      expect(caixaDoCartao.x, `${nomeDoCartao}: começa dentro da tela`).toBeGreaterThanOrEqual(0);
+      expect(caixaDoCartao.x + caixaDoCartao.width, `${nomeDoCartao}: termina dentro da tela`).toBeLessThanOrEqual(larguraDaJanela);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(larguraDaJanela);
+    await page.screenshot({ path: test.info().outputPath(`ca-26-empilhado-${larguraDaJanela}.png`), fullPage: true });
+  });
+}
+
+// A página abre em 90% (CA-2, decisão 7 do dono): a caixa na tela vale 0,9 do tamanho de CSS.
+// A área de toque é conferida em px de CSS, o tamanho que o código controla (spec da F3, ASSUMI-03).
+for (const larguraDaJanela of LARGURAS_DO_CA_23) {
+  test(`RNF-05: em ${larguraDaJanela} px cada controle da boleta tem área de toque de pelo menos 44 px de CSS`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
+    await page.goto('/');
+    const escalaDaPagina = Number(await page.evaluate(() => getComputedStyle(document.documentElement).zoom));
+    expect(escalaDaPagina).toBe(0.9);
     for (const [nomeDoControle, controleDaBoleta] of controlesDaBoleta(page)) {
       await expect(controleDaBoleta, nomeDoControle).toHaveCount(1);
       const caixaDoControle = (await controleDaBoleta.boundingBox())!;
-      expect(caixaDoControle.height, `${nomeDoControle}: altura`).toBeGreaterThanOrEqual(44);
-      expect(caixaDoControle.width, `${nomeDoControle}: largura`).toBeGreaterThanOrEqual(44);
+      // A caixa na tela vem arredondada ao 1/64 de px; a folga é esse arredondamento, levado para px de CSS.
+      const folgaDoArredondamentoEmCss = 1 / 64 / escalaDaPagina;
+      expect(caixaDoControle.height / escalaDaPagina + folgaDoArredondamentoEmCss, `${nomeDoControle}: altura`).toBeGreaterThanOrEqual(44);
+      expect(caixaDoControle.width / escalaDaPagina + folgaDoArredondamentoEmCss, `${nomeDoControle}: largura`).toBeGreaterThanOrEqual(44);
     }
   });
 }

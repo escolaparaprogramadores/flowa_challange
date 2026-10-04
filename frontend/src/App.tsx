@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Boleta } from './Boleta';
+import { ExposicaoPorAtivo, type EstadoDasExposicoes } from './ExposicaoPorAtivo';
+import { Topo } from './Topo';
+import './boleta.css';
 import { formatarQuantidade, formatarReais } from './lib/validacaoDaOrdem';
 import {
   enviarOrdem,
   lerExposicoes,
-  type ExposicaoDoSimbolo,
   type OrdemParaEnviar,
   type RespostaDaOrdem,
 } from './ordensService';
-
-type EstadoDasExposicoes =
-  | { situacao: 'carregando' }
-  | { situacao: 'erro'; mensagemDeErro: string }
-  | { situacao: 'pronto'; exposicoesPorSimbolo: ExposicaoDoSimbolo[] };
 
 export function PaginaDaBoletaEExposicao() {
   const [estadoDasExposicoes, setEstadoDasExposicoes] = useState<EstadoDasExposicoes>({ situacao: 'carregando' });
@@ -48,59 +45,21 @@ export function PaginaDaBoletaEExposicao() {
 
   return (
     <div className="pagina">
-      <header className="topo">
-        <LogoBase />
-        <div>
-          <h1 className="titulo">Boleta de ordens</h1>
-          <p className="apoio">
-            Envie ordens de compra e venda de PETR4, VALE3 e VIIA4 e acompanhe a exposição de cada ativo até o limite de
-            R$ 100.000.000,00.
-          </p>
-        </div>
-      </header>
+      <Topo />
+      <div className="cabecalho-da-pagina">
+        <h1 className="titulo">Boleta de ordens</h1>
+        <p className="apoio">
+          Envie ordens de compra e venda de PETR4, VALE3 e VIIA4 e acompanhe a exposição de cada ativo até o limite de
+          R$ 100.000.000,00.
+        </p>
+      </div>
 
       <main className="grade">
-        <PainelDeExposicao estadoDasExposicoes={estadoDasExposicoes} />
+        <ExposicaoPorAtivo estadoDasExposicoes={estadoDasExposicoes} />
         <PainelDeResposta enviandoOrdem={enviandoOrdem} respostaDaUltimaOrdem={respostaDaUltimaOrdem} />
         <Boleta enviandoOrdem={enviandoOrdem} aoEnviarOrdem={aoEnviarOrdem} />
       </main>
     </div>
-  );
-}
-
-function LogoBase() {
-  return (
-    <span className="logo" role="img" aria-label="Base investimentos">
-      <span className="logo-base" aria-hidden="true">base</span>
-      <span className="logo-complemento" aria-hidden="true">investimentos</span>
-    </span>
-  );
-}
-
-function PainelDeExposicao({ estadoDasExposicoes }: { estadoDasExposicoes: EstadoDasExposicoes }) {
-  return (
-    <section className="painel exposicao" aria-labelledby="titulo-exposicao" aria-busy={estadoDasExposicoes.situacao === 'carregando'}>
-      <h2 className="painel-cabeca" id="titulo-exposicao">Exposição por ativo</h2>
-      {estadoDasExposicoes.situacao === 'carregando' && <p className="exposicao-aviso">Carregando a exposição…</p>}
-      {estadoDasExposicoes.situacao === 'erro' && (
-        <p className="exposicao-aviso erro" role="alert">{estadoDasExposicoes.mensagemDeErro}</p>
-      )}
-      {estadoDasExposicoes.situacao === 'pronto' && (
-        <ul className="exposicao-lista">
-          {estadoDasExposicoes.exposicoesPorSimbolo.map((exposicaoDoSimbolo) => (
-            <li className="exposicao-item" key={exposicaoDoSimbolo.simbolo} data-testid={`exposicao-${exposicaoDoSimbolo.simbolo}`}>
-              <span className="exposicao-simbolo">{exposicaoDoSimbolo.simbolo}</span>
-              <dl className="exposicao-dados">
-                <dt>Exposição atual</dt>
-                <dd className="num" data-testid="exposicao-atual">{formatarReais(exposicaoDoSimbolo.exposicao)}</dd>
-                <dt>Falta até o limite</dt>
-                <dd className="num" data-testid="exposicao-restante">{formatarReais(exposicaoDoSimbolo.restanteAteOLimite)}</dd>
-              </dl>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
 
