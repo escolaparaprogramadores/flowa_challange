@@ -276,20 +276,23 @@ test('CA-9: clicar num link do Datadog abre o painel em outra aba', async ({ pag
   expect(page.url()).toMatch(/\/$/);
 });
 
-test('CA-10: à direita dos links fica o selo com escudo verde, "AMBIENTE" e "Demonstração"', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
-  const selo = page.getByRole('banner').locator('.selo-ambiente');
-  await expect(selo).toHaveCount(1);
-  await expect(selo.locator('.selo-ambiente-rotulo')).toHaveText('AMBIENTE', { useInnerText: true });
-  await expect(selo.locator('.selo-ambiente-nome')).toHaveText('Demonstração');
-  await expect(selo.locator('.selo-ambiente-icone')).toHaveCSS('background-color', 'rgba(79, 227, 176, 0.13)');
-  await expect(selo.locator('.selo-ambiente-icone svg')).toHaveCSS('color', COR_DO_ACENTO);
-  await conferirDesenhoDoIcone(selo.locator('.selo-ambiente-icone svg'), 'IconeEscudo');
-  const caixaDoSelo = await medirRetanguloNaTela(selo);
-  const caixaDoUltimoLink = await medirRetanguloNaTela(page.getByRole('banner').getByRole('link', { name: /Ordens e exposição/ }));
-  expect(caixaDoSelo.x).toBeGreaterThanOrEqual(caixaDoUltimoLink.x + caixaDoUltimoLink.width);
-});
+for (const larguraDaJanela of [1440, 1920]) {
+  test(`CA-10: em ${larguraDaJanela} px, à direita dos links fica o selo com escudo verde, "AMBIENTE" e "Demonstração"`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
+    await page.goto('/');
+    const selo = page.getByRole('banner').locator('.selo-ambiente');
+    await expect(selo).toHaveCount(1);
+    await expect(selo.locator('.selo-ambiente-rotulo')).toHaveText('AMBIENTE', { useInnerText: true });
+    await expect(selo.locator('.selo-ambiente-nome')).toHaveText('Demonstração');
+    await expect(selo.locator('.selo-ambiente-icone')).toHaveCSS('background-color', 'rgba(79, 227, 176, 0.13)');
+    await expect(selo.locator('.selo-ambiente-icone svg')).toHaveCSS('color', COR_DO_ACENTO);
+    await conferirDesenhoDoIcone(selo.locator('.selo-ambiente-icone svg'), 'IconeEscudo');
+    const caixaDoSelo = await medirRetanguloNaTela(selo);
+    const caixaDoUltimoLink = await medirRetanguloNaTela(page.getByRole('banner').getByRole('link', { name: /Ordens e exposição/ }));
+    expect(caixaDoSelo.x).toBeGreaterThanOrEqual(caixaDoUltimoLink.x + caixaDoUltimoLink.width);
+    expect(Math.abs(caixaDoSelo.y + caixaDoSelo.height / 2 - (caixaDoUltimoLink.y + caixaDoUltimoLink.height / 2))).toBeLessThanOrEqual(1);
+  });
+}
 
 test('CA-43: abrir a tela não busca nada no Datadog nem arquivo de imagem do logo', async ({ page }) => {
   const enderecosPedidos: string[] = [];
@@ -489,17 +492,19 @@ for (const larguraDaJanela of [860, 375]) {
   });
 }
 
-test('CA-27: cada link do Datadog recebe foco pelo teclado com contorno visível', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
-  for (const painelEsperado of PAINEIS_DO_DATADOG_ESPERADOS) {
-    const linkDoPainel = page.getByRole('banner').getByRole('link', { name: new RegExp(painelEsperado.nomeDoPainel) });
-    await page.keyboard.press('Tab');
-    await expect(linkDoPainel).toBeFocused();
-    await expect(linkDoPainel).toHaveCSS('outline-style', 'solid');
-    // O contorno tem de aparecer com pelo menos 2 px na tela, já com os 90%.
-    const contornoNaTelaEmPx = (await lerMedidaDoCssEmPx(linkDoPainel, 'outline-width')) * (await lerEscalaDaPagina(page));
-    expect(Math.round(contornoNaTelaEmPx * 100) / 100).toBeGreaterThanOrEqual(2);
-    await expect(linkDoPainel).toHaveCSS('outline-color', COR_DO_ACENTO);
-  }
-});
+for (const larguraDaJanela of [1440, 1920]) {
+  test(`CA-27: em ${larguraDaJanela} px cada link do Datadog recebe foco pelo teclado com contorno visível`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
+    await page.goto('/');
+    for (const painelEsperado of PAINEIS_DO_DATADOG_ESPERADOS) {
+      const linkDoPainel = page.getByRole('banner').getByRole('link', { name: new RegExp(painelEsperado.nomeDoPainel) });
+      await page.keyboard.press('Tab');
+      await expect(linkDoPainel).toBeFocused();
+      await expect(linkDoPainel).toHaveCSS('outline-style', 'solid');
+      // O contorno tem de aparecer com pelo menos 2 px na tela, já com os 90%.
+      const contornoNaTelaEmPx = (await lerMedidaDoCssEmPx(linkDoPainel, 'outline-width')) * (await lerEscalaDaPagina(page));
+      expect(Math.round(contornoNaTelaEmPx * 100) / 100).toBeGreaterThanOrEqual(2);
+      await expect(linkDoPainel).toHaveCSS('outline-color', COR_DO_ACENTO);
+    }
+  });
+}
