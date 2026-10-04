@@ -83,15 +83,15 @@ function localizarCartaoDoAtivo(paginaDaBoleta: Page, simboloDoAtivo: string) {
 async function conferirCartaoDoAtivo(
   paginaDaBoleta: Page,
   simboloDoAtivo: string,
-  // larguraDaBarrinha: fração do trilho preenchida; 'marca-minima' = exposição diferente de zero que não chega
+  // fracaoPreenchidaDoTrilho: fração do trilho preenchida; 'marca-minima' = exposição diferente de zero que não chega
   // a 1 px do trilho e aparece como um ponto do tamanho da altura da barrinha.
   cartaoDoAtivoEsperado: {
     exposicaoAtual: string;
     faltaAteOLimite: string;
     usoDoLimite: string;
     valorDoMedidor: string;
-    barrinha: string;
-    larguraDaBarrinha: number | 'marca-minima';
+    gradienteDoPreenchimento: string;
+    fracaoPreenchidaDoTrilho: number | 'marca-minima';
   },
 ) {
   const cartaoDoAtivo = localizarCartaoDoAtivo(paginaDaBoleta, simboloDoAtivo);
@@ -101,17 +101,17 @@ async function conferirCartaoDoAtivo(
   // A porcentagem acompanha a cor da barrinha: âmbar perto do limite, texto normal no resto.
   await expect(cartaoDoAtivo.getByTestId('uso-do-limite-porcentagem')).toHaveCSS(
     'color',
-    cartaoDoAtivoEsperado.barrinha === BARRINHA_AMBAR ? COR_DA_PORCENTAGEM_PERTO_DO_LIMITE : COR_DO_TEXTO,
+    cartaoDoAtivoEsperado.gradienteDoPreenchimento === BARRINHA_AMBAR ? COR_DA_PORCENTAGEM_PERTO_DO_LIMITE : COR_DO_TEXTO,
   );
-  const barrinha = cartaoDoAtivo.getByRole('meter', { name: 'Uso do limite de ' + simboloDoAtivo });
-  await expect(barrinha).toHaveAttribute('aria-valuetext', cartaoDoAtivoEsperado.usoDoLimite);
-  await expect(barrinha).toHaveAttribute('aria-valuenow', cartaoDoAtivoEsperado.valorDoMedidor);
-  const preenchimentoDaBarrinha = cartaoDoAtivo.getByTestId('uso-do-limite-preenchimento');
-  await expect(preenchimentoDaBarrinha).toHaveCSS('background-image', cartaoDoAtivoEsperado.barrinha);
-  const caixaDoTrilho = await medirRetanguloNaTela(barrinha);
-  const larguraPreenchida = (await preenchimentoDaBarrinha.boundingBox())?.width ?? 0;
-  if (cartaoDoAtivoEsperado.larguraDaBarrinha === 'marca-minima') expect(larguraPreenchida).toBeCloseTo(caixaDoTrilho.height, 1);
-  else expect(larguraPreenchida / caixaDoTrilho.width).toBeCloseTo(cartaoDoAtivoEsperado.larguraDaBarrinha, 2);
+  const trilhoDoUsoDoLimite = cartaoDoAtivo.getByRole('meter', { name: 'Uso do limite de ' + simboloDoAtivo });
+  await expect(trilhoDoUsoDoLimite).toHaveAttribute('aria-valuetext', cartaoDoAtivoEsperado.usoDoLimite);
+  await expect(trilhoDoUsoDoLimite).toHaveAttribute('aria-valuenow', cartaoDoAtivoEsperado.valorDoMedidor);
+  const preenchimentoDoUsoDoLimite = cartaoDoAtivo.getByTestId('uso-do-limite-preenchimento');
+  await expect(preenchimentoDoUsoDoLimite).toHaveCSS('background-image', cartaoDoAtivoEsperado.gradienteDoPreenchimento);
+  const caixaDoTrilho = await medirRetanguloNaTela(trilhoDoUsoDoLimite);
+  const larguraPreenchida = (await preenchimentoDoUsoDoLimite.boundingBox())?.width ?? 0;
+  if (cartaoDoAtivoEsperado.fracaoPreenchidaDoTrilho === 'marca-minima') expect(larguraPreenchida).toBeCloseTo(caixaDoTrilho.height, 1);
+  else expect(larguraPreenchida / caixaDoTrilho.width).toBeCloseTo(cartaoDoAtivoEsperado.fracaoPreenchidaDoTrilho, 2);
 }
 
 // Com a página em 90%, o Chrome arredonda bordas e contornos para o pixel inteiro da tela, e a
@@ -426,25 +426,25 @@ test('CA-6 e CA-39: o uso do limite vem do servidor, corta sem arredondar, fica 
     exposicaoAtual: 'R$ 95.000.000,00',
     faltaAteOLimite: 'R$ 5.000.000,00',
     usoDoLimite: '95%',
-    barrinha: BARRINHA_AMBAR,
+    gradienteDoPreenchimento: BARRINHA_AMBAR,
     valorDoMedidor: '95',
-    larguraDaBarrinha: 0.95,
+    fracaoPreenchidaDoTrilho: 0.95,
   });
   await conferirCartaoDoAtivo(page, 'VALE3', {
     exposicaoAtual: 'R$ 0,00',
     faltaAteOLimite: 'R$ 100.000.000,00',
     usoDoLimite: '0%',
-    barrinha: BARRINHA_VERDE,
+    gradienteDoPreenchimento: BARRINHA_VERDE,
     valorDoMedidor: '0',
-    larguraDaBarrinha: 0,
+    fracaoPreenchidaDoTrilho: 0,
   });
   await conferirCartaoDoAtivo(page, 'PETR4', {
     exposicaoAtual: '-R$ 95.000.000,00',
     faltaAteOLimite: 'R$ 5.000.000,00',
     usoDoLimite: '95%',
-    barrinha: BARRINHA_AMBAR,
+    gradienteDoPreenchimento: BARRINHA_AMBAR,
     valorDoMedidor: '95',
-    larguraDaBarrinha: 0.95,
+    fracaoPreenchidaDoTrilho: 0.95,
   });
 
   // Compra pela própria boleta: a tela relê a exposição e o cartão muda junto, sem conta no cliente.
@@ -461,9 +461,9 @@ test('CA-6 e CA-39: o uso do limite vem do servidor, corta sem arredondar, fica 
     exposicaoAtual: '-R$ 950,00',
     faltaAteOLimite: 'R$ 99.999.050,00',
     usoDoLimite: '< 0,01%',
-    barrinha: BARRINHA_VERDE,
+    gradienteDoPreenchimento: BARRINHA_VERDE,
     valorDoMedidor: '0',
-    larguraDaBarrinha: 'marca-minima',
+    fracaoPreenchidaDoTrilho: 'marca-minima',
   });
   expect(await lerExposicaoEmCentavosNoServidor(request, 'PETR4')).toBe(-95_000);
 });
@@ -479,17 +479,17 @@ test('CA-6: na tela, 89,99% fica verde e 99,997…% aparece 99,99% âmbar, sem a
     exposicaoAtual: 'R$ 89.999.999,99',
     faltaAteOLimite: 'R$ 10.000.000,01',
     usoDoLimite: '89,99%',
-    barrinha: BARRINHA_VERDE,
+    gradienteDoPreenchimento: BARRINHA_VERDE,
     valorDoMedidor: '89.99',
-    larguraDaBarrinha: 0.8999,
+    fracaoPreenchidaDoTrilho: 0.8999,
   });
   await conferirCartaoDoAtivo(page, 'VALE3', {
     exposicaoAtual: 'R$ 99.997.997,01',
     faltaAteOLimite: 'R$ 2.002,99',
     usoDoLimite: '99,99%',
-    barrinha: BARRINHA_AMBAR,
+    gradienteDoPreenchimento: BARRINHA_AMBAR,
     valorDoMedidor: '99.99',
-    larguraDaBarrinha: 0.9999,
+    fracaoPreenchidaDoTrilho: 0.9999,
   });
 });
 
