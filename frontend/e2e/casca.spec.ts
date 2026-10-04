@@ -17,7 +17,7 @@ async function abrirBoletaNaLargura(paginaDaBoleta: Page, larguraDaJanela: numbe
   await expect(paginaDaBoleta.getByTestId('exposicao-PETR4')).toBeVisible();
 }
 
-async function medirNaTela(elementoDaPagina: Locator) {
+async function medirCaixaDoElementoNaTela(elementoDaPagina: Locator) {
   return elementoDaPagina.evaluate((elementoNaPagina) => {
     const caixaNaTela = elementoNaPagina.getBoundingClientRect();
     return { esquerda: caixaNaTela.left, direita: caixaNaTela.right, topo: caixaNaTela.top, fim: caixaNaTela.bottom, largura: caixaNaTela.width };
@@ -39,8 +39,8 @@ test('CA-1: no alto há a barra com o logo à esquerda e a linha fina embaixo; a
   // Os links do Datadog entram no topo (F4); o título e o texto de apoio não têm link.
   await expect(page.locator('.cabecalho-da-pagina').getByRole('link')).toHaveCount(0);
 
-  const caixaDaBarra = await medirNaTela(barraDoTopo);
-  const caixaDoLogo = await medirNaTela(barraDoTopo.getByRole('img', { name: 'Base investimentos' }));
+  const caixaDaBarra = await medirCaixaDoElementoNaTela(barraDoTopo);
+  const caixaDoLogo = await medirCaixaDoElementoNaTela(barraDoTopo.getByRole('img', { name: 'Base investimentos' }));
   expect(caixaDoLogo.esquerda).toBeCloseTo(caixaDaBarra.esquerda, 0);
 
   const tituloDaPagina = page.getByRole('heading', { level: 1 });
@@ -49,7 +49,7 @@ test('CA-1: no alto há a barra com o logo à esquerda e a linha fina embaixo; a
   await expect(tituloDaPagina).toHaveCSS('font-size', '34px');
   await expect(tituloDaPagina).toHaveCSS('font-weight', '600');
   await expect(tituloDaPagina).toHaveCSS('letter-spacing', '-1.02px');
-  expect((await medirNaTela(tituloDaPagina)).topo).toBeGreaterThan(caixaDaBarra.fim);
+  expect((await medirCaixaDoElementoNaTela(tituloDaPagina)).topo).toBeGreaterThan(caixaDaBarra.fim);
   await expect(page.locator('.apoio')).toHaveText(TEXTO_DE_APOIO);
 });
 
@@ -74,7 +74,7 @@ test('CA-2: com o navegador em 100%, a página aparece em 90% e um texto de 15 p
   });
   expect(alturaDeUmaLinhaNaTela).toBeCloseTo(24 * ESCALA_DA_PAGINA, 0);
   // A boleta tem 400 px de CSS; na tela, a mesma escala vale para as caixas.
-  const larguraDaBoletaNaTela = (await medirNaTela(page.getByRole('form', { name: 'Boleta de ordem' }))).largura;
+  const larguraDaBoletaNaTela = (await medirCaixaDoElementoNaTela(page.getByRole('form', { name: 'Boleta de ordem' }))).largura;
   expect(larguraDaBoletaNaTela / LARGURA_DA_NOVA_ORDEM_EM_CSS).toBeCloseTo(ESCALA_DA_PAGINA, 3);
   await page.screenshot({ path: test.info().outputPath('ca-2-pagina-em-90.png') });
 });
@@ -84,10 +84,10 @@ for (const larguraDaJanela of [1440, 1920]) {
     await abrirBoletaNaLargura(page, larguraDaJanela);
     const larguraDaJanelaEmCss = larguraDaJanela / ESCALA_DA_PAGINA;
     const larguraEsperadaDoConteudoEmCss = Math.min(LARGURA_MAXIMA_DO_CONTEUDO_EM_CSS, larguraDaJanelaEmCss - 2 * MARGEM_LATERAL_EM_CSS);
-    const caixaDoConteudo = await medirNaTela(page.getByRole('banner'));
+    const caixaDoConteudo = await medirCaixaDoElementoNaTela(page.getByRole('banner'));
     expect(caixaDoConteudo.largura / ESCALA_DA_PAGINA).toBeCloseTo(larguraEsperadaDoConteudoEmCss, 0);
     // Topo e cartões ocupam a mesma faixa: a grade não pode ser mais larga nem mais estreita que o topo.
-    const caixaDaGrade = await medirNaTela(page.getByRole('main'));
+    const caixaDaGrade = await medirCaixaDoElementoNaTela(page.getByRole('main'));
     expect(caixaDaGrade.esquerda).toBeCloseTo(caixaDoConteudo.esquerda, 1);
     expect(caixaDaGrade.largura).toBeCloseTo(caixaDoConteudo.largura, 1);
     expect(caixaDoConteudo.esquerda / ESCALA_DA_PAGINA).toBeGreaterThanOrEqual(MARGEM_LATERAL_EM_CSS - 0.5);
@@ -145,9 +145,9 @@ for (const larguraDaJanela of [861, 1280, 1440, 1920]) {
   test(`CA-7: em ${larguraDaJanela} px, abaixo dos ativos, a resposta (mais larga) e a Nova ordem (400 px) começam e terminam na mesma altura`, async ({ page }) => {
     await abrirBoletaNaLargura(page, larguraDaJanela);
     const cartaoDaEsquerda = page.locator('section.resposta');
-    const caixaDosAtivos = await medirNaTela(page.locator('section.exposicao'));
-    const caixaDaEsquerda = await medirNaTela(cartaoDaEsquerda);
-    const caixaDaNovaOrdem = await medirNaTela(page.getByRole('form', { name: 'Boleta de ordem' }));
+    const caixaDosAtivos = await medirCaixaDoElementoNaTela(page.locator('section.exposicao'));
+    const caixaDaEsquerda = await medirCaixaDoElementoNaTela(cartaoDaEsquerda);
+    const caixaDaNovaOrdem = await medirCaixaDoElementoNaTela(page.getByRole('form', { name: 'Boleta de ordem' }));
 
     expect(caixaDaEsquerda.topo).toBeGreaterThan(caixaDosAtivos.fim);
     expect(caixaDaEsquerda.direita).toBeLessThan(caixaDaNovaOrdem.esquerda);
@@ -158,7 +158,7 @@ for (const larguraDaJanela of [861, 1280, 1440, 1920]) {
     await expect(cartaoDaEsquerda).toHaveCSS('border-radius', '22px');
 
     // "Exposição por ativo" ocupa a largura toda; as duas colunas de baixo encostam nas bordas do conteúdo.
-    const caixaDoConteudo = await medirNaTela(page.getByRole('main'));
+    const caixaDoConteudo = await medirCaixaDoElementoNaTela(page.getByRole('main'));
     expect(caixaDosAtivos.esquerda).toBeCloseTo(caixaDoConteudo.esquerda, 1);
     expect(caixaDosAtivos.largura).toBeCloseTo(caixaDoConteudo.largura, 1);
     expect(caixaDaEsquerda.esquerda).toBeCloseTo(caixaDoConteudo.esquerda, 1);
@@ -176,9 +176,9 @@ for (const { larguraDaJanela, ladoALado } of [
 ]) {
   test(`ASSUMI-09: em ${larguraDaJanela} px os três ativos ficam ${ladoALado ? 'lado a lado, do mesmo tamanho' : 'um embaixo do outro, na largura toda'}`, async ({ page }) => {
     await abrirBoletaNaLargura(page, larguraDaJanela);
-    const caixaDaLista = await medirNaTela(page.locator('.exposicao-lista'));
+    const caixaDaLista = await medirCaixaDoElementoNaTela(page.locator('.exposicao-lista'));
     const caixasDosAtivos = [];
-    for (const simboloDoAtivo of SIMBOLOS_DOS_ATIVOS) caixasDosAtivos.push(await medirNaTela(page.getByTestId(`exposicao-${simboloDoAtivo}`)));
+    for (const simboloDoAtivo of SIMBOLOS_DOS_ATIVOS) caixasDosAtivos.push(await medirCaixaDoElementoNaTela(page.getByTestId(`exposicao-${simboloDoAtivo}`)));
     const [caixaDoPrimeiro, caixaDoSegundo, caixaDoTerceiro] = caixasDosAtivos;
     if (ladoALado) {
       expect(caixaDoSegundo.topo).toBeCloseTo(caixaDoPrimeiro.topo, 1);

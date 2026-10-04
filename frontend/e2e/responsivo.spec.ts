@@ -115,8 +115,33 @@ for (const larguraDaJanela of [375, 860]) {
     }, larguraDaJanela);
     expect(conferenciaDosCartoes.problemasEncontrados).toEqual([]);
     expect(Object.keys(conferenciaDosCartoes.pecasConferidasPorCartao)).toEqual(['painel exposicao', 'cartao resposta', 'cartao boleta']);
-    for (const [nomeDoCartao, pecasConferidas] of Object.entries(conferenciaDosCartoes.pecasConferidasPorCartao)) {
-      expect(pecasConferidas, `${nomeDoCartao}: peças visíveis conferidas`).toBeGreaterThanOrEqual(2);
+
+    // Cada peça obrigatória, pelo nome: visível, com tamanho e inteira dentro do seu cartão e da janela.
+    // Peça que sumisse (largura 0) não pode passar só porque as outras do cartão continuam lá.
+    const cartaoDaExposicao = page.locator('section.exposicao');
+    const cartaoDaNovaOrdem = page.getByRole('form', { name: 'Boleta de ordem' });
+    const cartaoDaResposta = page.locator('section.resposta');
+    const pecasObrigatorias: Array<[string, Locator, Locator]> = [
+      ['Título da exposição', cartaoDaExposicao.getByRole('heading', { name: 'Exposição por ativo' }), cartaoDaExposicao],
+      ...['PETR4', 'VALE3', 'VIIA4'].flatMap((simboloDoAtivo): Array<[string, Locator, Locator]> => [
+        [`${simboloDoAtivo}: exposição atual`, page.getByTestId(`exposicao-${simboloDoAtivo}`).getByTestId('exposicao-atual'), cartaoDaExposicao],
+        [`${simboloDoAtivo}: falta até o limite`, page.getByTestId(`exposicao-${simboloDoAtivo}`).getByTestId('exposicao-restante'), cartaoDaExposicao],
+      ]),
+      ['Título da Nova ordem', cartaoDaNovaOrdem.getByRole('heading', { name: 'Nova ordem' }), cartaoDaNovaOrdem],
+      ...controlesDaBoleta(page).map(([nomeDoControle, controleDaBoleta]): [string, Locator, Locator] => [nomeDoControle, controleDaBoleta, cartaoDaNovaOrdem]),
+      ['Título da resposta', cartaoDaResposta.getByRole('heading', { name: 'Resposta da ordem' }), cartaoDaResposta],
+      ['Aviso sem ordem', cartaoDaResposta.getByText('Nenhuma ordem enviada ainda.', { exact: false }), cartaoDaResposta],
+    ];
+    for (const [nomeDaPeca, pecaObrigatoria, cartaoDaPeca] of pecasObrigatorias) {
+      await expect(pecaObrigatoria, nomeDaPeca).toHaveCount(1);
+      await expect(pecaObrigatoria, nomeDaPeca).toBeVisible();
+      const caixaDaPeca = (await pecaObrigatoria.boundingBox())!;
+      const caixaDoCartaoDaPeca = (await cartaoDaPeca.boundingBox())!;
+      expect(caixaDaPeca.width, `${nomeDaPeca}: largura`).toBeGreaterThan(0);
+      expect(caixaDaPeca.height, `${nomeDaPeca}: altura`).toBeGreaterThan(0);
+      expect(caixaDaPeca.x, `${nomeDaPeca}: começa dentro do cartão`).toBeGreaterThanOrEqual(caixaDoCartaoDaPeca.x - 0.5);
+      expect(caixaDaPeca.x + caixaDaPeca.width, `${nomeDaPeca}: termina dentro do cartão`).toBeLessThanOrEqual(caixaDoCartaoDaPeca.x + caixaDoCartaoDaPeca.width + 0.5);
+      expect(caixaDaPeca.x + caixaDaPeca.width, `${nomeDaPeca}: termina dentro da tela`).toBeLessThanOrEqual(larguraDaJanela + 0.5);
     }
     // Sem fullPage: com o zoom de 90% o Playwright mede a página inteira sem a escala e o print sai mais largo.
     await page.screenshot({ path: test.info().outputPath(`ca-26-empilhado-${larguraDaJanela}.png`) });

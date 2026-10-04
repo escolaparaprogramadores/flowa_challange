@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createElement, type ComponentType } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +12,9 @@ import {
   LogoDatadog,
 } from './Icones';
 
-type IconeDoContrato = { nomeDoIcone: string; componenteDoIcone: ComponentType<{ className?: string }> };
+const HASH_DO_CAMINHO_DA_MARCA_DATADOG = 'd9c09ff2589ace4b691ba53ec21ee3bca5f45f8458c99d864e8d021cdb7564de';
+
+type IconeDoContrato ={ nomeDoIcone: string; componenteDoIcone: ComponentType<{ className?: string }> };
 
 // Cada ícone de traço com o seu desenho: trocar o desenho de um pelo de outro quebra o teste.
 const ICONES_DE_TRACO: Array<IconeDoContrato & { desenhosEsperados: string[] }> = [
@@ -57,11 +60,10 @@ describe('CA-40: ícones da tela são SVG escritos no código', () => {
   it('LogoDatadog é a marca oficial preenchida com a cor de quem usa', () => {
     const desenhoDaMarca = renderToStaticMarkup(createElement(LogoDatadog));
     expect(desenhoDaMarca).toContain('fill="currentColor"');
-    // Início, fim e tamanho do desenho da marca no Simple Icons 16.34.0 (datadog.svg): confere que é ela, inteira.
+    // SHA-256 do caminho inteiro do datadog.svg do Simple Icons 16.34.0: qualquer número trocado no desenho quebra o teste.
     const [desenhoDoCaminho = ''] = lerDesenhosDoIcone(desenhoDaMarca);
     expect(lerDesenhosDoIcone(desenhoDaMarca)).toHaveLength(1);
     expect(desenhoDoCaminho.startsWith('M19.57 17.04l-1.997-1.316-1.665 2.782')).toBe(true);
-    expect(desenhoDoCaminho.endsWith('-.044-.542-.455-.456-.146-.749')).toBe(true);
-    expect(desenhoDoCaminho).toHaveLength(2887);
+    expect(createHash('sha256').update(desenhoDoCaminho).digest('hex')).toBe(HASH_DO_CAMINHO_DA_MARCA_DATADOG);
   });
 });
