@@ -126,8 +126,9 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
             Assert.False(ordersRouteResponse.Headers.Contains("Access-Control-Allow-Origin"), $"{ordersRouteResponse.RequestMessage!.Method} trouxe Access-Control-Allow-Origin");
     }
 
-    // Tudo ou nada: uma trava só deste banco de teste faz o DELETE de orders falhar depois que a exposição já
-    // foi zerada na mesma transação. Nada pode ficar zerado, nem no banco nem na memória.
+    // Tudo ou nada: uma trava só deste banco de teste faz o DELETE de orders falhar. Ela confere antes que a
+    // exposição já foi zerada na mesma transação (P0001); se as ordens fossem apagadas primeiro, o erro seria P0002.
+    // Nada pode ficar zerado, nem no banco nem na memória.
     [Fact]
     public async Task Failed_delete_rolls_back_the_zeroed_exposures_and_leaves_the_memory_untouched()
     {
@@ -190,6 +191,9 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
             """
             CREATE FUNCTION refuse_deleting_orders() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
+                IF (SELECT exposure FROM exposures WHERE symbol = 'PETR4') <> 0 THEN
+                    RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'as ordens foram apagadas antes de zerar a exposição';
+                END IF;
                 RAISE EXCEPTION 'apagar ordens recusado neste banco de teste';
             END $$;
             CREATE TRIGGER refuse_deleting_orders BEFORE DELETE ON orders FOR EACH STATEMENT EXECUTE FUNCTION refuse_deleting_orders();

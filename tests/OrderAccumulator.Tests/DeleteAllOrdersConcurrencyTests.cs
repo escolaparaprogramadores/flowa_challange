@@ -11,7 +11,8 @@ namespace OrderAccumulator.Tests;
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper concurrencyTestOutput)
 {
-    private const int SimultaneousOrdersPerRound = 200;
+    private const int OrdersPerWave = 100;
+    private const int StoredOrdersBeforeFiringTheDeletes = 30;
     private const int SimultaneousDeletesPerRound = 5;
 
     // Tempo para um passo que não deveria acontecer ter acontecido, se a porta estivesse aberta.
@@ -171,15 +172,16 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         }
     }
 
-    // 200 ordens nos três símbolos e 5 apagar pela rota, todos ao mesmo tempo, pelo app inteiro. Sem exceção
-    // e sem deadlock; no fim a exposição do banco é a da memória e é a soma das ordens aceitas que sobraram.
+    // Pelo app inteiro: 100 ordens nos três símbolos; quando 30 já gravaram, 5 apagar pela rota entram no meio das
+    // que ainda estão em curso; depois dos apagar, mais 100 ordens. Sem exceção e sem deadlock; no fim sobram ordens
+    // (as que entraram depois do último apagar) e a exposição do banco é a da memória e a soma das aceitas que sobraram.
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
-    public async Task Simultaneous_orders_and_deletes_end_with_the_same_exposure_in_the_database_and_in_memory(int concurrencyRound)
+    public async Task Deletes_in_the_middle_of_orders_in_progress_end_with_the_same_exposure_in_the_database_and_in_memory(int concurrencyRound)
     {
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
@@ -187,30 +189,46 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<SymbolExposureMemory>();
         var orderAccumulatorClient = orderAccumulatorTestApp.CreateClient();
         var orderQuantityGenerator = new Random(concurrencyRound);
-        var simultaneousOrders = Enumerable.Range(0, SimultaneousOrdersPerRound)
+        var ordersStoredBeforeTheDeletes = 0;
+        var enoughOrdersStoredToFireTheDeletes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var ordersBeforeTheDeletes = NewMixedOrders(OrdersPerWave, orderQuantityGenerator).Select(mixedOrder => Task.Run(async () =>
+        {
+            var orderOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(mixedOrder);
+            if (Interlocked.Increment(ref ordersStoredBeforeTheDeletes) == StoredOrdersBeforeFiringTheDeletes)
+                enoughOrdersStoredToFireTheDeletes.TrySetResult();
+            return orderOutcome;
+        })).ToList();
+        await enoughOrdersStoredToFireTheDeletes.Task.WaitAsync(TimeSpan.FromMinutes(2));
+        var ordersInProgressWhenTheDeletesFired = ordersBeforeTheDeletes.Count(orderBeforeTheDeletes => !orderBeforeTheDeletes.IsCompleted);
+        var deleteResponses = await Task.WhenAll(Enumerable.Range(0, SimultaneousDeletesPerRound)
+            .Select(_ => Task.Run(() => orderAccumulatorClient.DeleteAsync("/api/orders")))).WaitAsync(TimeSpan.FromMinutes(2));
+        var ordersAfterTheDeletes = NewMixedOrders(OrdersPerWave, orderQuantityGenerator)
+            .Select(mixedOrder => Task.Run(() => appOrderProcessor.ProcessIncomingOrderAsync(mixedOrder))).ToList();
+        var orderOutcomes = await Task.WhenAll(ordersBeforeTheDeletes.Concat(ordersAfterTheDeletes)).WaitAsync(TimeSpan.FromMinutes(2));
+
+        var remainingStoredOrders = await orderAccumulatorDatabase.CountStoredOrdersAsync();
+        var storedExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
+        concurrencyTestOutput.WriteLine(
+            $"rodada {concurrencyRound}: {ordersInProgressWhenTheDeletesFired} ordens em curso quando os apagar saíram; " +
+            $"{remainingStoredOrders} ordens sobraram; " +
+            string.Join(", ", storedExposures.Select(storedExposure => $"{storedExposure.Symbol}={storedExposure.Exposure}")));
+        Assert.All(orderOutcomes, orderOutcome => Assert.True(orderOutcome.Accepted));
+        Assert.All(deleteResponses, deleteResponse => Assert.Equal(System.Net.HttpStatusCode.NoContent, deleteResponse.StatusCode));
+        Assert.InRange(ordersInProgressWhenTheDeletesFired, 1, OrdersPerWave - StoredOrdersBeforeFiringTheDeletes);
+        Assert.InRange(remainingStoredOrders, OrdersPerWave, 2 * OrdersPerWave - StoredOrdersBeforeFiringTheDeletes);
+        Assert.Equal(storedExposures, appSymbolExposureMemory.CurrentSymbolExposures());
+        foreach (var storedExposure in storedExposures)
+            Assert.Equal(await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync(storedExposure.Symbol), storedExposure.Exposure);
+    }
+
+    private static List<IncomingOrder> NewMixedOrders(int orderCount, Random orderQuantityGenerator) =>
+        Enumerable.Range(0, orderCount)
             .Select(orderNumber => TestOrders.NewIncomingOrder(
                 OrderRules.AllowedOrderSymbols[orderNumber % 3],
                 orderNumber % 2 == 0 ? OrderSideCodes.BuyOrderSideFixCode : OrderSideCodes.SellOrderSideFixCode,
                 orderQuantityGenerator.Next(1, 1_000), 10.00m))
             .ToList();
-
-        var orderTasks = simultaneousOrders.Select(simultaneousOrder => Task.Run(() => appOrderProcessor.ProcessIncomingOrderAsync(simultaneousOrder))).ToList();
-        var deleteTasks = Enumerable.Range(0, SimultaneousDeletesPerRound)
-            .Select(_ => Task.Run(() => orderAccumulatorClient.DeleteAsync("/api/orders")))
-            .ToList();
-        var orderOutcomes = await Task.WhenAll(orderTasks).WaitAsync(TimeSpan.FromMinutes(2));
-        var deleteResponses = await Task.WhenAll(deleteTasks).WaitAsync(TimeSpan.FromMinutes(2));
-
-        Assert.All(orderOutcomes, orderOutcome => Assert.True(orderOutcome.Accepted));
-        Assert.All(deleteResponses, deleteResponse => Assert.Equal(System.Net.HttpStatusCode.NoContent, deleteResponse.StatusCode));
-        var storedExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
-        Assert.Equal(storedExposures, appSymbolExposureMemory.CurrentSymbolExposures());
-        foreach (var storedExposure in storedExposures)
-            Assert.Equal(await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync(storedExposure.Symbol), storedExposure.Exposure);
-        concurrencyTestOutput.WriteLine(
-            $"rodada {concurrencyRound}: {await orderAccumulatorDatabase.CountStoredOrdersAsync()} ordens sobraram depois dos apagar; " +
-            string.Join(", ", storedExposures.Select(storedExposure => $"{storedExposure.Symbol}={storedExposure.Exposure}")));
-    }
 
     private static int DogStatsdPortWithoutListener() => OrderAccumulatorFixTestHost.FindFreeFixAcceptorTcpPort();
 

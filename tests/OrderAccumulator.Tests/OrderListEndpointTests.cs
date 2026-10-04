@@ -39,8 +39,11 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         var rejectedSellOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 100_000, 1.00m));
         var storedReceivedAtByClOrdId = await ReadStoredReceivedAtByClOrdIdAsync();
 
-        var listedOrders = (await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1")).GetProperty("orders").EnumerateArray().ToList();
+        var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1");
+        var listedOrders = orderPage.GetProperty("orders").EnumerateArray().ToList();
 
+        Assert.False(rejectedSellOutcome.Accepted);
+        Assert.Equal((1, 10, 2L), ReadPageHeader(orderPage));
         Assert.Equal(2, listedOrders.Count);
         AssertListedOrder(listedOrders[0], storedReceivedAtByClOrdId[rejectedSellOutcome.ClOrdId], "rejected", "VALE3", "sell", 100_000m, 1.00m,
             rejectedSellOutcome.OrderId, rejectedSellOutcome.ClOrdId);
