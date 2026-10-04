@@ -146,12 +146,14 @@ test('CA-27 (RNF-08a): pelo teclado, o foco do − e do + aparece dentro do bot�
       await expect(passoComFoco).toBeFocused();
     }
     const passoSemFoco = passosDaQuantidade[1 - indiceDoPasso];
-    await expect.poll(() => lerEstiloCalculado(passoComFoco, ['background-color', 'outline-style', 'outline-color', 'outline-offset'])).toEqual({
+    await expect.poll(() => lerEstiloCalculado(passoComFoco, ['background-color', 'outline-style', 'outline-color'])).toEqual({
       'background-color': COR_DE_DESTAQUE_DO_PASSO,
       'outline-style': 'solid',
       'outline-color': COR_DO_ACENTO,
-      'outline-offset': '-4px',
     });
+    const contornoDoPasso = await lerEstiloCalculado(passoComFoco, ['outline-offset', 'outline-width']);
+    // Recuo para dentro maior que a espessura: o contorno inteiro cabe no botão e a caixa não o corta.
+    expect(lerPixels(contornoDoPasso['outline-offset'])).toBeLessThanOrEqual(-lerPixels(contornoDoPasso['outline-width']));
     await expect.poll(() => lerEstiloCalculado(passoSemFoco, ['background-color'])).toEqual({ 'background-color': COR_DO_TRILHO });
   }
 });
