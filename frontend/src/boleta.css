@@ -6,7 +6,8 @@
   --brilho-enviar-compra: 0 10px 28px -6px rgba(79, 227, 176, 0.45);
   --brilho-enviar-venda: 0 10px 28px -6px rgba(255, 164, 151, 0.42);
   --anel-de-foco-do-campo: 0 0 0 3px rgba(79, 227, 176, 0.22);
-  --raio-campo: 14px;
+  --raio-campo: var(--raio-quantidade);
+  --recuo-do-foco-no-passo: -4px;
   --altura-botao-enviar: 52px;
   --letra-rotulo-do-campo: 0.08em;
   --tamanho-icone-da-nota: 16px;
@@ -58,6 +59,8 @@
 .quantidade:focus-within { border-color: var(--cor-acento); box-shadow: var(--anel-de-foco-do-campo); }
 .quantidade button { border: 0; background: var(--cor-afundado); color: var(--cor-texto); font-size: var(--texto-numero-grande); height: var(--altura-quantidade); transition: background var(--transicao); }
 .quantidade button:hover { background: var(--cor-hover); }
+/* A caixa corta o que passa da borda (overflow: hidden): o contorno de foco do − e do + fica para dentro. */
+.quantidade button:focus-visible { background: var(--cor-hover); outline-offset: var(--recuo-do-foco-no-passo); }
 .quantidade input { border: 0; background: var(--cor-fundo); color: var(--cor-texto); text-align: center; font-family: var(--fonte-display); font-size: var(--texto-numero-grande); font-weight: 600; min-width: 0; outline: none; }
 .entrada[aria-invalid='true'], .quantidade.invalida { border-color: var(--cor-perigo-texto); }
 .erro-campo { margin: 0; font-size: var(--texto-rotulo); font-weight: 700; color: var(--cor-perigo-texto); line-height: 1.4; }

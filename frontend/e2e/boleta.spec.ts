@@ -7,6 +7,7 @@ const COR_DA_BORDA_DO_TRILHO = 'rgb(30, 50, 54)';
 const COR_DO_SIMBOLO_ESCOLHIDO = 'rgb(232, 239, 238)';
 const COR_DO_TEXTO_DO_SIMBOLO_ESCOLHIDO = 'rgb(8, 17, 19)';
 const COR_DO_ACENTO = 'rgb(79, 227, 176)';
+const COR_DE_DESTAQUE_DO_PASSO = 'rgb(18, 36, 39)';
 const BRILHO_DA_OPCAO_COMPRA = 'rgba(79, 227, 176, 0.35) 0px 0px 18px 0px';
 const BRILHO_DA_OPCAO_VENDA = 'rgba(255, 164, 151, 0.32) 0px 0px 18px 0px';
 const BRILHO_DO_ENVIAR_COMPRA = 'rgba(79, 227, 176, 0.45) 0px 10px 28px -6px';
@@ -126,6 +127,33 @@ test('CA-23/CA-27: pelo teclado, Tab chega nos símbolos, Enter e Espaço escolh
   await expect(botaoDoSimbolo(page, 'VALE3')).toBeFocused();
   await page.keyboard.press(' ');
   await esperarOBotaoDoSimboloEscolhido(page, 'VALE3');
+});
+
+test('CA-27 (RNF-08a): pelo teclado, o foco do − e do + aparece dentro do botão, com fundo de destaque', async ({ page }) => {
+  const passosDaQuantidade = [
+    boletaDaPagina(page).getByRole('button', { name: 'Diminuir quantidade' }),
+    boletaDaPagina(page).getByRole('button', { name: 'Aumentar quantidade' }),
+  ];
+  await page.mouse.move(0, 0);
+  await botaoDoSimbolo(page, 'VIIA4').focus();
+  await page.keyboard.press('Tab');
+  await expect(passosDaQuantidade[0]).toBeFocused();
+  for (const [indiceDoPasso, passoComFoco] of passosDaQuantidade.entries()) {
+    if (indiceDoPasso === 1) {
+      await page.keyboard.press('Tab');
+      await expect(boletaDaPagina(page).getByLabel(/^Quantidade de/)).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(passoComFoco).toBeFocused();
+    }
+    const passoSemFoco = passosDaQuantidade[1 - indiceDoPasso];
+    await expect.poll(() => lerEstiloCalculado(passoComFoco, ['background-color', 'outline-style', 'outline-color', 'outline-offset'])).toEqual({
+      'background-color': COR_DE_DESTAQUE_DO_PASSO,
+      'outline-style': 'solid',
+      'outline-color': COR_DO_ACENTO,
+      'outline-offset': '-4px',
+    });
+    await expect.poll(() => lerEstiloCalculado(passoSemFoco, ['background-color'])).toEqual({ 'background-color': COR_DO_TRILHO });
+  }
 });
 
 test('CA-27: o texto dos botões de símbolo tem contraste de pelo menos 4,5:1, escolhido ou não', async ({ page }) => {
