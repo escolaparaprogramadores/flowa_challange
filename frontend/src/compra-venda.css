@@ -1,0 +1,89 @@
+:root {
+  --texto-cabecalho-da-tabela: 11px;
+  --letra-cabecalho-da-tabela: 0.06em;
+  --espaco-horizontal-do-selo: 11px;
+  --espaco-0-5: 2px;
+  --tamanho-icone-da-faixa: 18px;
+  --tamanho-icone-da-lista-vazia: 32px;
+  --largura-maxima-texto-da-lista-vazia: 360px;
+}
+
+.compra-venda { grid-area: compra-venda; }
+.compra-venda-cabeca { display: flex; align-items: center; gap: var(--espaco-3); min-height: var(--altura-aba); }
+.compra-venda-cabeca .cartao-titulo { margin-right: auto; }
+.compra-venda-aviso { margin: 0; font-size: var(--texto-corpo-menor); line-height: 1.6; color: var(--cor-texto-apagado); }
+.compra-venda-aviso-erro { color: var(--cor-perigo-texto); font-weight: 700; }
+
+.selo-da-ordem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--espaco-1-5);
+  padding: var(--espaco-1-5) var(--espaco-horizontal-do-selo);
+  border-radius: var(--raio-pill);
+  font-size: var(--texto-legenda);
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+.selo-da-ordem::before { content: ''; width: var(--tamanho-ponto-status); height: var(--tamanho-ponto-status); border-radius: var(--raio-pill); background: currentColor; }
+.selo-aceita { background: var(--cor-sucesso-fundo); color: var(--cor-sucesso-texto); }
+.selo-rejeitada { background: var(--cor-perigo-fundo); color: var(--cor-perigo-texto); }
+.selo-enviando { background: var(--cor-aviso-fundo); color: var(--cor-aviso-texto); }
+
+.faixa-da-falha-no-envio {
+  display: flex;
+  gap: var(--espaco-3);
+  padding: var(--espaco-3-5) var(--espaco-4);
+  border: 1px solid var(--cor-perigo-texto);
+  border-radius: var(--raio-aba);
+  background: var(--cor-perigo-fundo);
+  color: var(--cor-perigo-texto);
+}
+.faixa-da-falha-no-envio-icone { flex: none; width: var(--tamanho-icone-da-faixa); height: var(--tamanho-icone-da-faixa); margin-top: var(--espaco-0-5); }
+.faixa-da-falha-no-envio-titulo { margin: 0; font-weight: 800; font-size: var(--texto-corpo-menor); }
+.faixa-da-falha-no-envio-mensagem,
+.faixa-da-falha-no-envio-erros { margin: var(--espaco-1) 0 0; font-size: var(--texto-corpo-menor); line-height: 1.6; color: var(--cor-texto-secundario); }
+.faixa-da-falha-no-envio-erros { padding-left: var(--espaco-5); }
+
+.lista-de-ordens-vazia {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--espaco-3);
+  padding: var(--espaco-12) var(--espaco-6);
+  border: 1px dashed var(--cor-borda);
+  border-radius: var(--raio-aba);
+  background: var(--cor-afundado);
+  text-align: center;
+}
+.lista-de-ordens-vazia-icone { width: var(--tamanho-icone-da-lista-vazia); height: var(--tamanho-icone-da-lista-vazia); color: var(--cor-texto-rotulo); }
+.lista-de-ordens-vazia p { margin: 0; max-width: var(--largura-maxima-texto-da-lista-vazia); font-size: var(--texto-corpo-menor); line-height: 1.6; color: var(--cor-texto-apagado); }
+
+/* A tabela rola por dentro do cartão em tela estreita; a página nunca rola para o lado. */
+.tabela-de-ordens-moldura { overflow-x: auto; border: 1px solid var(--cor-borda); border-radius: var(--raio-aba); background: var(--cor-afundado); }
+.tabela-de-ordens { width: 100%; border-collapse: collapse; font-size: var(--texto-rotulo); }
+.tabela-de-ordens th {
+  padding: var(--espaco-3) var(--espaco-2-5);
+  text-align: left;
+  font-size: var(--texto-cabecalho-da-tabela);
+  font-weight: 700;
+  letter-spacing: var(--letra-cabecalho-da-tabela);
+  text-transform: uppercase;
+  color: var(--cor-texto-rotulo);
+  background: var(--cor-afundado);
+  white-space: nowrap;
+}
+.tabela-de-ordens td {
+  padding: var(--espaco-3) var(--espaco-2-5);
+  border-top: 1px solid var(--cor-divisor);
+  background: var(--cor-card);
+  color: var(--cor-texto);
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: middle;
+  transition: background var(--transicao);
+}
+.tabela-de-ordens tbody tr:hover td { background: var(--cor-hover); }
+.linha-da-ordem-dia, .linha-da-ordem-hora { display: block; }
+.linha-da-ordem-hora { margin-top: var(--espaco-0-5); font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-apagado); }
+.linha-da-ordem-codigo { font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-secundario); }
