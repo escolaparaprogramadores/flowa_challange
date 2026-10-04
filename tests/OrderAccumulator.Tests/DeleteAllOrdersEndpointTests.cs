@@ -118,8 +118,7 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         var getFromOtherSiteResponse = await orderAccumulatorClient.SendAsync(OrdersRequestFromOtherSite(HttpMethod.Get));
         var deleteFromOtherSiteResponse = await orderAccumulatorClient.SendAsync(OrdersRequestFromOtherSite(HttpMethod.Delete));
 
-        Assert.NotEqual(HttpStatusCode.NoContent, preflightResponse.StatusCode);
-        Assert.False(preflightResponse.IsSuccessStatusCode);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, preflightResponse.StatusCode);
         Assert.Equal(3L, ordersCountAfterPreflight);
         Assert.Equal(HttpStatusCode.OK, getFromOtherSiteResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, deleteFromOtherSiteResponse.StatusCode);

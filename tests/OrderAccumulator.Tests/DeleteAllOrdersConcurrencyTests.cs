@@ -1,4 +1,5 @@
 using Flowa.Shared;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OrderAccumulator.Exposure;
 using OrderAccumulator.Observabilidade;
@@ -140,6 +141,36 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         Assert.Equal(["apagar", "ordem que chegou depois"], stepsInOrder);
     }
 
+    // Pelo OrderProcessorWithMetrics de verdade: a ordem já gravada só sai da porta depois de somar na memória.
+    // Se a soma ficasse fora da porta, o apagar que espera veria a memória sem a ordem e o zero seria desfeito
+    // pela soma atrasada. Repete para a janela entre gravar e somar ser exercitada várias vezes.
+    [Fact]
+    public async Task Order_through_the_metrics_processor_adds_to_memory_before_a_waiting_delete_runs()
+    {
+        using var orderMetricsClient = OrderMetricsSetup.CreateOrderMetricsClient(DogStatsdPortWithoutListener(), new ConfigurationBuilder().Build());
+        for (var attempt = 0; attempt < 50; attempt++)
+        {
+            var symbolExposureMemory = new SymbolExposureMemory();
+            var blockedOrderProcessor = new OrderProcessorBlockedAfterStoring(AcceptedBuyOutcome("PETR4", 100, 10.00m));
+            var orderProcessorWithMetrics = new OrderProcessorWithMetrics(blockedOrderProcessor, orderMetricsClient, symbolExposureMemory);
+
+            var orderInProgress = orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
+            await blockedOrderProcessor.OrderStored.WaitAsync(StepDeadline);
+            IReadOnlyList<SymbolExposure>? exposureMemorySeenByTheDelete = null;
+            var deleteAll = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
+            {
+                exposureMemorySeenByTheDelete = symbolExposureMemory.CurrentSymbolExposures();
+                return Task.CompletedTask;
+            }, CancellationToken.None);
+            await Task.Delay(20);
+            blockedOrderProcessor.ReleaseTheStoredOrder();
+            await Task.WhenAll(orderInProgress, deleteAll).WaitAsync(StepDeadline);
+
+            Assert.Equal([new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)], exposureMemorySeenByTheDelete);
+            Assert.Equal([new("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)], symbolExposureMemory.CurrentSymbolExposures());
+        }
+    }
+
     // 200 ordens nos três símbolos e 5 apagar pela rota, todos ao mesmo tempo, pelo app inteiro. Sem exceção
     // e sem deadlock; no fim a exposição do banco é a da memória e é a soma das ordens aceitas que sobraram.
     [Theory]
@@ -179,6 +210,26 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         concurrencyTestOutput.WriteLine(
             $"rodada {concurrencyRound}: {await orderAccumulatorDatabase.CountStoredOrdersAsync()} ordens sobraram depois dos apagar; " +
             string.Join(", ", storedExposures.Select(storedExposure => $"{storedExposure.Symbol}={storedExposure.Exposure}")));
+    }
+
+    private static int DogStatsdPortWithoutListener() => OrderAccumulatorFixTestHost.FindFreeFixAcceptorTcpPort();
+
+    // Faz o papel do PostgresOrderProcessor: a ordem "já gravou" e fica parada até o teste soltar.
+    private sealed class OrderProcessorBlockedAfterStoring(OrderOutcome storedOrderOutcome) : IOrderProcessor
+    {
+        private readonly TaskCompletionSource orderStored = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource storedOrderReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task OrderStored => orderStored.Task;
+
+        public void ReleaseTheStoredOrder() => storedOrderReleased.SetResult();
+
+        public async Task<OrderOutcome> ProcessIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
+        {
+            orderStored.SetResult();
+            await storedOrderReleased.Task;
+            return storedOrderOutcome;
+        }
     }
 
     private static OrderOutcome AcceptedBuyOutcome(string symbol, decimal quantity, decimal price) =>

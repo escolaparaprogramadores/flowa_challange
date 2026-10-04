@@ -105,16 +105,16 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     }
 
     [Theory]
-    [InlineData("/api/orders?page=3")]
-    [InlineData("/api/orders?page=1000")]
-    public async Task Page_past_the_last_one_returns_an_empty_list_with_the_real_total(string pastLastOrderPageUrl)
+    [InlineData(3)]
+    [InlineData(1000)]
+    public async Task Page_past_the_last_one_returns_an_empty_list_with_the_real_total(int pastLastPageNumber)
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         await ProcessOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 12);
 
-        var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, pastLastOrderPageUrl);
+        var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, $"/api/orders?page={pastLastPageNumber}");
 
-        Assert.Equal(12L, orderPage.GetProperty("total").GetInt64());
+        Assert.Equal((pastLastPageNumber, 10, 12L), ReadPageHeader(orderPage));
         Assert.Equal(0, orderPage.GetProperty("orders").GetArrayLength());
     }
 
@@ -160,7 +160,9 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         var repeatedPageResponse = await orderAccumulatorTestApp.CreateClient().GetAsync("/api/orders?page=1&page=2");
 
         Assert.Equal(HttpStatusCode.BadRequest, repeatedPageResponse.StatusCode);
-        Assert.Equal("validation_error", JsonDocument.Parse(await repeatedPageResponse.Content.ReadAsStringAsync()).RootElement.GetProperty("status").GetString());
+        Assert.Equal(
+            """{"status":"validation_error","message":"Página inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}""",
+            await repeatedPageResponse.Content.ReadAsStringAsync());
     }
 
     [Fact]
