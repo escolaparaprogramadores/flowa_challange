@@ -31,7 +31,7 @@ describe('calcularUsoDoLimite', () => {
     const usoDoLimite = calcularUsoDoLimite(exposicaoEmReais);
     expect(usoDoLimite.porcentagemMostrada).toBe(porcentagemEsperada);
     expect(usoDoLimite.larguraDaBarraEmPorcentagem).toBe(0);
-    expect(usoDoLimite.pertoDoLimite).toBe(false);
+    expect(usoDoLimite.estaPertoDoLimite).toBe(false);
   });
 
   it.each([
@@ -39,11 +39,11 @@ describe('calcularUsoDoLimite', () => {
     [-89_999_999.99, '89,99%', 89.99, false],
     [-90_000_000, '90%', 90, true],
     [-78_991, '0,07%', 0.07, false],
-  ])('exposição negativa %d usa o valor sem sinal: %s', (exposicaoEmReais, porcentagemEsperada, larguraEsperada, pertoDoLimiteEsperado) => {
+  ])('exposição negativa %d usa o valor sem sinal: %s', (exposicaoEmReais, porcentagemEsperada, larguraEsperada, estaPertoDoLimiteEsperado) => {
     expect(calcularUsoDoLimite(exposicaoEmReais)).toEqual({
       porcentagemMostrada: porcentagemEsperada,
       larguraDaBarraEmPorcentagem: larguraEsperada,
-      pertoDoLimite: pertoDoLimiteEsperado,
+      estaPertoDoLimite: estaPertoDoLimiteEsperado,
     });
   });
 
@@ -53,15 +53,15 @@ describe('calcularUsoDoLimite', () => {
     [89_999_999.99, false],
     [90_000_000, true],
     [99_997_997.01, true],
-  ])('exposição %d fica perto do limite (barrinha âmbar)? %s', (exposicaoEmReais, pertoDoLimiteEsperado) => {
-    expect(calcularUsoDoLimite(exposicaoEmReais).pertoDoLimite).toBe(pertoDoLimiteEsperado);
+  ])('exposição %d fica perto do limite (barrinha âmbar)? %s', (exposicaoEmReais, estaPertoDoLimiteEsperado) => {
+    expect(calcularUsoDoLimite(exposicaoEmReais).estaPertoDoLimite).toBe(estaPertoDoLimiteEsperado);
   });
 
   it('acima do limite mostra o número real e a barrinha fica cheia e âmbar', () => {
     expect(calcularUsoDoLimite(100_500_000)).toEqual({
       porcentagemMostrada: '100,5%',
       larguraDaBarraEmPorcentagem: 100,
-      pertoDoLimite: true,
+      estaPertoDoLimite: true,
     });
   });
 });

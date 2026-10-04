@@ -37,7 +37,7 @@ function CartaoDoAtivo({ exposicaoDoSimbolo }: { exposicaoDoSimbolo: ExposicaoDo
   const classesDoPreenchimento = [
     'uso-do-limite-preenchimento',
     exposicaoDoSimbolo.exposicao !== 0 && 'com-exposicao',
-    usoDoLimite.pertoDoLimite && 'perto-do-limite',
+    usoDoLimite.estaPertoDoLimite && 'perto-do-limite',
   ]
     .filter(Boolean)
     .join(' ');
@@ -77,7 +77,7 @@ function CartaoDoAtivo({ exposicaoDoSimbolo }: { exposicaoDoSimbolo: ExposicaoDo
         </div>
         <p className="uso-do-limite-legenda" aria-hidden="true">
           <span>Uso do limite</span>
-          <span className={usoDoLimite.pertoDoLimite ? 'num perto-do-limite' : 'num'} data-testid="uso-do-limite-porcentagem">
+          <span className={usoDoLimite.estaPertoDoLimite ? 'num perto-do-limite' : 'num'} data-testid="uso-do-limite-porcentagem">
             {usoDoLimite.porcentagemMostrada}
           </span>
         </p>

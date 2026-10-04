@@ -9,7 +9,7 @@ const formatadorDaPorcentagem = new Intl.NumberFormat('pt-BR', { maximumFraction
 export type UsoDoLimite = {
   porcentagemMostrada: string;
   larguraDaBarraEmPorcentagem: number;
-  pertoDoLimite: boolean;
+  estaPertoDoLimite: boolean;
 };
 
 // Venda que deixa a exposição negativa também consome o limite: a conta usa o valor sem sinal.
@@ -26,6 +26,6 @@ export function calcularUsoDoLimite(exposicaoEmReais: number): UsoDoLimite {
   return {
     porcentagemMostrada: usoAbaixoDoMenorValorMostrado ? '< 0,01%' : `${formatadorDaPorcentagem.format(porcentagemCortada)}%`,
     larguraDaBarraEmPorcentagem: Math.min(porcentagemCortada, 100),
-    pertoDoLimite: centesimosDePorcentagem >= CENTESIMOS_DE_PORCENTAGEM_DO_ALERTA,
+    estaPertoDoLimite: centesimosDePorcentagem >= CENTESIMOS_DE_PORCENTAGEM_DO_ALERTA,
   };
 }
