@@ -153,13 +153,14 @@ public sealed class OrdersProxyTests : IDisposable
     }
 
     [Theory]
-    [InlineData("GET", StatusCodes.Status500InternalServerError, OrdersPageCommunicationMessage)]
-    [InlineData("GET", StatusCodes.Status404NotFound, OrdersPageCommunicationMessage)]
-    [InlineData("GET", StatusCodes.Status204NoContent, OrdersPageCommunicationMessage)]
-    [InlineData("DELETE", StatusCodes.Status500InternalServerError, OrdersDeletionCommunicationMessage)]
-    [InlineData("DELETE", StatusCodes.Status200OK, OrdersDeletionCommunicationMessage)]
-    [InlineData("DELETE", StatusCodes.Status400BadRequest, OrdersDeletionCommunicationMessage)]
-    public async Task Status_inesperado_do_accumulator_vira_503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedCommunicationMessage)
+    [InlineData("GET", StatusCodes.Status500InternalServerError, OrdersPageCommunicationMessage, "GET ?page=1")]
+    [InlineData("GET", StatusCodes.Status404NotFound, OrdersPageCommunicationMessage, "GET ?page=1")]
+    [InlineData("GET", StatusCodes.Status204NoContent, OrdersPageCommunicationMessage, "GET ?page=1")]
+    [InlineData("DELETE", StatusCodes.Status500InternalServerError, OrdersDeletionCommunicationMessage, "DELETE ")]
+    [InlineData("DELETE", StatusCodes.Status200OK, OrdersDeletionCommunicationMessage, "DELETE ")]
+    [InlineData("DELETE", StatusCodes.Status400BadRequest, OrdersDeletionCommunicationMessage, "DELETE ")]
+    public async Task Status_inesperado_do_accumulator_vira_503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedCommunicationMessage,
+        string expectedAccumulatorOrdersRequest)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
         {
@@ -174,6 +175,8 @@ public sealed class OrdersProxyTests : IDisposable
 
         await AssertOrdersCommunicationError(ordersResponse, expectedCommunicationMessage);
         Assert.DoesNotContain("detalhe-do-accumulator-que-nao-pode-vazar", await ordersResponse.Content.ReadAsStringAsync());
+        // O 503 veio da resposta do accumulator, numa chamada só: sem nova tentativa, nem no apagar.
+        Assert.Equal([expectedAccumulatorOrdersRequest], fakeAccumulator.ReceivedOrdersRequests);
     }
 
     // CA-29: abrir o endereço, link pré-carregado, formulário ou outro verbo não apagam nada.
@@ -264,6 +267,9 @@ public sealed class OrdersProxyTests : IDisposable
         // Sem isto o teste passaria com o log todo desligado: o nível Information do app tem de estar ligado.
         var orderGeneratorLoggerFactory = orderGeneratorFactory.Services.GetRequiredService<ILoggerFactory>();
         Assert.True(orderGeneratorLoggerFactory.CreateLogger("OrderGenerator").IsEnabled(LogLevel.Information));
+        // E o capturador tem de estar ligado nesse caminho: uma linha Information do app chega até ele.
+        orderGeneratorLoggerFactory.CreateLogger("OrderGenerator").LogInformation("sonda-do-capturador");
+        Assert.Contains("Information OrderGenerator: sonda-do-capturador", orderGeneratorCapturedLogs.CapturedLogLines);
         orderGeneratorCapturedLogs.ForgetCapturedLogLines();
 
         var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), ordersPath));
