@@ -203,11 +203,11 @@ ativo (`src/OrderAccumulator/Observabilidade/OrderMetrics.cs`). O ClOrdID não v
 número de séries ficar pequeno.
 
 A esteira só põe o agente nas tasks quando o cofre do Datadog no Secrets Manager já tem a chave
-(`infra/datadog-agente.tf`, variável `datadog_ligado`). O painel é Terraform em
-`observabilidade/datadog/`, aplicado pelo workflow `.github/workflows/2-develop-painel-datadog.yml`. As
-chaves do Datadog ficam no Secrets Manager e nos secrets do GitHub, nunca no repositório. A conta do
-Datadog está no período de teste grátis até 15/10/2026; sem plano contratado, o painel para de receber
-dado novo depois disso.
+(`infra/datadog-agente.tf`, variável `datadog_ligado`). O painel de ordens e exposição é Terraform em
+`observabilidade/datadog/`, aplicado pelo workflow `.github/workflows/2-develop-painel-datadog.yml`; os
+outros dois não estão no repositório. As chaves do Datadog ficam no Secrets Manager e nos secrets do
+GitHub, nunca no repositório. A conta do Datadog está no período de teste grátis até 15/10/2026; sem
+plano contratado, os três painéis param de receber dado novo depois disso.
 
 ### Teste de carga
 
