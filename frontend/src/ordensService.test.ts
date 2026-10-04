@@ -138,11 +138,11 @@ describe('listarOrdens', () => {
   };
 
   it('CA-41: lê só a página pedida, com uma chamada GET em /api/orders?page=<n>', async () => {
-    const fetchDaTela = vi.fn(async () => new Response(JSON.stringify(paginaDoContrato), { status: 200 }));
-    vi.stubGlobal('fetch', fetchDaTela);
+    const servidorSimuladoDaLista = vi.fn(async () => new Response(JSON.stringify(paginaDoContrato), { status: 200 }));
+    vi.stubGlobal('fetch', servidorSimuladoDaLista);
     await listarOrdens(1);
-    expect(fetchDaTela).toHaveBeenCalledTimes(1);
-    const [rotaChamada, opcoesDaChamada] = fetchDaTela.mock.calls[0] as unknown as [string, RequestInit];
+    expect(servidorSimuladoDaLista).toHaveBeenCalledTimes(1);
+    const [rotaChamada, opcoesDaChamada] = servidorSimuladoDaLista.mock.calls[0] as unknown as [string, RequestInit];
     expect(rotaChamada).toBe('/api/orders?page=1');
     expect(opcoesDaChamada.method).toBeUndefined();
   });
@@ -195,11 +195,11 @@ describe('listarOrdens', () => {
 
 describe('apagarTodasAsOrdens', () => {
   it('manda DELETE em /api/orders e termina sem erro no 204', async () => {
-    const fetchDaTela = vi.fn(async () => new Response(null, { status: 204 }));
-    vi.stubGlobal('fetch', fetchDaTela);
+    const servidorSimuladoDoApagamento = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', servidorSimuladoDoApagamento);
     await expect(apagarTodasAsOrdens()).resolves.toBeUndefined();
-    expect(fetchDaTela).toHaveBeenCalledTimes(1);
-    const [rotaChamada, opcoesDaChamada] = fetchDaTela.mock.calls[0] as unknown as [string, RequestInit];
+    expect(servidorSimuladoDoApagamento).toHaveBeenCalledTimes(1);
+    const [rotaChamada, opcoesDaChamada] = servidorSimuladoDoApagamento.mock.calls[0] as unknown as [string, RequestInit];
     expect(rotaChamada).toBe('/api/orders');
     expect(opcoesDaChamada.method).toBe('DELETE');
   });
