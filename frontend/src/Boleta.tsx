@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { IconeEscudo } from './Icones';
 import {
   QUANTIDADE_MAXIMA_EXCLUSIVA,
   SIMBOLOS_DA_BOLETA,
@@ -69,17 +70,20 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
       </fieldset>
 
       <div className="campo">
-        <label className="campo-rotulo" htmlFor="simbolo">Símbolo</label>
-        <select
-          id="simbolo"
-          className="seletor"
-          value={simboloDaOrdem}
-          onChange={(eventoDoSeletor) => setSimboloDaOrdem(eventoDoSeletor.target.value as SimboloDaBoleta)}
-        >
+        <span className="campo-rotulo" id="rotulo-simbolo">Símbolo</span>
+        <div className="trilho-simbolo" role="group" aria-labelledby="rotulo-simbolo">
           {SIMBOLOS_DA_BOLETA.map((simboloDisponivel) => (
-            <option key={simboloDisponivel} value={simboloDisponivel}>{simboloDisponivel}</option>
+            <button
+              key={simboloDisponivel}
+              type="button"
+              className="simbolo-opcao"
+              aria-pressed={simboloDaOrdem === simboloDisponivel}
+              onClick={() => setSimboloDaOrdem(simboloDisponivel)}
+            >
+              {simboloDisponivel}
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
       <div className="campo">
@@ -130,7 +134,7 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
         </div>
         <div className="resumo-linha">
           <dt>Valor total estimado</dt>
-          <dd className="num" data-testid="total-estimado">
+          <dd className="num resumo-total" data-testid="total-estimado">
             {totalEstimadoEmReais !== undefined ? formatarReais(totalEstimadoEmReais) : '—'}
           </dd>
         </div>
@@ -139,7 +143,10 @@ export function Boleta({ enviandoOrdem, aoEnviarOrdem }: PropsDaBoleta) {
       <button type="submit" className={`botao-enviar ${classeCssDoLado}`} disabled={enviandoOrdem}>
         {enviandoOrdem ? 'Enviando…' : ladoDaOrdem === 'Compra' ? 'Enviar ordem de compra' : 'Enviar ordem de venda'}
       </button>
-      <p className="nota">Ordem de demonstração: nenhuma operação real é feita.</p>
+      <p className="nota">
+        <IconeEscudo className="nota-icone" />
+        Ordem de demonstração: nenhuma operação real é feita.
+      </p>
     </form>
   );
 }

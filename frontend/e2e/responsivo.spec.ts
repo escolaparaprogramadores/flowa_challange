@@ -36,7 +36,9 @@ function controlesDaBoleta(paginaDaBoleta: Page): Array<[string, Locator]> {
   return [
     ['Compra', paginaDaBoleta.getByRole('button', { name: 'Compra', exact: true })],
     ['Venda', paginaDaBoleta.getByRole('button', { name: 'Venda', exact: true })],
-    ['Símbolo', paginaDaBoleta.getByLabel('Símbolo')],
+    ['Símbolo PETR4', paginaDaBoleta.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'PETR4', exact: true })],
+    ['Símbolo VALE3', paginaDaBoleta.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'VALE3', exact: true })],
+    ['Símbolo VIIA4', paginaDaBoleta.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'VIIA4', exact: true })],
     ['Diminuir quantidade', paginaDaBoleta.getByRole('button', { name: 'Diminuir quantidade' })],
     ['Quantidade', paginaDaBoleta.getByLabel(/^Quantidade de/)],
     ['Aumentar quantidade', paginaDaBoleta.getByRole('button', { name: 'Aumentar quantidade' })],
