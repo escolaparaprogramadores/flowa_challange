@@ -13,8 +13,10 @@ Está no ar em https://h2asgc2sce.execute-api.us-east-1.amazonaws.com (veja [Na 
 - React 19, TypeScript e Vite na tela
 - xUnit e Testcontainers nos testes do .NET; Vitest e Playwright nos testes da tela
 - Docker Compose para subir tudo junto
-- GitHub Actions: build e todos os testes em cada PR, e deploy na AWS a cada merge em `develop`
+- GitHub Actions: build e todos os testes em cada PR, e deploy na AWS quando um merge de código chega em `develop`
 - AWS (API Gateway, ECS Fargate, RDS), criada só com Terraform
+- Datadog para rastros, métricas das ordens e um painel público, com um agente ao lado de cada serviço na AWS
+- k6 para o teste de carga, rodado à mão pelo GitHub Actions
 
 ## Como rodar com Docker
 
@@ -158,9 +160,9 @@ da versão local, e as ordens vão para um PostgreSQL de verdade na AWS.
 O navegador fala só com o API Gateway. Ele passa o pedido por um VPC Link para o OrderGenerator, que
 roda no ECS Fargate. O OrderGenerator acha o OrderAccumulator pelo Cloud Map e conversa com ele por FIX,
 como na versão local. O OrderAccumulator grava num RDS PostgreSQL que fica numa subnet sem saída para
-fora. Nenhuma tarefa aceita conexão vinda da internet. Cada serviço roda uma cópia com 0,25 vCPU e
-0,5 GB, o banco é um `db.t3.micro` numa zona só, e o API Gateway aceita até 20 pedidos por segundo
-(rajada de 40); acima disso responde 429.
+fora. Nenhuma tarefa aceita conexão vinda da internet. Cada serviço roda uma cópia com 0,5 vCPU e
+1 GB, que o app divide com o agente do Datadog, o banco é um `db.t3.micro` numa zona só, e o API
+Gateway aceita até 20 pedidos por segundo (rajada de 40); acima disso responde 429.
 
 **Como publica.** Os serviços, a rede, o banco, o ECR e os logs são criados pelo Terraform de `infra/`.
 A role que a esteira assume e o bucket do state vêm de uma base Terraform separada, fora deste
@@ -169,5 +171,41 @@ workflow `.github/workflows/2-develop-deploy.yml` roda o CI no mesmo commit e, c
 imagem do serviço que mudou, manda para o ECR e roda o `terraform apply`. Merge só de texto (`*.md` e
 `docs/`) não publica nada. O GitHub entra na AWS por OIDC, com uma credencial temporária, sem chave
 guardada no repositório. A fonte do desenho fica em `docs/arquitetura/arquitetura-aws.drawio`.
+
+## Observabilidade
+
+O [painel do Datadog](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-cb393cd3b3760676912c981fa71f3372)
+é público e abre sem login. Ele mostra a taxa de aceite, as ordens aceitas e rejeitadas ao longo do tempo e a exposição de cada
+ativo, com as linhas do limite de 100 milhões.
+
+Na AWS, cada task roda um agente do Datadog ao lado do app. O app manda rastros para o agente em
+`localhost:8126` e métricas em `localhost:8125`, e o agente envia tudo ao Datadog por HTTPS. Uma ordem
+aparece como um rastro só, da tela até o OrderAccumulator: o OrderGenerator põe o contexto do rastro
+numa tag FIX própria da `NewOrderSingle`, a 5100 (`TraceParent`), e o OrderAccumulator continua o
+mesmo rastro (`src/Flowa.Shared/Fix/RastroDaOrdemFix.cs`). O OrderAccumulator conta
+`flowa.ordens.aceitas` e `flowa.ordens.rejeitadas` por ativo e lado, e publica `flowa.exposicao` por
+ativo (`src/OrderAccumulator/Observabilidade/OrderMetrics.cs`). O ClOrdID não vira etiqueta, para o
+número de séries ficar pequeno.
+
+A esteira só põe o agente nas tasks quando o cofre do Datadog no Secrets Manager já tem a chave
+(`infra/datadog-agente.tf`, variável `datadog_ligado`). O painel é Terraform em
+`observabilidade/datadog/`, aplicado pelo workflow `.github/workflows/2-develop-painel-datadog.yml`. As
+chaves do Datadog ficam no Secrets Manager e nos secrets do GitHub, nunca no repositório. A conta do
+Datadog está no período de teste grátis até 15/10/2026; sem plano contratado, o painel para de receber
+dado novo depois disso.
+
+### Teste de carga
+
+O k6 (`k6/carga-ordens.js`) manda 15 ordens por segundo durante 5 minutos para a URL pública, abaixo
+do limite de 20 por segundo do API Gateway. As ordens vão em pares de compra e venda do mesmo ativo,
+quantidade e preço, para a exposição voltar perto de onde estava. O teste só reprova se a taxa de erro
+chegar a 1%. O commit é a versão do OrderGenerator no ar durante o teste.
+
+| Data | Commit | Requisições por minuto | Taxa de erro | P80 | P90 | P95 | P99 |
+|---|---|---|---|---|---|---|---|
+| 04/10/2026 00:24 UTC | f6a268d | 899 | 0,00% | 79 ms | 90 ms | 101 ms | 146 ms |
+
+Foram 4500 ordens, todas aceitas. Para rodar de novo: em Actions, escolha o workflow `k6-carga.yml` e
+clique em "Run workflow". O relatório fica como anexo do run.
 
 This is a challenge by [Coodesh](https://coodesh.com/)
