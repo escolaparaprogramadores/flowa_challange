@@ -89,6 +89,35 @@ for (const larguraDaJanela of [375, 860]) {
       expect(caixaDoCartao.x + caixaDoCartao.width, `${nomeDoCartao}: termina dentro da tela`).toBeLessThanOrEqual(larguraDaJanela);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(larguraDaJanela);
+
+    // Nada cortado por dentro: os cartões escondem o que transborda (overflow: hidden), então cada
+    // cartão não pode ter conteúdo mais largo ou mais alto que ele, e cada pedaço visível dentro dele
+    // tem de caber no cartão e na janela.
+    const conferenciaDosCartoes = await page.getByRole('main').evaluate((conteudoDaPagina, larguraDaTela) => {
+      const problemasEncontrados: string[] = [];
+      const pecasConferidasPorCartao: Record<string, number> = {};
+      for (const cartaoDaPagina of conteudoDaPagina.querySelectorAll<HTMLElement>(':scope > .painel, :scope > .cartao')) {
+        const nomeDoCartao = cartaoDaPagina.className;
+        if (cartaoDaPagina.scrollWidth > cartaoDaPagina.clientWidth) problemasEncontrados.push(`${nomeDoCartao}: conteúdo mais largo que o cartão`);
+        if (cartaoDaPagina.scrollHeight > cartaoDaPagina.clientHeight) problemasEncontrados.push(`${nomeDoCartao}: conteúdo mais alto que o cartão`);
+        const caixaDoCartao = cartaoDaPagina.getBoundingClientRect();
+        pecasConferidasPorCartao[nomeDoCartao] = 0;
+        for (const pecaDoCartao of cartaoDaPagina.querySelectorAll<HTMLElement>('*')) {
+          const caixaDaPeca = pecaDoCartao.getBoundingClientRect();
+          if (caixaDaPeca.width === 0 || caixaDaPeca.height === 0 || pecaDoCartao.closest('.sr')) continue;
+          pecasConferidasPorCartao[nomeDoCartao] += 1;
+          const cabeNoCartao = caixaDaPeca.left >= caixaDoCartao.left - 0.5 && caixaDaPeca.right <= caixaDoCartao.right + 0.5 && caixaDaPeca.top >= caixaDoCartao.top - 0.5 && caixaDaPeca.bottom <= caixaDoCartao.bottom + 0.5;
+          const cabeNaTela = caixaDaPeca.left >= -0.5 && caixaDaPeca.right <= larguraDaTela + 0.5;
+          if (!cabeNoCartao || !cabeNaTela) problemasEncontrados.push(`${nomeDoCartao} > ${pecaDoCartao.tagName}.${pecaDoCartao.className}: fora do cartão ou da tela`);
+        }
+      }
+      return { problemasEncontrados, pecasConferidasPorCartao };
+    }, larguraDaJanela);
+    expect(conferenciaDosCartoes.problemasEncontrados).toEqual([]);
+    expect(Object.keys(conferenciaDosCartoes.pecasConferidasPorCartao)).toEqual(['painel exposicao', 'cartao resposta', 'cartao boleta']);
+    for (const [nomeDoCartao, pecasConferidas] of Object.entries(conferenciaDosCartoes.pecasConferidasPorCartao)) {
+      expect(pecasConferidas, `${nomeDoCartao}: peças visíveis conferidas`).toBeGreaterThanOrEqual(2);
+    }
     // Sem fullPage: com o zoom de 90% o Playwright mede a página inteira sem a escala e o print sai mais largo.
     await page.screenshot({ path: test.info().outputPath(`ca-26-empilhado-${larguraDaJanela}.png`) });
   });

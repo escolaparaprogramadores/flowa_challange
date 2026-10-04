@@ -157,7 +157,7 @@ button { cursor: pointer; }
 .status-aceita { background: var(--cor-sucesso-fundo); color: var(--cor-sucesso-texto); }
 .status-rejeitada, .status-erro { background: var(--cor-perigo-fundo); color: var(--cor-perigo-texto); }
 .status-enviando { background: var(--cor-aviso-fundo); color: var(--cor-aviso-texto); }
-/* Até 860 px, uma coluna só: ativos, depois Nova ordem, depois Compra/Venda (decisão G-1). */
+/* Até 860 px, uma coluna só: ativos, depois Nova ordem, depois Compra/Venda. */
 @media (max-width: 860px) {
   .pagina { padding: 0 var(--espaco-4) var(--espaco-12); }
   .cabecalho-da-pagina { margin-top: var(--espaco-7); }

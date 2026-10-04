@@ -156,6 +156,45 @@ for (const larguraDaJanela of [861, 1280, 1440, 1920]) {
     expect(caixaDaEsquerda.topo - caixaDaNovaOrdem.topo).toBe(0);
     expect(caixaDaEsquerda.fim - caixaDaNovaOrdem.fim).toBe(0);
     await expect(cartaoDaEsquerda).toHaveCSS('border-radius', '22px');
+
+    // "Exposição por ativo" ocupa a largura toda; as duas colunas de baixo encostam nas bordas do conteúdo.
+    const caixaDoConteudo = await medirNaTela(page.getByRole('main'));
+    expect(caixaDosAtivos.esquerda).toBeCloseTo(caixaDoConteudo.esquerda, 1);
+    expect(caixaDosAtivos.largura).toBeCloseTo(caixaDoConteudo.largura, 1);
+    expect(caixaDaEsquerda.esquerda).toBeCloseTo(caixaDoConteudo.esquerda, 1);
+    expect(caixaDaNovaOrdem.direita).toBeCloseTo(caixaDoConteudo.direita, 1);
+  });
+}
+
+const SIMBOLOS_DOS_ATIVOS = ['PETR4', 'VALE3', 'VIIA4'];
+
+for (const { larguraDaJanela, ladoALado } of [
+  { larguraDaJanela: 375, ladoALado: false },
+  { larguraDaJanela: 860, ladoALado: false },
+  { larguraDaJanela: 861, ladoALado: true },
+  { larguraDaJanela: 1440, ladoALado: true },
+]) {
+  test(`ASSUMI-09: em ${larguraDaJanela} px os três ativos ficam ${ladoALado ? 'lado a lado, do mesmo tamanho' : 'um embaixo do outro, na largura toda'}`, async ({ page }) => {
+    await abrirBoletaNaLargura(page, larguraDaJanela);
+    const caixaDaLista = await medirNaTela(page.locator('.exposicao-lista'));
+    const caixasDosAtivos = [];
+    for (const simboloDoAtivo of SIMBOLOS_DOS_ATIVOS) caixasDosAtivos.push(await medirNaTela(page.getByTestId(`exposicao-${simboloDoAtivo}`)));
+    const [caixaDoPrimeiro, caixaDoSegundo, caixaDoTerceiro] = caixasDosAtivos;
+    if (ladoALado) {
+      expect(caixaDoSegundo.topo).toBeCloseTo(caixaDoPrimeiro.topo, 1);
+      expect(caixaDoTerceiro.topo).toBeCloseTo(caixaDoPrimeiro.topo, 1);
+      expect(caixaDoSegundo.esquerda).toBeCloseTo(caixaDoPrimeiro.direita, 1);
+      expect(caixaDoTerceiro.esquerda).toBeCloseTo(caixaDoSegundo.direita, 1);
+      expect(caixaDoTerceiro.direita).toBeCloseTo(caixaDaLista.direita, 1);
+      for (const caixaDoAtivo of caixasDosAtivos) expect(caixaDoAtivo.largura).toBeCloseTo(caixaDaLista.largura / 3, 0);
+    } else {
+      expect(caixaDoSegundo.topo).toBeCloseTo(caixaDoPrimeiro.fim, 1);
+      expect(caixaDoTerceiro.topo).toBeCloseTo(caixaDoSegundo.fim, 1);
+      for (const caixaDoAtivo of caixasDosAtivos) {
+        expect(caixaDoAtivo.esquerda).toBeCloseTo(caixaDaLista.esquerda, 1);
+        expect(caixaDoAtivo.largura).toBeCloseTo(caixaDaLista.largura, 1);
+      }
+    }
   });
 }
 

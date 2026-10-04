@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-// Ícones desenhados no próprio código, sem pacote de ícones (CA-40). São decorativos: o texto ao lado
+// Ícones desenhados no próprio código, sem pacote de ícones. São decorativos: o texto ao lado
 // diz o que significam, por isso ficam fora da leitura de tela. Cor e tamanho vêm do CSS de quem usa.
 type PropsDoIcone = { className?: string };
 
