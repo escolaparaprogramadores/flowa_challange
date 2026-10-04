@@ -100,7 +100,7 @@ test('CA-17: o painel mostra os três ativos e muda depois de uma ordem aceita',
   await conferirPainelDeExposicao(page, 'PETR4', exposicaoEsperada, LIMITE_DE_EXPOSICAO_POR_SIMBOLO - Math.abs(exposicaoEsperada));
 });
 
-test('CA-16 e CA-17: ordem que estoura o limite aparece rejeitada com o motivo e não muda a exposição', async ({ page }) => {
+test('CA-16 e CA-17: ordem que estoura o limite volta rejeitada com o motivo, entra "Rejeitada" no topo da lista e não muda a exposição', async ({ page }) => {
   // Leva VIIA4 até perto do limite com ordens válidas e grandes; a primeira que
   // não couber mais é a rejeição que o cenário quer ver.
   const leiturasDaExposicao: string[] = [];

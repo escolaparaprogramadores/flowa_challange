@@ -36,7 +36,8 @@ async function enviarOrdemPelaBoleta(paginaDaBoleta: Page, ordemDaBoleta: OrdemD
   const releituraDaLista = paginaDaBoleta.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'GET' && new URL(respostaHttp.url()).pathname === ROTA_DAS_ORDENS);
   await paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ }).click();
   const corpoDaCriacao = (await (await respostaDaCriacao).json()) as { clOrdId: string; status: string };
-  await releituraDaLista;
+  // RF-07 e CA-41: depois do envio a tela relê só a página 1.
+  expect(new URL((await releituraDaLista).url()).search).toBe('?page=1');
   await expect(paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
   return corpoDaCriacao;
 }
@@ -95,6 +96,11 @@ test('CA-14: sem ordens no banco, o cartão mostra o vazio com ícone e texto, s
   await expect(listaVazia).toHaveText(TEXTO_DA_LISTA_VAZIA);
   await expect(listaVazia.locator('svg')).toHaveCount(1);
   await expect(listaVazia.locator('svg')).toBeVisible();
+  // É o IconeDocumento da F3 (Icones.tsx): folha com a dobra no canto e duas linhas de texto.
+  await expect(listaVazia.locator('svg path')).toHaveCount(3);
+  await expect(listaVazia.locator('svg path').nth(0)).toHaveAttribute('d', 'M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-5-5z');
+  await expect(listaVazia.locator('svg path').nth(1)).toHaveAttribute('d', 'M14 3v5h5');
+  await expect(listaVazia.locator('svg path').nth(2)).toHaveAttribute('d', 'M9 13h6M9 17h6');
   await expect(cartaoCompraVenda(page).getByRole('table')).toHaveCount(0);
   await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, '06-vazio-1440.png'), fullPage: true });
 });
@@ -163,8 +169,19 @@ test('CA-15: erro de preenchimento (400) aparece na faixa vermelha com os erros 
   expect((await lerPrimeiraPaginaNoServidor(page)).total).toBe(totalAntes);
   await expect(celulaDaLinha(linhasDaLista(page).first(), 'identificador-do-envio')).toHaveText(identificadorDoTopoAntes!);
 
+  // RF-11: o envio seguinte (real, só segurado 1,5 s) tira a faixa já no começo, enquanto ainda está "Enviando…".
   await page.unroute('**' + ROTA_DE_CRIACAO_DE_ORDEM);
-  await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '1', preco: '10,00' });
+  await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, async (criacaoDaOrdemSegurada) => {
+    await new Promise((liberarRequisicaoSegurada) => setTimeout(liberarRequisicaoSegurada, 1_500));
+    await criacaoDaOrdemSegurada.continue();
+  });
+  await page.getByLabel(/^Quantidade de/).fill('1');
+  await page.getByLabel('Preço por ação (R$)').fill('10,00');
+  await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+  await expect(cartaoCompraVenda(page).getByTestId('selo-enviando')).toBeVisible();
+  await expect(faixaDaFalha).toHaveCount(0);
+  await expect(cartaoCompraVenda(page).getByTestId('selo-enviando')).toBeVisible();
+  await expect(cartaoCompraVenda(page).getByTestId('selo-enviando')).toHaveCount(0);
   await expect(faixaDaFalha).toHaveCount(0);
 });
 
@@ -263,18 +280,40 @@ const ROTULOS_DOS_CAMPOS_DA_ORDEM = [
   ['data', 'Data'], ['status', 'Status'], ['ativo', 'Ativo'], ['lado', 'Lado'], ['quantidade', 'Quantidade'],
   ['preco', 'Preço'], ['numero-da-ordem', 'Número da ordem'], ['identificador-do-envio', 'Identificador do envio'],
 ] as const;
-const QUANTIDADE_DE_ORDENS_DA_LISTA_CHEIA = 10;
+const QUANTIDADE_DE_ORDENS_NA_PAGINA = 10;
 
-// Página 1 cheia com os valores mais largos que a boleta aceita (99.999 a R$ 999,99). Compra e venda se
-// alternam, então a exposição volta a zero e as specs seguintes não herdam ativo perto do limite.
+// Página 1 cheia com os valores mais largos que a boleta aceita (99.999 a R$ 999,99) e uma "Rejeitada"
+// (selo mais largo). Nove ordens de PETR4 alternam compra e venda, então PETR4 termina perto do limite e
+// a segunda compra grande de VIIA4 estoura o limite. O afterEach zera tudo para as specs seguintes.
 async function gravarListaCheiaDeOrdensLargas(paginaDaBoleta: Page) {
   await apagarTodasAsOrdensNoServidor(paginaDaBoleta);
-  for (let posicaoDaOrdem = 0; posicaoDaOrdem < QUANTIDADE_DE_ORDENS_DA_LISTA_CHEIA; posicaoDaOrdem++) {
-    const ordemGravada = await paginaDaBoleta.request.post(ROTA_DE_CRIACAO_DE_ORDEM, {
-      data: { symbol: 'PETR4', side: posicaoDaOrdem % 2 === 0 ? 'buy' : 'sell', quantity: 99_999, price: 999.99 },
-    });
+  const ordensDaSemente = [
+    ...Array.from({ length: 9 }, (_, posicaoDaOrdem) => ({ symbol: 'PETR4', side: posicaoDaOrdem % 2 === 0 ? 'buy' : 'sell' })),
+    { symbol: 'VIIA4', side: 'buy' },
+    { symbol: 'VIIA4', side: 'buy' },
+  ];
+  const situacoesGravadas: string[] = [];
+  for (const ordemDaSemente of ordensDaSemente) {
+    const ordemGravada = await paginaDaBoleta.request.post(ROTA_DE_CRIACAO_DE_ORDEM, { data: { ...ordemDaSemente, quantity: 99_999, price: 999.99 } });
     expect(ordemGravada.status()).toBe(200);
+    situacoesGravadas.push(((await ordemGravada.json()) as { status: string }).status);
   }
+  expect(situacoesGravadas.at(-1)).toBe('rejected');
+}
+
+async function contarLinhasDeTextoDaCelula(celulaDaOrdem: Locator) {
+  return celulaDaOrdem.evaluate((celulaNaPagina) => {
+    const faixaDoTexto = document.createRange();
+    faixaDoTexto.selectNodeContents(celulaNaPagina);
+    return new Set([...faixaDoTexto.getClientRects()].map((caixaDaLinha) => Math.round(caixaDaLinha.top))).size;
+  });
+}
+
+async function conferirNadaRolaParaOLado(paginaDaBoleta: Page) {
+  const paginaCabeSemRolarParaOLado = await paginaDaBoleta.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+  expect(paginaCabeSemRolarParaOLado).toBe(true);
+  const molduraCabeSemRolar = await cartaoCompraVenda(paginaDaBoleta).locator('.tabela-de-ordens-moldura').evaluate((molduraNaPagina) => molduraNaPagina.scrollWidth <= molduraNaPagina.clientWidth);
+  expect(molduraCabeSemRolar).toBe(true);
 }
 
 test.describe('lista cheia de ordens largas', () => {
@@ -286,42 +325,86 @@ test.describe('lista cheia de ordens largas', () => {
     await apagarTodasAsOrdensNoServidor(page);
   });
 
-  for (const larguraDaJanela of [375, 860, 1440, 1920]) {
-    test(`RNF-02: em ${larguraDaJanela} px, com a página 1 cheia de valores largos, a página não rola para o lado`, async ({ page }) => {
+  // ASSUMI-04, cartão de 1030 px ou mais: a tabela inteira, cada código numa linha só (RF-03, CA-11).
+  for (const larguraDaJanela of [1440, 1920]) {
+    test(`CA-11 e RF-03: em ${larguraDaJanela} px, com o pior caso, cada ordem é uma linha da tabela e os códigos de 32 letras ficam inteiros numa linha`, async ({ page }) => {
       await page.setViewportSize({ width: larguraDaJanela, height: 900 });
       await page.goto('/');
-      await expect(linhasDaLista(page)).toHaveCount(QUANTIDADE_DE_ORDENS_DA_LISTA_CHEIA);
-      await expect(celulaDaLinha(linhasDaLista(page).first(), 'quantidade')).toHaveText('99.999');
-      await expect(celulaDaLinha(linhasDaLista(page).first(), 'preco')).toHaveText(formatadorDeReais.format(999.99));
-      const paginaCabeSemRolarParaOLado = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
-      expect(paginaCabeSemRolarParaOLado).toBe(true);
-      if (larguraDaJanela === 375) await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, '06-lista-375.png'), fullPage: true });
+      await expect(linhasDaLista(page)).toHaveCount(QUANTIDADE_DE_ORDENS_NA_PAGINA);
+      await expect(celulaDaLinha(linhasDaLista(page).first(), 'status').locator('.selo-da-ordem')).toHaveText('Rejeitada');
+      await expect(cartaoCompraVenda(page).locator('thead')).toBeVisible();
+      await conferirNadaRolaParaOLado(page);
+      for (let posicaoDaLinha = 0; posicaoDaLinha < QUANTIDADE_DE_ORDENS_NA_PAGINA; posicaoDaLinha++) {
+        const linhaDaOrdem = linhasDaLista(page).nth(posicaoDaLinha);
+        await expect(linhaDaOrdem, `linha ${posicaoDaLinha + 1}`).toHaveCSS('display', 'table-row');
+        for (const colunaDeCodigo of ['numero-da-ordem', 'identificador-do-envio']) {
+          const celulaDeCodigo = celulaDaLinha(linhaDaOrdem, colunaDeCodigo);
+          await expect(celulaDeCodigo, `linha ${posicaoDaLinha + 1} / ${colunaDeCodigo}`).toHaveText(/^[0-9a-f]{32}$/i);
+          expect(await contarLinhasDeTextoDaCelula(celulaDeCodigo), `linha ${posicaoDaLinha + 1} / ${colunaDeCodigo}`).toBe(1);
+          const codigoCabeInteiro = await celulaDeCodigo.evaluate((celulaNaPagina) => celulaNaPagina.scrollWidth <= celulaNaPagina.clientWidth);
+          expect(codigoCabeInteiro, `linha ${posicaoDaLinha + 1} / ${colunaDeCodigo}`).toBe(true);
+        }
+      }
+      if (larguraDaJanela === 1440) await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, '06-lista-cheia-1440.png'), fullPage: true });
     });
   }
 
-  for (const larguraDaJanela of [375, 860, 1280]) {
-    test(`CA-26 e ASSUMI-04: em ${larguraDaJanela} px cada ordem vira um bloco com os 8 campos rotulados, todos à vista dentro do cartão`, async ({ page }) => {
+  // ASSUMI-04, cartão de 800 a 1029 px: ainda uma ordem por linha da tabela; só os códigos quebram, no máximo em 2 linhas.
+  for (const larguraDaJanela of [860, 1280]) {
+    test(`ASSUMI-04: em ${larguraDaJanela} px, com o pior caso, a tabela continua com uma ordem por linha e cada código ocupa no máximo 2 linhas`, async ({ page }) => {
       await page.setViewportSize({ width: larguraDaJanela, height: 900 });
       await page.goto('/');
-      await expect(linhasDaLista(page)).toHaveCount(QUANTIDADE_DE_ORDENS_DA_LISTA_CHEIA);
-      // No modo em blocos o cabeçalho da tabela sai de cena: cada campo leva o próprio rótulo.
-      await expect(cartaoCompraVenda(page).locator('thead')).toBeHidden();
-      const caixaDoCartao = (await cartaoCompraVenda(page).boundingBox())!;
-      for (let posicaoDaLinha = 0; posicaoDaLinha < QUANTIDADE_DE_ORDENS_DA_LISTA_CHEIA; posicaoDaLinha++) {
+      await expect(linhasDaLista(page)).toHaveCount(QUANTIDADE_DE_ORDENS_NA_PAGINA);
+      await expect(cartaoCompraVenda(page).locator('thead')).toBeVisible();
+      await expect(cartaoCompraVenda(page).locator('thead th')).toHaveText(COLUNAS_DA_LISTA);
+      await conferirNadaRolaParaOLado(page);
+      for (let posicaoDaLinha = 0; posicaoDaLinha < QUANTIDADE_DE_ORDENS_NA_PAGINA; posicaoDaLinha++) {
         const linhaDaOrdem = linhasDaLista(page).nth(posicaoDaLinha);
-        await expect(linhaDaOrdem, `linha ${posicaoDaLinha + 1}`).toHaveCSS('display', 'block');
+        await expect(linhaDaOrdem, `linha ${posicaoDaLinha + 1}`).toHaveCSS('display', 'table-row');
+        for (const colunaDeCodigo of ['numero-da-ordem', 'identificador-do-envio']) {
+          const celulaDeCodigo = celulaDaLinha(linhaDaOrdem, colunaDeCodigo);
+          await expect(celulaDeCodigo, `linha ${posicaoDaLinha + 1} / ${colunaDeCodigo}`).toHaveText(/^[0-9a-f]{32}$/i);
+          expect(await contarLinhasDeTextoDaCelula(celulaDeCodigo), `linha ${posicaoDaLinha + 1} / ${colunaDeCodigo}`).toBeLessThanOrEqual(2);
+        }
+      }
+      if (larguraDaJanela === 1280) await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, '06-lista-cheia-1280.png'), fullPage: true });
+    });
+  }
+
+  // ASSUMI-04, cartão com menos de 800 px: bloco em grade, rótulo em cima de cada valor, nada fora do cartão (CA-26).
+  for (const { larguraDaJanela, colunasDoBloco, alturaMaximaDoBlocoNaTela } of [
+    { larguraDaJanela: 375, colunasDoBloco: 2, alturaMaximaDoBlocoNaTela: 260 },
+    { larguraDaJanela: 861, colunasDoBloco: 2, alturaMaximaDoBlocoNaTela: 260 },
+    { larguraDaJanela: 1180, colunasDoBloco: 4, alturaMaximaDoBlocoNaTela: 180 },
+  ]) {
+    test(`CA-26 e ASSUMI-04: em ${larguraDaJanela} px cada ordem vira um bloco de ${colunasDoBloco} colunas com os 8 campos rotulados, rótulo em cima do valor, todos dentro do cartão`, async ({ page }) => {
+      await page.setViewportSize({ width: larguraDaJanela, height: 900 });
+      await page.goto('/');
+      await expect(linhasDaLista(page)).toHaveCount(QUANTIDADE_DE_ORDENS_NA_PAGINA);
+      // No bloco o cabeçalho da tabela sai de cena: cada campo leva o próprio rótulo.
+      await expect(cartaoCompraVenda(page).locator('thead')).toBeHidden();
+      await conferirNadaRolaParaOLado(page);
+      const caixaDoCartao = (await cartaoCompraVenda(page).boundingBox())!;
+      for (let posicaoDaLinha = 0; posicaoDaLinha < QUANTIDADE_DE_ORDENS_NA_PAGINA; posicaoDaLinha++) {
+        const linhaDaOrdem = linhasDaLista(page).nth(posicaoDaLinha);
+        await expect(linhaDaOrdem, `linha ${posicaoDaLinha + 1}`).toHaveCSS('display', 'grid');
+        const colunasDaGradeDoBloco = await linhaDaOrdem.evaluate((linhaNaPagina) => getComputedStyle(linhaNaPagina).gridTemplateColumns.split(' ').length);
+        expect(colunasDaGradeDoBloco, `linha ${posicaoDaLinha + 1}`).toBe(colunasDoBloco);
+        const caixaDaOrdem = (await linhaDaOrdem.boundingBox())!;
+        expect(caixaDaOrdem.height, `linha ${posicaoDaLinha + 1}: altura do bloco`).toBeLessThanOrEqual(alturaMaximaDoBlocoNaTela);
         for (const [colunaDoCampo, rotuloDoCampo] of ROTULOS_DOS_CAMPOS_DA_ORDEM) {
           const celulaDoCampo = celulaDaLinha(linhaDaOrdem, colunaDoCampo);
           const nomeDoCampo = `linha ${posicaoDaLinha + 1} / ${colunaDoCampo}`;
           await expect(celulaDoCampo, nomeDoCampo).toBeVisible();
           expect(await celulaDoCampo.evaluate((celulaNaPagina) => getComputedStyle(celulaNaPagina, '::before').content), nomeDoCampo).toBe(`"${rotuloDoCampo}"`);
+          // Rótulo em cima do valor: a célula empilha em coluna, sem afastar rótulo e valor para as pontas.
+          await expect(celulaDoCampo, nomeDoCampo).toHaveCSS('flex-direction', 'column');
           const caixaDoCampo = (await celulaDoCampo.boundingBox())!;
           expect(caixaDoCampo.x, `${nomeDoCampo}: começa dentro do cartão`).toBeGreaterThanOrEqual(caixaDoCartao.x);
           expect(caixaDoCampo.x + caixaDoCampo.width, `${nomeDoCampo}: termina dentro do cartão`).toBeLessThanOrEqual(caixaDoCartao.x + caixaDoCartao.width);
         }
       }
-      const molduraCabeSemRolar = await cartaoCompraVenda(page).locator('.tabela-de-ordens-moldura').evaluate((molduraNaPagina) => molduraNaPagina.scrollWidth <= molduraNaPagina.clientWidth);
-      expect(molduraCabeSemRolar).toBe(true);
+      if (larguraDaJanela === 375) await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, '06-lista-375.png'), fullPage: true });
     });
   }
 });

@@ -204,6 +204,11 @@ describe('apagarTodasAsOrdens', () => {
     expect(opcoesDaChamada.method).toBe('DELETE');
   });
 
+  it('400 do servidor também lança o erro de apagamento, sem repassar o corpo cru', async () => {
+    simularServidorRespondendoComJson(400, { status: 'validation_error', message: 'Pedido inválido.', errors: [] });
+    await expect(apagarTodasAsOrdens()).rejects.toThrow('Não foi possível apagar as ordens agora. Tente de novo em instantes.');
+  });
+
   it('503 do servidor lança erro com mensagem clara, sem o nome do serviço interno', async () => {
     simularServidorRespondendoComJson(503, { status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator.' });
     await expect(apagarTodasAsOrdens()).rejects.toThrow('Não foi possível apagar as ordens agora. Tente de novo em instantes.');

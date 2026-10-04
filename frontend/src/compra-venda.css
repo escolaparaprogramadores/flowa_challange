@@ -87,32 +87,53 @@
 .linha-da-ordem-hora { margin-top: var(--espaco-0-5); font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-apagado); }
 .linha-da-ordem-codigo { font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-secundario); }
 
-/* A tabela inteira só cabe com o cartão largo (1440 px de tela ou mais). Abaixo disso, cada ordem
-   vira um bloco com os campos empilhados e rotulados: nada fica escondido atrás de rolagem. */
-@container (max-width: 1030px) {
+/* Três jeitos de mostrar a mesma lista, pela largura do próprio cartão (a grade da casca muda a largura
+   dele sem seguir a janela):
+   - 1030 px ou mais (1440 px de tela em diante): a tabela da maquete inteira, códigos numa linha só;
+   - 800 a 1029 px: a mesma tabela, uma ordem por linha, com os dois códigos quebrando dentro da célula;
+   - menos de 800 px: cada ordem vira um bloco em grade, rótulo em cima do valor.
+   Em nenhum dos três há rolagem para o lado nem campo escondido. */
+@container (max-width: 1029px) {
+  .tabela-de-ordens td.linha-da-ordem-codigo { white-space: normal; overflow-wrap: anywhere; }
+}
+
+@container (max-width: 799px) {
   /* Cada campo leva o próprio rótulo (td::before); o cabeçalho da tabela sai de cena. */
   .tabela-de-ordens thead { display: none; }
-  .tabela-de-ordens, .tabela-de-ordens tbody, .tabela-de-ordens tr { display: block; }
-  .tabela-de-ordens tr { padding: var(--espaco-2) 0; border-top: 1px solid var(--cor-divisor); }
+  .tabela-de-ordens, .tabela-de-ordens tbody { display: block; }
+  .tabela-de-ordens tr {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--espaco-2-5) var(--espaco-3);
+    padding: var(--espaco-3-5) var(--espaco-4);
+    border-top: 1px solid var(--cor-divisor);
+    background: var(--cor-card);
+    transition: background var(--transicao);
+  }
   .tabela-de-ordens tbody tr:first-child { border-top: 0; }
+  .tabela-de-ordens tbody tr:hover { background: var(--cor-hover); }
   .tabela-de-ordens td {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--espaco-3);
-    padding: var(--espaco-1) var(--espaco-4);
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--espaco-1);
+    min-width: 0;
+    padding: 0;
     border-top: 0;
-    white-space: normal;
+    background: transparent;
   }
+  .tabela-de-ordens tbody tr:hover td { background: transparent; }
   .tabela-de-ordens td::before {
     content: attr(data-rotulo);
-    flex: none;
     font-size: var(--texto-cabecalho-da-tabela);
     font-weight: 700;
     letter-spacing: var(--letra-cabecalho-da-tabela);
     text-transform: uppercase;
     color: var(--cor-texto-rotulo);
   }
-  .linha-da-ordem-instante { text-align: right; }
-  .linha-da-ordem-codigo { min-width: 0; text-align: right; overflow-wrap: anywhere; }
+  .tabela-de-ordens td.linha-da-ordem-codigo { grid-column: span 2; }
+}
+
+@container (max-width: 459px) {
+  .tabela-de-ordens tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
