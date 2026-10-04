@@ -200,7 +200,9 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             return orderOutcome;
         })).ToList();
         await enoughOrdersStoredToFireTheDeletes.Task.WaitAsync(TimeSpan.FromMinutes(2));
-        var ordersInProgressCountWhenTheDeletesFired = ordersBeforeTheDeletes.Count(orderBeforeTheDeletes => !orderBeforeTheDeletes.IsCompleted);
+        // Conta pelas ordens já gravadas, não por Task.IsCompleted: a tarefa que dispara o sinal ainda não terminou
+        // quando o teste acorda e entraria como "em curso", somando uma a mais.
+        var ordersInProgressCountWhenTheDeletesFired = OrdersPerWave - Volatile.Read(ref storedOrdersCountBeforeTheDeletes);
         var deleteResponses = await Task.WhenAll(Enumerable.Range(0, SimultaneousDeletesPerRound)
             .Select(_ => Task.Run(() => orderAccumulatorClient.DeleteAsync("/api/orders")))).WaitAsync(TimeSpan.FromMinutes(2));
         var ordersAfterTheDeletes = NewOrdersMixingSymbolsAndSides(OrdersPerWave, orderQuantityGenerator)
