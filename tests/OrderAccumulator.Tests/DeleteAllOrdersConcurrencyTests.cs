@@ -36,7 +36,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await orderInsideTheDoor.Task.WaitAsync(StepDeadline);
 
         var storedDeleteStarted = false;
-        var deleteAll = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
+        var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
         {
             storedDeleteStarted = true;
             return Task.CompletedTask;
@@ -44,7 +44,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await Task.Delay(BlockedStepWindow);
         var storedDeleteStartedWhileTheOrderWasInside = storedDeleteStarted;
         releaseTheOrder.SetResult();
-        await Task.WhenAll(orderInProgress, deleteAll).WaitAsync(StepDeadline);
+        await Task.WhenAll(orderInProgress, deleteAllOrdersTask).WaitAsync(StepDeadline);
 
         Assert.False(storedDeleteStartedWhileTheOrderWasInside);
         Assert.True(storedDeleteStarted);
@@ -58,7 +58,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         symbolExposureMemory.LoadStoredExposures([new SymbolExposure("PETR4", 5_000m)]);
         var deleteInsideTheDoor = new TaskCompletionSource();
         var releaseTheDelete = new TaskCompletionSource();
-        var deleteAll = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(async () =>
+        var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(async () =>
         {
             deleteInsideTheDoor.SetResult();
             await releaseTheDelete.Task;
@@ -76,7 +76,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await Task.Delay(BlockedStepWindow);
         var orderStartedWhileTheDeleteWasInside = orderProcessingStarted;
         releaseTheDelete.SetResult();
-        await Task.WhenAll(deleteAll, orderArrivingDuringDelete).WaitAsync(StepDeadline);
+        await Task.WhenAll(deleteAllOrdersTask, orderArrivingDuringDelete).WaitAsync(StepDeadline);
 
         Assert.False(orderStartedWhileTheDeleteWasInside);
         Assert.Equal([new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)], symbolExposureMemory.CurrentSymbolExposures());
@@ -89,20 +89,20 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var firstOrderInside = new TaskCompletionSource();
         var secondOrderInside = new TaskCompletionSource();
 
-        var firstOrder = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
+        var firstOrderTask = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
         {
             firstOrderInside.SetResult();
             await secondOrderInside.Task;
             return AcceptedBuyOutcome("PETR4", 1, 1.00m);
         }, CancellationToken.None);
-        var secondOrder = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
+        var secondOrderTask = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
         {
             secondOrderInside.SetResult();
             await firstOrderInside.Task;
             return AcceptedBuyOutcome("VALE3", 1, 1.00m);
         }, CancellationToken.None);
 
-        await Task.WhenAll(firstOrder, secondOrder).WaitAsync(StepDeadline);
+        await Task.WhenAll(firstOrderTask, secondOrderTask).WaitAsync(StepDeadline);
     }
 
     // Uma fila contínua de ordens não pode deixar o apagar esperando para sempre: ordem nova que chega
@@ -113,7 +113,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var symbolExposureMemory = new SymbolExposureMemory();
         var firstOrderInside = new TaskCompletionSource();
         var releaseTheFirstOrder = new TaskCompletionSource();
-        var firstOrder = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
+        var firstOrderTask = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
         {
             firstOrderInside.SetResult();
             await releaseTheFirstOrder.Task;
@@ -122,13 +122,13 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await firstOrderInside.Task.WaitAsync(StepDeadline);
 
         var stepsInOrder = new List<string>();
-        var deleteAll = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
+        var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
         {
             lock (stepsInOrder) stepsInOrder.Add("apagar");
             return Task.CompletedTask;
         }, CancellationToken.None);
         await Task.Delay(BlockedStepWindow);
-        var laterOrder = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(() =>
+        var laterOrderTask = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(() =>
         {
             lock (stepsInOrder) stepsInOrder.Add("ordem que chegou depois");
             return Task.FromResult(AcceptedBuyOutcome("VALE3", 1, 1.00m));
@@ -136,7 +136,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await Task.Delay(BlockedStepWindow);
         var stepsWhileTheFirstOrderWasInside = stepsInOrder.ToList();
         releaseTheFirstOrder.SetResult();
-        await Task.WhenAll(firstOrder, deleteAll, laterOrder).WaitAsync(StepDeadline);
+        await Task.WhenAll(firstOrderTask, deleteAllOrdersTask, laterOrderTask).WaitAsync(StepDeadline);
 
         Assert.Empty(stepsWhileTheFirstOrderWasInside);
         Assert.Equal(["apagar", "ordem que chegou depois"], stepsInOrder);
@@ -158,14 +158,14 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             var orderInProgress = orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
             await blockedOrderProcessor.OrderStored.WaitAsync(StepDeadline);
             IReadOnlyList<SymbolExposure>? exposureMemorySeenByTheDelete = null;
-            var deleteAll = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
+            var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
             {
                 exposureMemorySeenByTheDelete = symbolExposureMemory.CurrentSymbolExposures();
                 return Task.CompletedTask;
             }, CancellationToken.None);
             await Task.Delay(20);
             blockedOrderProcessor.ReleaseTheStoredOrder();
-            await Task.WhenAll(orderInProgress, deleteAll).WaitAsync(StepDeadline);
+            await Task.WhenAll(orderInProgress, deleteAllOrdersTask).WaitAsync(StepDeadline);
 
             Assert.Equal([new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)], exposureMemorySeenByTheDelete);
             Assert.Equal([new("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)], symbolExposureMemory.CurrentSymbolExposures());
