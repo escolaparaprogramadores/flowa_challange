@@ -21,3 +21,7 @@ CREATE TABLE IF NOT EXISTS orders (
     reject_reason text,
     received_at   timestamptz NOT NULL DEFAULT now()
 );
+
+-- A lista da tela vem da ordem mais nova para a mais antiga (GET /api/orders). Sem CONCURRENTLY porque
+-- este script roda dentro da transação da migração.
+CREATE INDEX IF NOT EXISTS orders_received_at_id_idx ON orders (received_at DESC, id DESC);

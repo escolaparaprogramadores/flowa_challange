@@ -10,14 +10,20 @@ public sealed class OrderProcessorWithMetrics(
 {
     public async Task<OrderOutcome> ProcessIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
     {
-        var orderOutcome = await storedOrderProcessor.ProcessIncomingOrderAsync(incomingOrder, cancellationToken);
+        // Gravar no banco e somar na memória acontecem juntos, sem um "Deletar tudo" no meio.
+        var orderOutcome = await symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
+        {
+            var storedOrderOutcome = await storedOrderProcessor.ProcessIncomingOrderAsync(incomingOrder, cancellationToken);
+            if (storedOrderOutcome is { IsRepeat: false, Accepted: true })
+                symbolExposureMemory.ApplyAcceptedOrder(storedOrderOutcome);
+            return storedOrderOutcome;
+        }, cancellationToken);
         if (orderOutcome.IsRepeat)
             return orderOutcome;
 
         var orderOutcomeTags = OrderMetricTags.OrderOutcomeTags(orderOutcome.Symbol, orderOutcome.Side);
         if (orderOutcome.Accepted)
         {
-            symbolExposureMemory.ApplyAcceptedOrder(orderOutcome);
             orderMetricsClient.Increment(OrderMetricNames.AcceptedOrders, tags: orderOutcomeTags);
         }
         else

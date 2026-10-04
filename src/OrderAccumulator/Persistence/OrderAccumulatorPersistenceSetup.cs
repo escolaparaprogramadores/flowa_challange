@@ -20,6 +20,7 @@ public static class OrderAccumulatorPersistenceSetup
         orderAccumulatorServices.AddSingleton(_ => NpgsqlDataSource.Create(orderDatabaseConnectionString));
         orderAccumulatorServices.AddSingleton<IOrderProcessor, PostgresOrderProcessor>();
         orderAccumulatorServices.AddSingleton<IExposureReader, PostgresExposureReader>();
+        orderAccumulatorServices.AddSingleton<PostgresOrderHistory>();
         return orderAccumulatorServices;
     }
 
