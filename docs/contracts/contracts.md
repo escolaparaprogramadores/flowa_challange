@@ -71,6 +71,43 @@ Se o OrderAccumulator não responder em 5 s ou estiver fora do ar, devolve `503`
 `communication_error` da ordem, trocando a mensagem por
 `"Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes."`.
 
+### OrderAccumulator — `GET /api/orders?page=<n>` e `DELETE /api/orders`
+
+`GET` lista as ordens gravadas no banco, 10 por página, da mais nova para a mais velha:
+
+```json
+{
+  "page": 1,
+  "pageSize": 10,
+  "total": 12,
+  "orders": [
+    { "receivedAt": "2026-10-04T12:00:00Z", "status": "accepted", "symbol": "PETR4", "side": "buy",
+      "quantity": 100, "price": 10.50, "orderId": "…", "clOrdId": "…" }
+  ]
+}
+```
+
+- `receivedAt` é ISO-8601 em UTC. `status` é `"accepted"` ou `"rejected"`; `symbol` pode ser `null`.
+- O tamanho da página é fixo no servidor; `pageSize` vindo do cliente é ignorado.
+- Página `0`, negativa, texto ou acima de `1000` → `400` com
+  `{ "status": "validation_error", "message": "…", "errors": [ { "field": "page", "message": "…" } ] }`.
+- Página além da última → `200` com `orders: []` e o `total` real.
+
+`DELETE` apaga todas as ordens e zera a exposição de `PETR4`, `VALE3` e `VIIA4` numa transação só
+(tudo ou nada) e responde `204` sem corpo. Não pede senha e não libera CORS.
+
+### OrderGenerator — `GET /api/orders?page=<n>` e `DELETE /api/orders`
+
+Repassam as duas rotas acima para o OrderAccumulator, com o mesmo prazo de 5 s do `GET /api/exposures`.
+
+- `GET` leva só o `page`, sem mudar, e devolve o `200` ou o `400` do OrderAccumulator com o mesmo corpo.
+- `DELETE` devolve o `204` sem corpo. Outro verbo em `/api/orders` (fora `POST`, a ordem) não apaga nada.
+- OrderAccumulator fora do ar, sem resposta em 5 s ou com outro status → `503` com o corpo
+  `communication_error` e a mensagem
+  `"Não foi possível ler as ordens no OrderAccumulator. Tente de novo em instantes."` (listar) ou
+  `"Não foi possível apagar as ordens no OrderAccumulator. Tente de novo em instantes."` (apagar).
+- Nenhuma das duas manda `Access-Control-Allow-Origin`: outra página não consegue chamá-las.
+
 ### Os dois apps — `GET /health` e `GET /version`
 
 `/health` responde `200` com o texto `Healthy` quando o processo está de pé, sem depender da sessão
@@ -146,7 +183,7 @@ sozinho.
 | Processo | Porta | Para quê |
 |---|---|---|
 | OrderGenerator | 8080 (HTTP); 8443 (HTTPS, só fora do compose) | página, `/api/*`, `/health`, `/version` |
-| OrderAccumulator | 8081 (HTTP); 8444 (HTTPS, só fora do compose) | `GET /api/exposures`, `/health`, `/version` |
+| OrderAccumulator | 8081 (HTTP); 8444 (HTTPS, só fora do compose) | `GET /api/exposures`, `GET /api/orders`, `DELETE /api/orders`, `/health`, `/version` |
 | OrderAccumulator | 9876 (TCP) | acceptor FIX |
 | PostgreSQL | 5432 | banco do OrderAccumulator |
 
