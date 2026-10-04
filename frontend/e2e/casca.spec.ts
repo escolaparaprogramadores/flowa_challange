@@ -36,6 +36,8 @@ test('CA-1: no alto há a barra com o logo à esquerda e a linha fina embaixo; a
   await expect(barraDoTopo).toHaveCSS('border-bottom-style', 'solid');
   await expect(barraDoTopo).toHaveCSS('border-bottom-color', COR_DA_LINHA_DO_TOPO);
   await expect(page.getByRole('navigation')).toHaveCount(0);
+  // Os links do Datadog entram no topo (F4); o título e o texto de apoio não têm link.
+  await expect(page.locator('.cabecalho-da-pagina').getByRole('link')).toHaveCount(0);
 
   const caixaDaBarra = await medirNaTela(barraDoTopo);
   const caixaDoLogo = await medirNaTela(barraDoTopo.getByRole('img', { name: 'Base investimentos' }));
@@ -58,11 +60,22 @@ test('CA-2: com o navegador em 100%, a página aparece em 90% e um texto de 15 p
 
   const textoDeApoio = page.locator('.apoio');
   await expect(textoDeApoio).toHaveCSS('font-size', '15px');
-  // A boleta tem 400 px de CSS; o quanto ela mede na tela é a escala real aplicada a tudo, letras inclusive.
+  // Letra na tela = tamanho de CSS × zoom efetivo do próprio parágrafo, que o Chrome informa em currentCSSZoom.
+  const letraDoApoioNaTela = await textoDeApoio.evaluate(
+    (apoioNaPagina) => parseFloat(getComputedStyle(apoioNaPagina).fontSize) * (apoioNaPagina as HTMLElement & { currentCSSZoom: number }).currentCSSZoom,
+  );
+  expect(letraDoApoioNaTela).toBeCloseTo(13.5, 3);
+  // A linha do parágrafo tem 1,6 × 15 = 24 px de CSS; na tela, cada linha mede 21,6 px.
+  const alturaDeUmaLinhaNaTela = await textoDeApoio.evaluate((apoioNaPagina) => {
+    const textoInteiro = document.createRange();
+    textoInteiro.selectNodeContents(apoioNaPagina);
+    const quantidadeDeLinhas = new Set([...textoInteiro.getClientRects()].map((pedacoDaLinha) => Math.round(pedacoDaLinha.top))).size;
+    return apoioNaPagina.getBoundingClientRect().height / quantidadeDeLinhas;
+  });
+  expect(alturaDeUmaLinhaNaTela).toBeCloseTo(24 * ESCALA_DA_PAGINA, 0);
+  // A boleta tem 400 px de CSS; na tela, a mesma escala vale para as caixas.
   const larguraDaBoletaNaTela = (await medirNaTela(page.getByRole('form', { name: 'Boleta de ordem' }))).largura;
-  const escalaMedidaNaTela = larguraDaBoletaNaTela / LARGURA_DA_NOVA_ORDEM_EM_CSS;
-  expect(escalaMedidaNaTela).toBeCloseTo(ESCALA_DA_PAGINA, 3);
-  expect(15 * escalaMedidaNaTela).toBeCloseTo(13.5, 2);
+  expect(larguraDaBoletaNaTela / LARGURA_DA_NOVA_ORDEM_EM_CSS).toBeCloseTo(ESCALA_DA_PAGINA, 3);
   await page.screenshot({ path: test.info().outputPath('ca-2-pagina-em-90.png') });
 });
 
@@ -73,6 +86,10 @@ for (const larguraDaJanela of [1440, 1920]) {
     const larguraEsperadaDoConteudoEmCss = Math.min(LARGURA_MAXIMA_DO_CONTEUDO_EM_CSS, larguraDaJanelaEmCss - 2 * MARGEM_LATERAL_EM_CSS);
     const caixaDoConteudo = await medirNaTela(page.getByRole('banner'));
     expect(caixaDoConteudo.largura / ESCALA_DA_PAGINA).toBeCloseTo(larguraEsperadaDoConteudoEmCss, 0);
+    // Topo e cartões ocupam a mesma faixa: a grade não pode ser mais larga nem mais estreita que o topo.
+    const caixaDaGrade = await medirNaTela(page.getByRole('main'));
+    expect(caixaDaGrade.esquerda).toBeCloseTo(caixaDoConteudo.esquerda, 1);
+    expect(caixaDaGrade.largura).toBeCloseTo(caixaDoConteudo.largura, 1);
     expect(caixaDoConteudo.esquerda / ESCALA_DA_PAGINA).toBeGreaterThanOrEqual(MARGEM_LATERAL_EM_CSS - 0.5);
     // Centralizado: a faixa vazia da esquerda é igual à da direita.
     expect(caixaDoConteudo.esquerda).toBeCloseTo(larguraDaJanela - caixaDoConteudo.direita, 0);
@@ -87,16 +104,44 @@ test('CA-4: o fundo tem brilho verde no alto e uma grade fina que some de cima p
   await abrirBoletaNaLargura(page, 1440);
   const desenhoDoFundo = await page.evaluate(() => {
     const estiloDoFundo = getComputedStyle(document.body, '::before');
-    return { imagens: estiloDoFundo.backgroundImage, mascara: estiloDoFundo.maskImage, posicao: estiloDoFundo.position, camada: estiloDoFundo.zIndex, cliques: estiloDoFundo.pointerEvents };
+    return {
+      conteudo: estiloDoFundo.content,
+      altura: estiloDoFundo.height,
+      imagens: estiloDoFundo.backgroundImage,
+      mascara: estiloDoFundo.maskImage,
+      posicao: estiloDoFundo.position,
+      camada: estiloDoFundo.zIndex,
+      cliques: estiloDoFundo.pointerEvents,
+    };
   });
+  expect(desenhoDoFundo).toMatchObject({ conteudo: '""', altura: '900px' });
   expect(desenhoDoFundo.imagens).toContain('radial-gradient(60% 520px at 50% -140px, rgba(79, 227, 176, 0.11), rgba(0, 0, 0, 0) 70%)');
   expect(desenhoDoFundo.imagens).toContain('linear-gradient(to right, rgba(232, 239, 238, 0.035) 1px, rgba(0, 0, 0, 0) 1px)');
   expect(desenhoDoFundo.imagens).toContain('linear-gradient(rgba(232, 239, 238, 0.035) 1px, rgba(0, 0, 0, 0) 1px)');
   expect(desenhoDoFundo.mascara).toBe('linear-gradient(rgb(0, 0, 0) 0px, rgba(0, 0, 0, 0) 100%)');
   expect(desenhoDoFundo).toMatchObject({ posicao: 'absolute', camada: '-1', cliques: 'none' });
+
+  // Prova pela tela: no alto, num ponto vazio, o pixel é mais verde que o fundo liso; embaixo, depois
+  // que a grade some (900 px de CSS = 810 px na tela), o pixel volta a ser o fundo liso #081113.
+  const printDaTela = await page.screenshot();
+  const [pixelDoAlto, pixelDeBaixo] = await page.evaluate(async (printEmBase64) => {
+    const printNaPagina = new Image();
+    printNaPagina.src = 'data:image/png;base64,' + printEmBase64;
+    await printNaPagina.decode();
+    const telaDeLeitura = document.createElement('canvas');
+    telaDeLeitura.width = printNaPagina.width;
+    telaDeLeitura.height = printNaPagina.height;
+    const pincelDeLeitura = telaDeLeitura.getContext('2d')!;
+    pincelDeLeitura.drawImage(printNaPagina, 0, 0);
+    const lerCorDoPixel = (posicaoX: number, posicaoY: number) => [...pincelDeLeitura.getImageData(posicaoX, posicaoY, 1, 1).data.slice(0, 3)];
+    return [lerCorDoPixel(720, 4), lerCorDoPixel(8, 990)];
+  }, printDaTela.toString('base64'));
+  // O canvas pode mudar 1 ponto por canal ao converter a cor do print.
+  [8, 17, 19].forEach((canalDoFundoLiso, indiceDoCanal) => expect(Math.abs(pixelDeBaixo[indiceDoCanal] - canalDoFundoLiso)).toBeLessThanOrEqual(1));
+  expect(pixelDoAlto[1] - pixelDeBaixo[1], `verde no alto ${pixelDoAlto} x embaixo ${pixelDeBaixo}`).toBeGreaterThanOrEqual(8);
 });
 
-for (const larguraDaJanela of [1440, 1920]) {
+for (const larguraDaJanela of [861, 1280, 1440, 1920]) {
   test(`CA-7: em ${larguraDaJanela} px, abaixo dos ativos, a resposta (mais larga) e a Nova ordem (400 px) começam e terminam na mesma altura`, async ({ page }) => {
     await abrirBoletaNaLargura(page, larguraDaJanela);
     const cartaoDaEsquerda = page.locator('section.resposta');
