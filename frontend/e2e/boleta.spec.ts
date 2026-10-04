@@ -7,8 +7,13 @@ const COR_DA_BORDA_DO_TRILHO = 'rgb(30, 50, 54)';
 const COR_DO_SIMBOLO_ESCOLHIDO = 'rgb(232, 239, 238)';
 const COR_DO_TEXTO_DO_SIMBOLO_ESCOLHIDO = 'rgb(8, 17, 19)';
 const COR_DO_ACENTO = 'rgb(79, 227, 176)';
-const BRILHO_VERDE = 'rgba(79, 227, 176';
-const BRILHO_CORAL = 'rgba(255, 164, 151';
+const BRILHO_DA_OPCAO_COMPRA = 'rgba(79, 227, 176, 0.35) 0px 0px 18px 0px';
+const BRILHO_DA_OPCAO_VENDA = 'rgba(255, 164, 151, 0.32) 0px 0px 18px 0px';
+const BRILHO_DO_ENVIAR_COMPRA = 'rgba(79, 227, 176, 0.45) 0px 10px 28px -6px';
+const BRILHO_DO_ENVIAR_VENDA = 'rgba(255, 164, 151, 0.42) 0px 10px 28px -6px';
+const ANEL_VERDE_DO_FOCO = 'rgba(79, 227, 176, 0.22) 0px 0px 0px 3px';
+// Desenho do IconeEscudo (Icones.tsx): prende a nota ao escudo e não a qualquer ícone.
+const DESENHO_DO_ESCUDO = 'M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z';
 const SIMBOLOS_NA_ORDEM = ['PETR4', 'VALE3', 'VIIA4'];
 
 function boletaDaPagina(paginaDaBoleta: Page) {
@@ -144,9 +149,9 @@ test('CA-27: o texto dos botões de símbolo tem contraste de pelo menos 4,5:1, 
 test('CA-24: alternador Compra/Venda no trilho escuro de cantos 16px, com brilho verde na compra e coral na venda', async ({ page }) => {
   const alternadorDeLado = boletaDaPagina(page).getByRole('group', { name: 'Lado da ordem' });
   expect(await lerEstiloCalculado(alternadorDeLado, ['background-color', 'border-top-left-radius'])).toEqual({ 'background-color': COR_DO_TRILHO, 'border-top-left-radius': '16px' });
-  await expect.poll(async () => (await lerEstiloCalculado(alternadorDeLado.getByRole('button', { name: 'Compra' }), ['box-shadow']))['box-shadow']).toContain(BRILHO_VERDE);
+  await expect.poll(async () => (await lerEstiloCalculado(alternadorDeLado.getByRole('button', { name: 'Compra' }), ['box-shadow']))['box-shadow']).toBe(BRILHO_DA_OPCAO_COMPRA);
   await alternadorDeLado.getByRole('button', { name: 'Venda' }).click();
-  await expect.poll(async () => (await lerEstiloCalculado(alternadorDeLado.getByRole('button', { name: 'Venda' }), ['box-shadow']))['box-shadow']).toContain(BRILHO_CORAL);
+  await expect.poll(async () => (await lerEstiloCalculado(alternadorDeLado.getByRole('button', { name: 'Venda' }), ['box-shadow']))['box-shadow']).toBe(BRILHO_DA_OPCAO_VENDA);
   await expect.poll(async () => (await lerEstiloCalculado(alternadorDeLado.getByRole('button', { name: 'Compra' }), ['box-shadow']))['box-shadow']).toBe('none');
 });
 
@@ -160,9 +165,9 @@ test('CA-24: rótulos em maiúsculas pequenas, campos com cantos 14px e anel ver
   expect((await lerEstiloCalculado(molduraDaQuantidade, ['border-top-left-radius']))['border-top-left-radius']).toBe('14px');
   await campoDoPreco.focus();
   await expect.poll(async () => lerEstiloCalculado(campoDoPreco, ['border-top-color', 'box-shadow'])).toMatchObject({ 'border-top-color': COR_DO_ACENTO });
-  expect((await lerEstiloCalculado(campoDoPreco, ['box-shadow']))['box-shadow']).toContain(BRILHO_VERDE);
+  await expect.poll(async () => (await lerEstiloCalculado(campoDoPreco, ['box-shadow']))['box-shadow']).toBe(ANEL_VERDE_DO_FOCO);
   await boletaDaPagina(page).getByLabel(/^Quantidade de/).focus();
-  await expect.poll(async () => (await lerEstiloCalculado(molduraDaQuantidade, ['box-shadow']))['box-shadow']).toContain(BRILHO_VERDE);
+  await expect.poll(async () => (await lerEstiloCalculado(molduraDaQuantidade, ['box-shadow']))['box-shadow']).toBe(ANEL_VERDE_DO_FOCO);
 });
 
 test('CA-24: quantidade em número grande Sora 22px e resumo numa caixa com o total em número grande', async ({ page }) => {
@@ -194,9 +199,9 @@ test('CA-24: botão de enviar com 52px de altura, cantos 14px e brilho na cor do
   const estiloDoBotaoDeCompra = await lerEstiloCalculado(botaoDeEnviar, ['height', 'border-top-left-radius', 'box-shadow']);
   expect(lerPixels(estiloDoBotaoDeCompra.height)).toBeCloseTo(52, 1);
   expect(estiloDoBotaoDeCompra['border-top-left-radius']).toBe('14px');
-  expect(estiloDoBotaoDeCompra['box-shadow']).toContain(BRILHO_VERDE);
+  expect(estiloDoBotaoDeCompra['box-shadow']).toBe(BRILHO_DO_ENVIAR_COMPRA);
   await boletaDaPagina(page).getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: 'Venda' }).click();
-  await expect.poll(async () => (await lerEstiloCalculado(boletaDaPagina(page).getByRole('button', { name: 'Enviar ordem de venda' }), ['box-shadow']))['box-shadow']).toContain(BRILHO_CORAL);
+  await expect.poll(async () => (await lerEstiloCalculado(boletaDaPagina(page).getByRole('button', { name: 'Enviar ordem de venda' }), ['box-shadow']))['box-shadow']).toBe(BRILHO_DO_ENVIAR_VENDA);
 });
 
 test('CA-24/CA-25: a nota de demonstração fica numa caixa com o escudo e o texto de sempre', async ({ page }) => {
@@ -204,6 +209,7 @@ test('CA-24/CA-25: a nota de demonstração fica numa caixa com o escudo e o tex
   await expect(notaDeDemonstracao).toHaveCount(1);
   await expect(notaDeDemonstracao.locator('svg[aria-hidden="true"]')).toHaveCount(1);
   await expect(notaDeDemonstracao.locator('svg')).toBeVisible();
+  await expect(notaDeDemonstracao.locator('svg path')).toHaveAttribute('d', DESENHO_DO_ESCUDO);
   const estiloDaNota = await lerEstiloCalculado(notaDeDemonstracao, ['background-color', 'border-top-color', 'border-top-width', 'border-top-left-radius']);
   expect(estiloDaNota).toMatchObject({ 'background-color': COR_DO_TRILHO, 'border-top-color': COR_DA_BORDA_DO_TRILHO, 'border-top-left-radius': '14px' });
   expect(lerPixels(estiloDaNota['border-top-width'])).toBeCloseTo(1, 0);
