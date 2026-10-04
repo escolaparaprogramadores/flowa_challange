@@ -89,7 +89,8 @@ for (const larguraDaJanela of [375, 860]) {
       expect(caixaDoCartao.x + caixaDoCartao.width, `${nomeDoCartao}: termina dentro da tela`).toBeLessThanOrEqual(larguraDaJanela);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(larguraDaJanela);
-    await page.screenshot({ path: test.info().outputPath(`ca-26-empilhado-${larguraDaJanela}.png`), fullPage: true });
+    // Sem fullPage: com o zoom de 90% o Playwright mede a página inteira sem a escala e o print sai mais largo.
+    await page.screenshot({ path: test.info().outputPath(`ca-26-empilhado-${larguraDaJanela}.png`) });
   });
 }
 
