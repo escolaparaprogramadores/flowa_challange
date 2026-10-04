@@ -25,7 +25,7 @@ const ROTULO_DA_SITUACAO_DA_ORDEM_GRAVADA = { aceita: 'Aceita', rejeitada: 'Reje
 export function CompraVenda({ estadoDaListaDeOrdens, enviandoOrdem, falhaNoUltimoEnvio, acaoDoCabecalho, rodape }: PropsDoCartaoCompraVenda) {
   const temOrdensNaPagina = estadoDaListaDeOrdens.situacao === 'pronto' && estadoDaListaDeOrdens.paginaDeOrdens.ordens.length > 0;
   return (
-    <section className="cartao compra-venda" aria-labelledby="titulo-compra-venda" aria-busy={estadoDaListaDeOrdens.situacao === 'carregando'}>
+    <section className="cartao resposta compra-venda" aria-labelledby="titulo-compra-venda" aria-busy={estadoDaListaDeOrdens.situacao === 'carregando'}>
       <div className="compra-venda-cabeca">
         <h2 className="cartao-titulo" id="titulo-compra-venda">Compra/Venda</h2>
         {enviandoOrdem && <span className="selo-da-ordem selo-enviando" role="status" data-testid="selo-enviando">Enviando…</span>}
