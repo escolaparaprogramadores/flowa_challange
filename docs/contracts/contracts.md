@@ -87,10 +87,11 @@ Se o OrderAccumulator não responder em 5 s ou estiver fora do ar, devolve `503`
 }
 ```
 
-- `receivedAt` é ISO-8601 em UTC. `status` é `"accepted"` ou `"rejected"`; `symbol` pode ser `null`.
-- O tamanho da página é fixo no servidor; `pageSize` vindo do cliente é ignorado.
-- Página `0`, negativa, texto ou acima de `1000` → `400` com
-  `{ "status": "validation_error", "message": "…", "errors": [ { "field": "page", "message": "…" } ] }`.
+- `receivedAt` é ISO-8601 em UTC. `status` é `"accepted"` ou `"rejected"`; `symbol` e `side` podem ser
+  `null` numa ordem rejeitada que chegou pelo FIX com o campo fora do padrão.
+- O tamanho da página é fixo no servidor; `pageSize` vindo do cliente é ignorado. Sem `page`, vem a página 1.
+- Página `0`, negativa, texto, repetida ou acima de `1000` → `400` com
+  `{ "status": "validation_error", "message": "Página inválida.", "errors": [ { "field": "page", "message": "A página deve ser um número inteiro de 1 a 1000." } ] }`.
 - Página além da última → `200` com `orders: []` e o `total` real.
 
 `DELETE` apaga todas as ordens e zera a exposição de `PETR4`, `VALE3` e `VIIA4` numa transação só

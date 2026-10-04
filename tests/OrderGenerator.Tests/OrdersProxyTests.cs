@@ -17,7 +17,7 @@ public sealed class OrdersProxyTests : IDisposable
     private const string OrdersDeletionCommunicationMessage = "Não foi possível apagar as ordens no OrderAccumulator. Tente de novo em instantes.";
     private const string BoletaTestIndexHtml = "<!doctype html><title>boleta-de-teste</title>";
     private const string InvalidPageJson = """
-        {"status":"validation_error","message":"A página pedida é inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}
+        {"status":"validation_error","message":"Página inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}
         """;
 
     private readonly string _temporaryWebRoot = Directory.CreateTempSubdirectory("flowa-wwwroot-").FullName;
@@ -82,6 +82,7 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("/api/orders?page=2&pageSize=500", "GET ?page=2")]
     [InlineData("/api/orders?pageSize=500&page=3&symbol=PETR4", "GET ?page=3")]
     [InlineData("/api/orders?page=1%262", "GET ?page=1%262")]
+    [InlineData("/api/orders?page=1&page=2", "GET ?page=1%2C2")]
     [InlineData("/api/orders", "GET ")]
     public async Task So_a_pagina_chega_ao_accumulator_sem_mudar(string ordersPagePathAskedByClient, string expectedAccumulatorOrdersRequest)
     {
@@ -212,10 +213,10 @@ public sealed class OrdersProxyTests : IDisposable
     }
 
     [Theory]
-    [InlineData("GET")]
-    [InlineData("DELETE")]
-    [InlineData("OPTIONS")]
-    public async Task Rotas_de_ordens_nao_liberam_CORS_para_outro_site(string ordersHttpMethod)
+    [InlineData("GET", HttpStatusCode.OK, "GET ?page=1")]
+    [InlineData("DELETE", HttpStatusCode.NoContent, "DELETE ")]
+    [InlineData("OPTIONS", HttpStatusCode.NotFound, null)]
+    public async Task Rotas_de_ordens_nao_liberam_CORS_para_outro_site(string ordersHttpMethod, HttpStatusCode expectedStatus, string? expectedAccumulatorOrdersRequest)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(AnswerOrdersPageOrDeletion);
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
@@ -226,18 +227,37 @@ public sealed class OrdersProxyTests : IDisposable
 
         var crossSiteOrdersResponse = await orderGeneratorClient.SendAsync(crossSiteOrdersRequest);
 
+        // A rota respondeu de verdade: sem isto, uma rota sumida (404 sem cabeçalho) também passaria.
+        Assert.Equal(expectedStatus, crossSiteOrdersResponse.StatusCode);
+        Assert.Equal(expectedAccumulatorOrdersRequest is null ? [] : [expectedAccumulatorOrdersRequest], fakeAccumulator.ReceivedOrdersRequests);
         var crossSiteResponseHeaderNames = crossSiteOrdersResponse.Headers.Select(responseHeader => responseHeader.Key)
             .Concat(crossSiteOrdersResponse.Content.Headers.Select(contentHeader => contentHeader.Key));
         Assert.DoesNotContain(crossSiteResponseHeaderNames, headerName => headerName.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase));
     }
 
     // CA-34: a listagem é chamada a cada troca de página; não pode escrever log Information por chamada.
-    [Fact]
-    public async Task Listagem_nao_escreve_log_Information()
+    // Vale para a resposta boa, para a página inválida, para o apagar e para o accumulator fora do ar.
+    [Theory]
+    [InlineData("GET", "/api/orders?page=1", true, HttpStatusCode.OK)]
+    [InlineData("GET", "/api/orders?page=abc", true, HttpStatusCode.BadRequest)]
+    [InlineData("DELETE", "/api/orders", true, HttpStatusCode.NoContent)]
+    [InlineData("GET", "/api/orders?page=1", false, HttpStatusCode.ServiceUnavailable)]
+    public async Task Rotas_de_ordens_nao_escrevem_log_Information(string ordersHttpMethod, string ordersPath, bool isAccumulatorRunning, HttpStatusCode expectedStatus)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(AnswerOrdersPageOrDeletion);
+        await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
+        {
+            if (ordersHttpContext.Request.Query["page"] == "abc")
+            {
+                ordersHttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                ordersHttpContext.Response.ContentType = "application/json";
+                await ordersHttpContext.Response.WriteAsync(InvalidPageJson);
+                return;
+            }
+            await AnswerOrdersPageOrDeletion(ordersHttpContext);
+        });
+        var accumulatorBaseUrl = isAccumulatorRunning ? fakeAccumulator.FakeAccumulatorUrl : $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}";
         var orderGeneratorCapturedLogs = new OrderGeneratorCapturedLogs();
-        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl)
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), accumulatorBaseUrl)
             .WithWebHostBuilder(orderGeneratorWebHostBuilder =>
                 orderGeneratorWebHostBuilder.ConfigureLogging(orderGeneratorLogging => orderGeneratorLogging.AddProvider(orderGeneratorCapturedLogs)));
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -246,9 +266,9 @@ public sealed class OrdersProxyTests : IDisposable
         Assert.True(orderGeneratorLoggerFactory.CreateLogger("OrderGenerator").IsEnabled(LogLevel.Information));
         orderGeneratorCapturedLogs.ForgetCapturedLogLines();
 
-        var ordersPageResponse = await orderGeneratorClient.GetAsync("/api/orders?page=1");
+        var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), ordersPath));
 
-        Assert.Equal(HttpStatusCode.OK, ordersPageResponse.StatusCode);
+        Assert.Equal(expectedStatus, ordersResponse.StatusCode);
         Assert.DoesNotContain(orderGeneratorCapturedLogs.CapturedLogLines, capturedLogLine => capturedLogLine.StartsWith($"{LogLevel.Information} "));
     }
 
