@@ -43,7 +43,7 @@ orderAccumulatorApp.MapGet("/api/exposures", async (IExposureReader exposureRead
             symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)).ToList());
 });
 
-// O teto de páginas limita o custo de um OFFSET grande no banco (parecer de arquitetura da rodada).
+// O teto de páginas limita o custo de um OFFSET grande no banco.
 const int MaxOrderListPageNumber = 1000;
 
 orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, OrderHistoryRepository orderHistoryRepository, CancellationToken cancellationToken) =>

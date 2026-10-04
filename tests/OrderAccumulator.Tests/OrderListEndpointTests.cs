@@ -173,14 +173,14 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         await ProcessOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 2);
-        var logLinesBeforeTheListing = orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines.Count;
+        var logLineCountBeforeTheListing = orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines.Count;
 
         await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1");
         await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=2");
         await orderAccumulatorTestApp.CreateClient().GetAsync("/api/orders?page=abc");
 
         var informationLogLinesOfTheListing = orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines
-            .Skip(logLinesBeforeTheListing)
+            .Skip(logLineCountBeforeTheListing)
             .Where(capturedLogLine => !capturedLogLine.StartsWith("Trace ") && !capturedLogLine.StartsWith("Debug "))
             .Where(capturedLogLine => !capturedLogLine.Contains(" QuickFix") && !capturedLogLine.Contains(" OrderAccumulator.Fix."))
             .ToList();
