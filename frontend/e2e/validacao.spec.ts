@@ -27,8 +27,8 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('CA-1: o símbolo só oferece PETR4, VALE3 e VIIA4', async ({ page }) => {
-  const opcoesDeSimbolo = page.getByLabel('Símbolo').locator('option');
-  await expect(opcoesDeSimbolo).toHaveText(['PETR4', 'VALE3', 'VIIA4']);
+  const botoesDeSimbolo = page.getByRole('group', { name: 'Símbolo' }).getByRole('button');
+  await expect(botoesDeSimbolo).toHaveText(['PETR4', 'VALE3', 'VIIA4']);
 });
 
 test('CA-2: o lado só oferece Compra e Venda', async ({ page }) => {
