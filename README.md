@@ -178,8 +178,9 @@ O [painel do Datadog](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98a
 é público e abre sem login. Ele mostra a taxa de aceite, as ordens aceitas e rejeitadas ao longo do tempo e a exposição de cada
 ativo, com as linhas do limite de 100 milhões.
 
-Na AWS, cada task roda um agente do Datadog ao lado do app. O app manda rastros para o agente em
-`localhost:8126` e métricas em `localhost:8125`, e o agente envia tudo ao Datadog por HTTPS. Uma ordem
+Na AWS, cada task roda um agente do Datadog ao lado do app. Os dois apps mandam rastros para o agente
+em `localhost:8126`, o OrderAccumulator manda também métricas em `localhost:8125`, e o agente envia
+tudo ao Datadog por HTTPS. Uma ordem
 aparece como um rastro só, da tela até o OrderAccumulator: o OrderGenerator põe o contexto do rastro
 numa tag FIX própria da `NewOrderSingle`, a 5100 (`TraceParent`), e o OrderAccumulator continua o
 mesmo rastro (`src/Flowa.Shared/Fix/RastroDaOrdemFix.cs`). O OrderAccumulator conta
@@ -203,7 +204,7 @@ chegar a 1%. O commit é a versão do OrderGenerator no ar durante o teste.
 
 | Data | Commit | Requisições por minuto | Taxa de erro | P80 | P90 | P95 | P99 |
 |---|---|---|---|---|---|---|---|
-| 04/10/2026 00:24 UTC | f6a268d | 899 | 0,00% | 79 ms | 90 ms | 101 ms | 146 ms |
+| 2026-10-04 00:24 UTC | f6a268d | 899 | 0,00% | 79 ms | 90 ms | 101 ms | 146 ms |
 
 Foram 4500 ordens, todas aceitas. Para rodar de novo: em Actions, escolha o workflow `k6-carga.yml` e
 clique em "Run workflow". O relatório fica como anexo do run.
