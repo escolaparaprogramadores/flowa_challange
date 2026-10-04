@@ -175,6 +175,7 @@ for (const { larguraDaJanela, ladoALado } of [
   { larguraDaJanela: 860, ladoALado: false },
   { larguraDaJanela: 861, ladoALado: true },
   { larguraDaJanela: 1440, ladoALado: true },
+  { larguraDaJanela: 1920, ladoALado: true },
 ]) {
   test(`ASSUMI-09: em ${larguraDaJanela} px os três ativos ficam ${ladoALado ? 'lado a lado, do mesmo tamanho' : 'um embaixo do outro, na largura toda'}`, async ({ page }) => {
     await abrirBoletaNaLargura(page, larguraDaJanela);

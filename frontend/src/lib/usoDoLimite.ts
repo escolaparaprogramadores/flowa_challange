@@ -21,10 +21,10 @@ export function calcularUsoDoLimite(exposicaoEmReais: number): UsoDoLimite {
     (exposicaoSemSinalEmCentavos - (exposicaoSemSinalEmCentavos % CENTAVOS_POR_CENTESIMO_DE_PORCENTAGEM)) /
     CENTAVOS_POR_CENTESIMO_DE_PORCENTAGEM;
   const porcentagemCortada = centesimosDePorcentagem / 100;
-  const usoAbaixoDoMenorValorMostrado = exposicaoSemSinalEmCentavos > 0 && centesimosDePorcentagem === 0;
+  const estaAbaixoDoMenorValorMostrado = exposicaoSemSinalEmCentavos > 0 && centesimosDePorcentagem === 0;
 
   return {
-    porcentagemMostrada: usoAbaixoDoMenorValorMostrado ? '< 0,01%' : `${formatadorDaPorcentagem.format(porcentagemCortada)}%`,
+    porcentagemMostrada: estaAbaixoDoMenorValorMostrado ? '< 0,01%' : `${formatadorDaPorcentagem.format(porcentagemCortada)}%`,
     larguraDaBarraEmPorcentagem: Math.min(porcentagemCortada, 100),
     estaPertoDoLimite: centesimosDePorcentagem >= CENTESIMOS_DE_PORCENTAGEM_DO_ALERTA,
   };

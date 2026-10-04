@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { ROTA_DAS_EXPOSICOES, ROTA_DE_CRIACAO_DE_ORDEM } from '../src/ordensService';
 
@@ -31,6 +32,7 @@ const BARRINHA_VERDE = 'linear-gradient(90deg, rgb(47, 199, 149), rgb(79, 227, 1
 const BARRINHA_AMBAR = 'linear-gradient(90deg, rgb(233, 167, 60), rgb(244, 197, 106))';
 const COR_DA_PORCENTAGEM_PERTO_DO_LIMITE = 'rgb(244, 197, 106)';
 const COR_DO_TEXTO = 'rgb(232, 239, 238)';
+const COR_DO_FUNDO_DO_LINK = 'rgb(14, 27, 30)';
 // Os cartões ficam 14 px de CSS um do outro (maquete 01); na tela, com a página em 90%, são 12,6 px.
 const ESPACO_ENTRE_CARTOES_NA_TELA = 14 * 0.9;
 const PRECO_MAXIMO_DA_ORDEM_EM_CENTAVOS = 99_999;
@@ -129,10 +131,61 @@ function medirRetanguloNaTela(elementoNaTela: Locator) {
 }
 
 function retangulosSeCruzam(
-  primeiro: { x: number; y: number; width: number; height: number },
-  segundo: { x: number; y: number; width: number; height: number },
+  primeiroRetangulo: { x: number; y: number; width: number; height: number },
+  segundoRetangulo: { x: number; y: number; width: number; height: number },
 ) {
-  return primeiro.x < segundo.x + segundo.width && segundo.x < primeiro.x + primeiro.width && primeiro.y < segundo.y + segundo.height && segundo.y < primeiro.y + primeiro.height;
+  return (
+    primeiroRetangulo.x < segundoRetangulo.x + segundoRetangulo.width &&
+    segundoRetangulo.x < primeiroRetangulo.x + primeiroRetangulo.width &&
+    primeiroRetangulo.y < segundoRetangulo.y + segundoRetangulo.height &&
+    segundoRetangulo.y < primeiroRetangulo.y + primeiroRetangulo.height
+  );
+}
+
+// Linha de base do texto, na tela: uma marca vazia em linha assenta exatamente nela.
+function medirLinhaDeBaseNaTela(textoNaTela: Locator) {
+  return textoNaTela.evaluate((elementoComTexto) => {
+    const marcaDaLinhaDeBase = document.createElement('span');
+    marcaDaLinhaDeBase.style.display = 'inline-block';
+    marcaDaLinhaDeBase.style.height = '0';
+    elementoComTexto.append(marcaDaLinhaDeBase);
+    const linhaDeBase = marcaDaLinhaDeBase.getBoundingClientRect().top;
+    marcaDaLinhaDeBase.remove();
+    return linhaDeBase;
+  });
+}
+
+// O desenho esperado de cada ícone sai do próprio Icones.tsx: o teste prova que o ícone da tela é aquele, não um SVG qualquer.
+function lerDesenhosDoIconeNoCodigo(nomeDoIcone: string) {
+  const codigoDosIcones = readFileSync(new URL('../src/Icones.tsx', import.meta.url), 'utf8');
+  const inicioDoIcone = codigoDosIcones.indexOf(`export function ${nomeDoIcone}(`);
+  if (inicioDoIcone === -1) throw new Error(`${nomeDoIcone} não existe em Icones.tsx`);
+  const fimDoIcone = codigoDosIcones.indexOf('export function', inicioDoIcone + 1);
+  const codigoDoIcone = codigoDosIcones.slice(inicioDoIcone, fimDoIcone === -1 ? undefined : fimDoIcone);
+  return [...codigoDoIcone.matchAll(/ d="([^"]+)"/g)].map((desenhoEncontrado) => desenhoEncontrado[1]);
+}
+
+async function conferirDesenhoDoIcone(iconeNaTela: Locator, nomeDoIcone: string) {
+  const desenhosEsperados = lerDesenhosDoIconeNoCodigo(nomeDoIcone);
+  expect(desenhosEsperados.length).toBeGreaterThan(0);
+  expect(await iconeNaTela.locator('path').evaluateAll((caminhos) => caminhos.map((caminho) => caminho.getAttribute('d')))).toEqual(desenhosEsperados);
+}
+
+// Contraste WCAG entre duas cores "rgb(r, g, b)".
+function calcularContraste(corDoTexto: string, corDoFundo: string) {
+  const luminanciaDaCor = (corEmRgb: string) => {
+    const [vermelho, verde, azul] = (corEmRgb.match(/\d+/g) ?? []).slice(0, 3).map((canal) => {
+      const canalNormalizado = Number(canal) / 255;
+      return canalNormalizado <= 0.03928 ? canalNormalizado / 12.92 : ((canalNormalizado + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * vermelho + 0.7152 * verde + 0.0722 * azul;
+  };
+  const [luminanciaMaior, luminanciaMenor] = [luminanciaDaCor(corDoTexto), luminanciaDaCor(corDoFundo)].sort((primeira, segunda) => segunda - primeira);
+  return (luminanciaMaior + 0.05) / (luminanciaMenor + 0.05);
+}
+
+async function lerCorCalculada(elementoNaTela: Locator, propriedadeDaCor: 'color' | 'background-color') {
+  return elementoNaTela.evaluate((elementoNaPagina, propriedade) => getComputedStyle(elementoNaPagina).getPropertyValue(propriedade), propriedadeDaCor);
 }
 
 const exposicoesAntesDoArquivoEmCentavos = new Map<string, number>();
@@ -149,45 +202,66 @@ test.afterAll(async ({ request }) => {
   }
 });
 
-test('CA-9: os 3 links do Datadog ficam no topo, nesta ordem, com logo, rótulo, nome, seta e abrem em aba nova', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
-  const topo = page.getByRole('banner');
-  await expect(topo.getByRole('link')).toHaveCount(3);
+for (const larguraDaJanela of [1440, 1920]) {
+  test(`CA-9: em ${larguraDaJanela} px os 3 links do Datadog ficam no topo, nesta ordem, com logo, rótulo, nome, seta e abrem em aba nova`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
+    await page.goto('/');
+    const topo = page.getByRole('banner');
+    await expect(topo.getByRole('link')).toHaveCount(3);
 
-  let ladoDireitoDoLinkAnterior = 0;
-  for (const painelEsperado of PAINEIS_DO_DATADOG_ESPERADOS) {
-    const linkDoPainel = topo.getByRole('link', { name: new RegExp(painelEsperado.nomeDoPainel) });
-    await expect(linkDoPainel).toHaveCount(1);
-    await expect(linkDoPainel).toBeVisible();
-    expect(await linkDoPainel.getAttribute('href')).toBe(painelEsperado.enderecoDoPainel);
-    await expect(linkDoPainel).toHaveAttribute('target', '_blank');
-    await expect(linkDoPainel).toHaveAttribute('rel', 'noopener noreferrer');
-    await expect(linkDoPainel.locator('.painel-datadog-nome')).toHaveText(painelEsperado.nomeDoPainel);
-    await expect(linkDoPainel.locator('.painel-datadog-marca')).toHaveText('DATADOG', { useInnerText: true });
-    await expect(linkDoPainel.locator('.painel-datadog-marca')).toHaveCSS('color', COR_DO_ROTULO);
-    await expect(linkDoPainel.locator('.painel-datadog-logo svg')).toBeVisible();
-    await expect(linkDoPainel.locator('.painel-datadog-logo')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
-    await expect(linkDoPainel.locator('.painel-datadog-seta')).toBeVisible();
-    await expect(linkDoPainel).toHaveCSS('border-radius', '14px');
-    expect(await lerMedidaDoCssEmPx(linkDoPainel, 'height')).toBeCloseTo(46, 1);
-    await expect(linkDoPainel).toHaveCSS('background-color', 'rgb(14, 27, 30)');
-    await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DA_BORDA);
+    let ladoDireitoDoLinkAnterior = 0;
+    for (const painelEsperado of PAINEIS_DO_DATADOG_ESPERADOS) {
+      const linkDoPainel = topo.getByRole('link', { name: new RegExp(painelEsperado.nomeDoPainel) });
+      await expect(linkDoPainel).toHaveCount(1);
+      await expect(linkDoPainel).toBeVisible();
+      expect(await linkDoPainel.getAttribute('href')).toBe(painelEsperado.enderecoDoPainel);
+      await expect(linkDoPainel).toHaveAttribute('target', '_blank');
+      await expect(linkDoPainel).toHaveAttribute('rel', 'noopener noreferrer');
+      await expect(linkDoPainel).toHaveCSS('border-radius', '14px');
+      expect(await lerMedidaDoCssEmPx(linkDoPainel, 'height')).toBeCloseTo(46, 1);
+      await expect(linkDoPainel).toHaveCSS('background-color', COR_DO_FUNDO_DO_LINK);
+      await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DA_BORDA);
 
-    const caixaDoLink = await medirRetanguloNaTela(linkDoPainel);
-    expect(caixaDoLink.x).toBeGreaterThanOrEqual(ladoDireitoDoLinkAnterior);
-    ladoDireitoDoLinkAnterior = caixaDoLink.x + caixaDoLink.width;
+      const nomeDoPainel = linkDoPainel.locator('.painel-datadog-nome');
+      await expect(nomeDoPainel).toHaveText(painelEsperado.nomeDoPainel);
+      await expect(nomeDoPainel).toHaveCSS('font-size', '13px');
+      await expect(nomeDoPainel).toHaveCSS('font-weight', '800');
+      await expect(nomeDoPainel).toHaveCSS('color', COR_DO_TEXTO);
+      expect(calcularContraste(await lerCorCalculada(nomeDoPainel, 'color'), COR_DO_FUNDO_DO_LINK)).toBeGreaterThanOrEqual(4.5);
 
-    await linkDoPainel.hover();
-    await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DO_ACENTO);
-    await page.mouse.move(0, 0);
-    await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DA_BORDA);
-  }
+      const marcaDoPainel = linkDoPainel.locator('.painel-datadog-marca');
+      await expect(marcaDoPainel).toHaveText('DATADOG', { useInnerText: true });
+      await expect(marcaDoPainel).toHaveCSS('font-size', '10px');
+      await expect(marcaDoPainel).toHaveCSS('color', COR_DO_ROTULO);
+      expect(calcularContraste(await lerCorCalculada(marcaDoPainel, 'color'), COR_DO_FUNDO_DO_LINK)).toBeGreaterThanOrEqual(4.5);
 
-  const caixaDoLogo = await medirRetanguloNaTela(page.getByRole('img', { name: 'Base investimentos' }));
-  const caixaDoPrimeiroLink = await medirRetanguloNaTela(topo.getByRole('link', { name: /Four Golden Signals/ }));
-  expect(caixaDoPrimeiroLink.x).toBeGreaterThan(caixaDoLogo.x + caixaDoLogo.width);
-});
+      const logoDoPainel = linkDoPainel.locator('.painel-datadog-logo');
+      await expect(logoDoPainel).toHaveCSS('background-color', 'rgb(255, 255, 255)');
+      expect(await lerMedidaDoCssEmPx(logoDoPainel, 'width')).toBeCloseTo(28, 1);
+      expect(await lerMedidaDoCssEmPx(logoDoPainel, 'height')).toBeCloseTo(28, 1);
+      await expect(logoDoPainel.locator('svg')).toBeVisible();
+      await conferirDesenhoDoIcone(logoDoPainel.locator('svg'), 'LogoDatadog');
+      await expect(linkDoPainel.locator('svg.painel-datadog-seta')).toBeVisible();
+      await conferirDesenhoDoIcone(linkDoPainel.locator('svg.painel-datadog-seta'), 'IconeSetaParaFora');
+
+      const caixaDoLink = await medirRetanguloNaTela(linkDoPainel);
+      expect(caixaDoLink.x).toBeGreaterThanOrEqual(ladoDireitoDoLinkAnterior);
+      ladoDireitoDoLinkAnterior = caixaDoLink.x + caixaDoLink.width;
+
+      await linkDoPainel.hover();
+      await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DO_ACENTO);
+      await page.mouse.move(0, 0);
+      await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DA_BORDA);
+    }
+
+    const caixaDoLogo = await medirRetanguloNaTela(page.getByRole('img', { name: 'Base investimentos' }));
+    const caixaDoPrimeiroLink = await medirRetanguloNaTela(topo.getByRole('link', { name: /Four Golden Signals/ }));
+    expect(caixaDoPrimeiroLink.x).toBeGreaterThan(caixaDoLogo.x + caixaDoLogo.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      await page.evaluate(() => document.documentElement.clientWidth),
+    );
+  });
+}
 
 test('CA-9: clicar num link do Datadog abre o painel em outra aba', async ({ page, context }) => {
   await page.goto('/');
@@ -211,6 +285,7 @@ test('CA-10: à direita dos links fica o selo com escudo verde, "AMBIENTE" e "De
   await expect(selo.locator('.selo-ambiente-nome')).toHaveText('Demonstração');
   await expect(selo.locator('.selo-ambiente-icone')).toHaveCSS('background-color', 'rgba(79, 227, 176, 0.13)');
   await expect(selo.locator('.selo-ambiente-icone svg')).toHaveCSS('color', COR_DO_ACENTO);
+  await conferirDesenhoDoIcone(selo.locator('.selo-ambiente-icone svg'), 'IconeEscudo');
   const caixaDoSelo = await medirRetanguloNaTela(selo);
   const caixaDoUltimoLink = await medirRetanguloNaTela(page.getByRole('banner').getByRole('link', { name: /Ordens e exposição/ }));
   expect(caixaDoSelo.x).toBeGreaterThanOrEqual(caixaDoUltimoLink.x + caixaDoUltimoLink.width);
@@ -233,63 +308,80 @@ test('CA-43: abrir a tela não busca nada no Datadog nem arquivo de imagem do lo
   expect(enderecosPedidos.filter((enderecoPedido) => new URL(enderecoPedido).origin !== origemDaTela)).toEqual([]);
 });
 
-test('CA-5: "Exposição por ativo" fica acima de tudo, com o limite à direita e 3 cartões lado a lado', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
-  const secaoDaExposicao = page.locator('section.exposicao');
-  const tituloDaExposicao = secaoDaExposicao.getByRole('heading', { level: 2, name: 'Exposição por ativo' });
-  await expect(tituloDaExposicao).toHaveCSS('font-family', /^Sora/);
-  await expect(tituloDaExposicao).toHaveCSS('font-size', '18px');
-  const textoDoLimite = secaoDaExposicao.getByText('Limite por ativo · R$ 100.000.000,00');
-  await expect(textoDoLimite).toBeVisible();
-  await expect(textoDoLimite).toHaveCSS('font-size', '13px');
-  await expect(textoDoLimite).toHaveCSS('color', COR_DO_ROTULO);
-  const caixaDoTitulo = await medirRetanguloNaTela(tituloDaExposicao);
-  const caixaDoLimite = await medirRetanguloNaTela(textoDoLimite);
-  expect(caixaDoLimite.x).toBeGreaterThan(caixaDoTitulo.x + caixaDoTitulo.width);
-  expect(Math.abs(caixaDoLimite.y + caixaDoLimite.height / 2 - (caixaDoTitulo.y + caixaDoTitulo.height / 2))).toBeLessThan(caixaDoTitulo.height);
+for (const larguraDaJanela of [1440, 1920]) {
+  test(`CA-5: em ${larguraDaJanela} px "Exposição por ativo" fica acima de tudo, com o limite à direita e 3 cartões lado a lado`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
+    await page.goto('/');
+    const secaoDaExposicao = page.locator('section.exposicao');
+    const tituloDaExposicao = secaoDaExposicao.getByRole('heading', { level: 2, name: 'Exposição por ativo' });
+    await expect(tituloDaExposicao).toHaveCSS('font-family', /^Sora/);
+    await expect(tituloDaExposicao).toHaveCSS('font-size', '18px');
+    const textoDoLimite = secaoDaExposicao.getByText('Limite por ativo · R$ 100.000.000,00');
+    await expect(textoDoLimite).toBeVisible();
+    await expect(textoDoLimite).toHaveCSS('font-size', '13px');
+    await expect(textoDoLimite).toHaveCSS('color', COR_DO_ROTULO);
+    const caixaDoTitulo = await medirRetanguloNaTela(tituloDaExposicao);
+    const caixaDoLimite = await medirRetanguloNaTela(textoDoLimite);
+    expect(caixaDoLimite.x).toBeGreaterThan(caixaDoTitulo.x + caixaDoTitulo.width);
+    expect(Math.abs(caixaDoLimite.y + caixaDoLimite.height / 2 - (caixaDoTitulo.y + caixaDoTitulo.height / 2))).toBeLessThan(caixaDoTitulo.height);
 
-  // Acima de tudo: nenhum outro bloco da grade começa antes de a seção de exposição terminar.
-  const blocosAbaixoDaExposicao = await page.locator('main').evaluate((grade) => {
-    const fimDaExposicao = grade.querySelector('section.exposicao')!.getBoundingClientRect().bottom;
-    return [...grade.children].filter((bloco) => !bloco.classList.contains('exposicao')).map((bloco) => bloco.getBoundingClientRect().top >= fimDaExposicao);
+    // Acima de tudo: nenhum outro bloco da grade começa antes de a seção de exposição terminar.
+    const blocosAbaixoDaExposicao = await page.locator('main').evaluate((grade) => {
+      const fimDaExposicao = grade.querySelector('section.exposicao')!.getBoundingClientRect().bottom;
+      return [...grade.children].filter((bloco) => !bloco.classList.contains('exposicao')).map((bloco) => bloco.getBoundingClientRect().top >= fimDaExposicao);
+    });
+    expect(blocosAbaixoDaExposicao.length).toBeGreaterThan(0);
+    expect(blocosAbaixoDaExposicao.every((blocoEstaAbaixo) => blocoEstaAbaixo)).toBe(true);
+
+    let ladoDireitoDoCartaoAnterior = 0;
+    let topoDoPrimeiroCartao: number | undefined;
+    for (const simboloDoAtivo of SIMBOLOS_DOS_CARTOES) {
+      const cartao = localizarCartaoDoAtivo(page, simboloDoAtivo);
+      await expect(cartao).toHaveCount(1);
+      await expect(cartao).toBeVisible();
+      await expect(cartao.getByRole('heading', { level: 3 })).toHaveText(simboloDoAtivo);
+      await expect(cartao.locator('.exposicao-icone svg')).toBeVisible();
+      await conferirDesenhoDoIcone(cartao.locator('.exposicao-icone svg'), 'IconeGraficoSubindo');
+      expect(await lerMedidaDoCssEmPx(cartao.locator('.exposicao-icone'), 'width')).toBeCloseTo(34, 1);
+      expect(await lerMedidaDoCssEmPx(cartao.locator('.exposicao-icone'), 'height')).toBeCloseTo(34, 1);
+      await expect(cartao.locator('dt', { hasText: 'Exposição atual' })).toHaveCount(1);
+      await expect(cartao.locator('dt', { hasText: 'Falta até o limite' })).toHaveCount(1);
+      await expect(cartao.getByTestId('exposicao-atual')).toHaveCSS('font-family', /^Sora/);
+      await expect(cartao.getByTestId('exposicao-atual')).toHaveCSS('font-size', '20px');
+      await expect(cartao).toHaveCSS('border-radius', '20px');
+      await expect(cartao).toHaveCSS('border-top-color', COR_DA_BORDA);
+      await expect(cartao).toHaveCSS('background-image', 'linear-gradient(rgb(15, 31, 34), rgb(14, 27, 30))');
+      await expect(cartao).toHaveCSS('box-shadow', 'rgba(0, 0, 0, 0.35) 0px 24px 50px 0px');
+      await expect(cartao.getByText('Uso do limite', { exact: true })).toHaveCSS('font-size', '12px');
+      await expect(cartao.getByTestId('uso-do-limite-porcentagem')).toHaveCSS('font-size', '12px');
+      expect(await lerMedidaDoCssEmPx(cartao.getByRole('meter'), 'height')).toBeCloseTo(6, 1);
+
+      const caixaDoCartao = await medirRetanguloNaTela(cartao);
+      if (simboloDoAtivo !== SIMBOLOS_DOS_CARTOES[0]) expect(caixaDoCartao.x).toBeCloseTo(ladoDireitoDoCartaoAnterior + ESPACO_ENTRE_CARTOES_NA_TELA, 1);
+      ladoDireitoDoCartaoAnterior = caixaDoCartao.x + caixaDoCartao.width;
+      topoDoPrimeiroCartao ??= caixaDoCartao.y;
+      expect(caixaDoCartao.y).toBeCloseTo(topoDoPrimeiroCartao, 0);
+
+      const caixaDaExposicaoAtual = await medirRetanguloNaTela(cartao.getByTestId('exposicao-atual'));
+      const caixaDaFalta = await medirRetanguloNaTela(cartao.getByTestId('exposicao-restante'));
+      expect(caixaDaFalta.x).toBeGreaterThan(caixaDaExposicaoAtual.x);
+      // Como na maquete: os dois rótulos começam na mesma altura e os dígitos dos dois valores assentam na mesma linha.
+      const caixaDoRotuloDaExposicao = await medirRetanguloNaTela(cartao.locator('dt', { hasText: 'Exposição atual' }));
+      const caixaDoRotuloDaFalta = await medirRetanguloNaTela(cartao.locator('dt', { hasText: 'Falta até o limite' }));
+      expect(Math.abs(caixaDoRotuloDaFalta.y - caixaDoRotuloDaExposicao.y)).toBeLessThanOrEqual(0.5);
+      const linhaDeBaseDaExposicao = await medirLinhaDeBaseNaTela(cartao.getByTestId('exposicao-atual'));
+      const linhaDeBaseDaFalta = await medirLinhaDeBaseNaTela(cartao.getByTestId('exposicao-restante'));
+      expect(Math.abs(linhaDeBaseDaFalta - linhaDeBaseDaExposicao)).toBeLessThanOrEqual(1);
+    }
+
+    // O texto do limite termina na mesma borda direita do último cartão, como na maquete.
+    const caixaDoUltimoCartao = await medirRetanguloNaTela(localizarCartaoDoAtivo(page, 'VIIA4'));
+    expect(caixaDoLimite.x + caixaDoLimite.width).toBeCloseTo(caixaDoUltimoCartao.x + caixaDoUltimoCartao.width, 0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      await page.evaluate(() => document.documentElement.clientWidth),
+    );
   });
-  expect(blocosAbaixoDaExposicao.length).toBeGreaterThan(0);
-  expect(blocosAbaixoDaExposicao.every((blocoEstaAbaixo) => blocoEstaAbaixo)).toBe(true);
-
-  let ladoDireitoDoCartaoAnterior = 0;
-  let topoDoPrimeiroCartao: number | undefined;
-  for (const simboloDoAtivo of SIMBOLOS_DOS_CARTOES) {
-    const cartao = localizarCartaoDoAtivo(page, simboloDoAtivo);
-    await expect(cartao).toHaveCount(1);
-    await expect(cartao).toBeVisible();
-    await expect(cartao.getByRole('heading', { level: 3 })).toHaveText(simboloDoAtivo);
-    await expect(cartao.locator('.exposicao-icone svg')).toBeVisible();
-    expect(await lerMedidaDoCssEmPx(cartao.locator('.exposicao-icone'), 'width')).toBeCloseTo(34, 1);
-    expect(await lerMedidaDoCssEmPx(cartao.locator('.exposicao-icone'), 'height')).toBeCloseTo(34, 1);
-    await expect(cartao.locator('dt', { hasText: 'Exposição atual' })).toHaveCount(1);
-    await expect(cartao.locator('dt', { hasText: 'Falta até o limite' })).toHaveCount(1);
-    await expect(cartao.getByTestId('exposicao-atual')).toHaveCSS('font-family', /^Sora/);
-    await expect(cartao.getByTestId('exposicao-atual')).toHaveCSS('font-size', '20px');
-    await expect(cartao).toHaveCSS('border-radius', '20px');
-    await expect(cartao).toHaveCSS('border-top-color', COR_DA_BORDA);
-    await expect(cartao).toHaveCSS('background-image', 'linear-gradient(rgb(15, 31, 34), rgb(14, 27, 30))');
-    await expect(cartao).toHaveCSS('box-shadow', 'rgba(0, 0, 0, 0.35) 0px 24px 50px 0px');
-    await expect(cartao.getByText('Uso do limite', { exact: true })).toHaveCSS('font-size', '12px');
-    await expect(cartao.getByTestId('uso-do-limite-porcentagem')).toHaveCSS('font-size', '12px');
-    expect(await lerMedidaDoCssEmPx(cartao.getByRole('meter'), 'height')).toBeCloseTo(6, 1);
-
-    const caixaDoCartao = await medirRetanguloNaTela(cartao);
-    if (simboloDoAtivo !== SIMBOLOS_DOS_CARTOES[0]) expect(caixaDoCartao.x).toBeCloseTo(ladoDireitoDoCartaoAnterior + ESPACO_ENTRE_CARTOES_NA_TELA, 1);
-    ladoDireitoDoCartaoAnterior = caixaDoCartao.x + caixaDoCartao.width;
-    topoDoPrimeiroCartao ??= caixaDoCartao.y;
-    expect(caixaDoCartao.y).toBeCloseTo(topoDoPrimeiroCartao, 0);
-
-    const caixaDaExposicaoAtual = await medirRetanguloNaTela(cartao.getByTestId('exposicao-atual'));
-    const caixaDaFalta = await medirRetanguloNaTela(cartao.getByTestId('exposicao-restante'));
-    expect(caixaDaFalta.x).toBeGreaterThan(caixaDaExposicaoAtual.x);
-  }
-});
+}
 
 test('CA-6 e CA-39: o uso do limite vem do servidor, corta sem arredondar, fica âmbar a partir de 90% e usa o valor sem sinal', async ({ page, request }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

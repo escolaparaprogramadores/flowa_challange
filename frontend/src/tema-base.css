@@ -144,9 +144,10 @@ button { cursor: pointer; }
 .exposicao-simbolo { margin: 0; font-family: var(--fonte-display); font-weight: 700; font-size: var(--texto-corpo); }
 /* Os dois valores ficam lado a lado; sem espaço, "Falta até o limite" desce inteira, e nenhum número quebra no meio. */
 .exposicao-dados { margin: 0; display: flex; flex-wrap: wrap; gap: var(--espaco-3) var(--espaco-6); }
-.exposicao-dados > div { flex: 1 1 0; min-width: max-content; }
+/* Rótulos no alto e valores no pé da mesma coluna: com altura de linha 1, os dígitos de 20 e de 15 px assentam na mesma linha. */
+.exposicao-dados > div { flex: 1 1 0; min-width: max-content; display: flex; flex-direction: column; gap: var(--espaco-1-5); }
 .exposicao-dados dt { font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-rotulo); white-space: nowrap; }
-.exposicao-dados dd { margin: var(--espaco-1-5) 0 0; font-family: var(--fonte-display); font-weight: 600; font-size: var(--texto-corpo); white-space: nowrap; }
+.exposicao-dados dd { margin: auto 0 0; font-family: var(--fonte-display); font-weight: 600; font-size: var(--texto-corpo); line-height: 1; white-space: nowrap; }
 .exposicao-dados .exposicao-atual { font-size: var(--texto-numero-do-ativo); }
 .uso-do-limite { display: flex; flex-direction: column; gap: var(--espaco-2); }
 .uso-do-limite-trilho { height: var(--altura-barra-uso-do-limite); background: var(--cor-divisor); border-radius: var(--raio-pill); overflow: hidden; }
