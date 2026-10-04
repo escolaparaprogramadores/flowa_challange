@@ -29,9 +29,9 @@ public sealed class OrdersProxyTests : IDisposable
     [Theory]
     [InlineData(1, new[] { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3 })]
     [InlineData(2, new[] { 2, 1 })]
-    public async Task Lista_de_ordens_repassa_a_pagina_e_devolve_o_mesmo_corpo_com_200(int requestedOrdersPage, int[] orderNumbersNewestFirst)
+    public async Task OrdersList_ForwardsPage_AndReturnsSameBodyWith200(int requestedOrdersPage, int[] orderNumbersNewestFirst)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
             var pageAskedToAccumulator = int.Parse(ordersHttpContext.Request.Query["page"]!);
             ordersHttpContext.Response.ContentType = "application/json";
@@ -59,9 +59,9 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("-1")]
     [InlineData("1001")]
     [InlineData("abc")]
-    public async Task Pagina_de_ordens_invalida_devolve_o_400_do_accumulator_com_o_mesmo_corpo(string invalidOrdersPage)
+    public async Task InvalidOrdersPage_ReturnsAccumulator400WithSameBody(string invalidOrdersPage)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
             ordersHttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
             ordersHttpContext.Response.ContentType = "application/json";
@@ -84,9 +84,9 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("/api/orders?page=1%262", "GET ?page=1%262")]
     [InlineData("/api/orders?page=1&page=2", "GET ?page=1%2C2")]
     [InlineData("/api/orders", "GET ")]
-    public async Task So_a_pagina_de_ordens_chega_ao_accumulator_sem_mudar(string ordersPagePathAskedByClient, string expectedAccumulatorOrdersRequest)
+    public async Task OnlyOrdersPage_ReachesAccumulatorUnchanged(string ordersPagePathAskedByClient, string expectedAccumulatorOrdersRequest)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
             ordersHttpContext.Response.ContentType = "application/json";
             await ordersHttpContext.Response.WriteAsync(BuildAccumulatorOrdersPageJson(1, 0, []));
@@ -101,9 +101,9 @@ public sealed class OrdersProxyTests : IDisposable
     }
 
     [Fact]
-    public async Task Deletar_todas_as_ordens_repassa_ao_accumulator_e_devolve_204_sem_corpo()
+    public async Task DeleteAllOrders_ForwardsToAccumulator_AndReturns204WithoutBody()
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(ordersHttpContext =>
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(ordersHttpContext =>
         {
             ordersHttpContext.Response.StatusCode = StatusCodes.Status204NoContent;
             return Task.CompletedTask;
@@ -121,7 +121,7 @@ public sealed class OrdersProxyTests : IDisposable
     [Theory]
     [InlineData("GET", OrdersPageCommunicationMessage)]
     [InlineData("DELETE", OrdersDeletionCommunicationMessage)]
-    public async Task Rotas_de_ordens_com_accumulator_fora_do_ar_respondem_503_em_portugues(string ordersHttpMethod, string expectedCommunicationMessage)
+    public async Task OrdersRoutes_WhenAccumulatorIsDown_Return503InPortuguese(string ordersHttpMethod, string expectedCommunicationMessage)
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}");
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -137,9 +137,9 @@ public sealed class OrdersProxyTests : IDisposable
     [Theory]
     [InlineData("GET", OrdersPageCommunicationMessage)]
     [InlineData("DELETE", OrdersDeletionCommunicationMessage)]
-    public async Task Rotas_de_ordens_com_accumulator_sem_resposta_em_5_segundos_respondem_503(string ordersHttpMethod, string expectedCommunicationMessage)
+    public async Task OrdersRoutes_WhenAccumulatorTimesOutAfter5Seconds_Return503(string ordersHttpMethod, string expectedCommunicationMessage)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
             await Task.Delay(TimeSpan.FromSeconds(8), ordersHttpContext.RequestAborted));
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -159,10 +159,10 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("DELETE", StatusCodes.Status500InternalServerError, OrdersDeletionCommunicationMessage, "DELETE ")]
     [InlineData("DELETE", StatusCodes.Status200OK, OrdersDeletionCommunicationMessage, "DELETE ")]
     [InlineData("DELETE", StatusCodes.Status400BadRequest, OrdersDeletionCommunicationMessage, "DELETE ")]
-    public async Task Status_inesperado_do_accumulator_nas_rotas_de_ordens_vira_503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedCommunicationMessage,
+    public async Task UnexpectedAccumulatorStatusOnOrdersRoutes_Becomes503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedCommunicationMessage,
         string expectedAccumulatorOrdersRequest)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
             ordersHttpContext.Response.StatusCode = unexpectedAccumulatorStatus;
             if (unexpectedAccumulatorStatus != StatusCodes.Status204NoContent)
@@ -182,9 +182,9 @@ public sealed class OrdersProxyTests : IDisposable
     // CA-29: abrir o endereço, link pré-carregado, formulário ou outro verbo não apagam nada.
     // O DELETE de verdade no fim é a sentinela: prova que o accumulator falso estava ouvindo e só ele chegou.
     [Fact]
-    public async Task So_o_verbo_DELETE_apaga_as_ordens_e_nenhum_outro_cai_no_index()
+    public async Task OnlyDeleteVerb_DeletesOrders_AndNoOtherVerbFallsBackToIndex()
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(AnswerOrdersPageOrDeletion);
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(AnswerOrdersPageOrDeletion);
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(),
             fakeAccumulator.FakeAccumulatorUrl, _temporaryWebRoot);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -219,9 +219,9 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("GET", HttpStatusCode.OK, "GET ?page=1")]
     [InlineData("DELETE", HttpStatusCode.NoContent, "DELETE ")]
     [InlineData("OPTIONS", HttpStatusCode.NotFound, null)]
-    public async Task Rotas_de_ordens_nao_liberam_CORS_para_outro_site(string ordersHttpMethod, HttpStatusCode expectedOrdersResponseStatus, string? expectedAccumulatorOrdersRequest)
+    public async Task OrdersRoutes_DoNotAllowCrossSiteCors(string ordersHttpMethod, HttpStatusCode expectedOrdersResponseStatus, string? expectedAccumulatorOrdersRequest)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(AnswerOrdersPageOrDeletion);
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(AnswerOrdersPageOrDeletion);
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
         var crossSiteOrdersRequest = new HttpRequestMessage(new HttpMethod(ordersHttpMethod), "/api/orders?page=1");
@@ -245,9 +245,9 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("GET", "/api/orders?page=abc", true, HttpStatusCode.BadRequest)]
     [InlineData("DELETE", "/api/orders", true, HttpStatusCode.NoContent)]
     [InlineData("GET", "/api/orders?page=1", false, HttpStatusCode.ServiceUnavailable)]
-    public async Task Rotas_de_ordens_nao_escrevem_log_Information(string ordersHttpMethod, string ordersPath, bool isAccumulatorRunning, HttpStatusCode expectedOrdersResponseStatus)
+    public async Task OrdersRoutes_DoNotWriteInformationLogs(string ordersHttpMethod, string ordersPath, bool isAccumulatorRunning, HttpStatusCode expectedOrdersResponseStatus)
     {
-        await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
             if (ordersHttpContext.Request.Query["page"] == "abc")
             {
@@ -259,23 +259,23 @@ public sealed class OrdersProxyTests : IDisposable
             await AnswerOrdersPageOrDeletion(ordersHttpContext);
         });
         var accumulatorBaseUrl = isAccumulatorRunning ? fakeAccumulator.FakeAccumulatorUrl : $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}";
-        var orderGeneratorCapturedLogs = new OrderGeneratorCapturedLogs();
+        var orderGeneratorLogCaptureProvider = new OrderGeneratorLogCaptureProvider();
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), accumulatorBaseUrl)
             .WithWebHostBuilder(orderGeneratorWebHostBuilder =>
-                orderGeneratorWebHostBuilder.ConfigureLogging(orderGeneratorLogging => orderGeneratorLogging.AddProvider(orderGeneratorCapturedLogs)));
+                orderGeneratorWebHostBuilder.ConfigureLogging(orderGeneratorLogging => orderGeneratorLogging.AddProvider(orderGeneratorLogCaptureProvider)));
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
         // Sem isto o teste passaria com o log todo desligado: o nível Information do app tem de estar ligado.
         var orderGeneratorLoggerFactory = orderGeneratorFactory.Services.GetRequiredService<ILoggerFactory>();
         Assert.True(orderGeneratorLoggerFactory.CreateLogger("OrderGenerator").IsEnabled(LogLevel.Information));
         // E o capturador tem de estar ligado nesse caminho: uma linha Information do app chega até ele.
         orderGeneratorLoggerFactory.CreateLogger("OrderGenerator").LogInformation("sonda-do-capturador");
-        Assert.Contains("Information OrderGenerator: sonda-do-capturador", orderGeneratorCapturedLogs.CapturedLogLines);
-        orderGeneratorCapturedLogs.ForgetCapturedLogLines();
+        Assert.Contains("Information OrderGenerator: sonda-do-capturador", orderGeneratorLogCaptureProvider.CapturedLogLines);
+        orderGeneratorLogCaptureProvider.ForgetCapturedLogLines();
 
         var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), ordersPath));
 
         Assert.Equal(expectedOrdersResponseStatus, ordersResponse.StatusCode);
-        Assert.DoesNotContain(orderGeneratorCapturedLogs.CapturedLogLines, capturedLogLine => capturedLogLine.StartsWith($"{LogLevel.Information} "));
+        Assert.DoesNotContain(orderGeneratorLogCaptureProvider.CapturedLogLines, capturedLogLine => capturedLogLine.StartsWith($"{LogLevel.Information} "));
     }
 
     private static async Task AnswerOrdersPageOrDeletion(HttpContext ordersHttpContext)
@@ -303,7 +303,7 @@ public sealed class OrdersProxyTests : IDisposable
         Assert.Equal(expectedCommunicationMessage, communicationErrorResponse.GetProperty("message").GetString());
     }
 
-    private static async Task<FakeOrdersAccumulator> StartFakeAccumulator(RequestDelegate accumulatorOrdersHandler)
+    private static async Task<FakeOrdersAccumulator> StartFakeOrdersAccumulator(RequestDelegate accumulatorOrdersHandler)
     {
         var fakeAccumulatorUrl = $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}";
         var fakeAccumulatorBuilder = WebApplication.CreateSlimBuilder();
@@ -325,7 +325,7 @@ public sealed class OrdersProxyTests : IDisposable
         public ValueTask DisposeAsync() => FakeAccumulatorApp.DisposeAsync();
     }
 
-    private sealed class OrderGeneratorCapturedLogs : ILoggerProvider
+    private sealed class OrderGeneratorLogCaptureProvider : ILoggerProvider
     {
         private readonly ConcurrentQueue<string> capturedOrderGeneratorLogLines = new();
         public IReadOnlyList<string> CapturedLogLines => capturedOrderGeneratorLogLines.ToList();
