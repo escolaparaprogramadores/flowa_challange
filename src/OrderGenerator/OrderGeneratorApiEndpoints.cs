@@ -15,11 +15,15 @@ public static class OrderGeneratorApiEndpoints
     public const string RejectedOrderWithoutTextMessage = "Ordem rejeitada.";
     public const string OrderCommunicationMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
     public const string ExposureCommunicationMessage = "Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.";
+    public const string OrdersPageCommunicationMessage = "Não foi possível ler as ordens no OrderAccumulator. Tente de novo em instantes.";
+    public const string OrdersDeletionCommunicationMessage = "Não foi possível apagar as ordens no OrderAccumulator. Tente de novo em instantes.";
     public const string UnexpectedErrorMessage = "Erro inesperado ao processar a ordem.";
 
     public static void MapOrderGeneratorRoutes(this WebApplication orderGeneratorApp, string buildCommitSha)
     {
         orderGeneratorApp.MapPost("/api/orders", PostOrder);
+        orderGeneratorApp.MapGet("/api/orders", GetOrdersPage);
+        orderGeneratorApp.MapDelete("/api/orders", DeleteAllOrders);
         orderGeneratorApp.MapGet("/api/exposures", GetExposures);
         orderGeneratorApp.MapGet("/health", () => Results.Text("Healthy"));
         orderGeneratorApp.MapGet("/version", () => Results.Json(new { commit = buildCommitSha }));
@@ -85,6 +89,53 @@ public static class OrderGeneratorApiEndpoints
         {
             // Cancelamento sem pedido de quem chamou é o timeout de 5 s do HttpClient.
             return BuildOrderAccumulatorCommunicationErrorResponse(ExposureCommunicationMessage);
+        }
+    }
+
+    private static Task<IResult> GetOrdersPage(HttpRequest ordersPageHttpRequest, IHttpClientFactory accumulatorHttpClientFactory, CancellationToken requestAborted)
+    {
+        // Só a página segue adiante: o tamanho da página é fixo no accumulator e o do cliente é ignorado.
+        var accumulatorOrdersPagePath = ordersPageHttpRequest.Query.TryGetValue("page", out var requestedOrdersPage)
+            ? $"/api/orders?page={Uri.EscapeDataString(requestedOrdersPage.ToString())}"
+            : "/api/orders";
+
+        return CallOrderAccumulatorOrdersRoute(accumulatorHttpClientFactory, OrdersPageCommunicationMessage, requestAborted, async accumulatorClient =>
+        {
+            using var accumulatorOrdersPageResponse = await accumulatorClient.GetAsync(accumulatorOrdersPagePath, requestAborted);
+            // O 400 de página inválida volta igual, com o corpo validation_error do accumulator.
+            if (accumulatorOrdersPageResponse.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.BadRequest))
+                return BuildOrderAccumulatorCommunicationErrorResponse(OrdersPageCommunicationMessage);
+
+            var ordersPageJson = await accumulatorOrdersPageResponse.Content.ReadAsStringAsync(requestAborted);
+            return Results.Content(ordersPageJson, "application/json", statusCode: (int)accumulatorOrdersPageResponse.StatusCode);
+        });
+    }
+
+    private static Task<IResult> DeleteAllOrders(IHttpClientFactory accumulatorHttpClientFactory, CancellationToken requestAborted) =>
+        CallOrderAccumulatorOrdersRoute(accumulatorHttpClientFactory, OrdersDeletionCommunicationMessage, requestAborted, async accumulatorClient =>
+        {
+            using var accumulatorOrdersDeletionResponse = await accumulatorClient.DeleteAsync("/api/orders", requestAborted);
+            return accumulatorOrdersDeletionResponse.StatusCode == HttpStatusCode.NoContent
+                ? Results.NoContent()
+                : BuildOrderAccumulatorCommunicationErrorResponse(OrdersDeletionCommunicationMessage);
+        });
+
+    private static async Task<IResult> CallOrderAccumulatorOrdersRoute(IHttpClientFactory accumulatorHttpClientFactory, string communicationErrorMessage,
+        CancellationToken requestAborted, Func<HttpClient, Task<IResult>> accumulatorOrdersCall)
+    {
+        var accumulatorClient = accumulatorHttpClientFactory.CreateClient(AccumulatorHttpClientName);
+        try
+        {
+            return await accumulatorOrdersCall(accumulatorClient);
+        }
+        catch (HttpRequestException)
+        {
+            return BuildOrderAccumulatorCommunicationErrorResponse(communicationErrorMessage);
+        }
+        catch (TaskCanceledException) when (!requestAborted.IsCancellationRequested)
+        {
+            // Cancelamento sem pedido de quem chamou é o timeout de 5 s do HttpClient.
+            return BuildOrderAccumulatorCommunicationErrorResponse(communicationErrorMessage);
         }
     }
 
