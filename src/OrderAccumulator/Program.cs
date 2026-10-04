@@ -46,7 +46,7 @@ orderAccumulatorApp.MapGet("/api/exposures", async (IExposureReader exposureRead
 // O teto de páginas limita o custo de um OFFSET grande no banco (parecer de arquitetura da rodada).
 const int MaxOrderListPageNumber = 1000;
 
-orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, PostgresOrderHistory orderHistory, CancellationToken cancellationToken) =>
+orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, OrderHistoryRepository orderHistoryRepository, CancellationToken cancellationToken) =>
 {
     if (!TryReadOrderListPageNumber(orderListRequest.Query["page"], out var orderListPageNumber))
     {
@@ -60,17 +60,17 @@ orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, P
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    var storedOrderPage = await orderHistory.ReadStoredOrderPageAsync(orderListPageNumber, cancellationToken);
+    var storedOrderPage = await orderHistoryRepository.ReadStoredOrderPageAsync(orderListPageNumber, cancellationToken);
     return Results.Json(new OrderPageResponse(
-        orderListPageNumber, PostgresOrderHistory.OrdersPerPage, storedOrderPage.TotalStoredOrders,
+        orderListPageNumber, OrderHistoryRepository.OrdersPerPage, storedOrderPage.TotalStoredOrders,
         storedOrderPage.StoredOrders.Select(ToListedOrderResponse).ToList()));
 });
 
-orderAccumulatorApp.MapDelete("/api/orders", async (PostgresOrderHistory orderHistory, SymbolExposureMemory symbolExposureMemory, CancellationToken cancellationToken) =>
+orderAccumulatorApp.MapDelete("/api/orders", async (OrderHistoryRepository orderHistoryRepository, SymbolExposureMemory symbolExposureMemory, CancellationToken cancellationToken) =>
 {
     // Depois de entrar, o apagar vai até o fim mesmo se o cliente desistir: banco e memória zeram juntos.
     await symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(
-        () => orderHistory.DeleteAllOrdersAndZeroExposuresAsync(CancellationToken.None), cancellationToken);
+        () => orderHistoryRepository.DeleteAllOrdersAndZeroExposuresAsync(CancellationToken.None), cancellationToken);
     return Results.NoContent();
 });
 

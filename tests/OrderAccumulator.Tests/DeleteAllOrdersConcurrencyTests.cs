@@ -12,7 +12,7 @@ namespace OrderAccumulator.Tests;
 public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper concurrencyTestOutput)
 {
     private const int OrdersPerWave = 100;
-    private const int StoredOrdersBeforeFiringTheDeletes = 30;
+    private const int StoredOrdersCountBeforeFiringTheDeletes = 30;
     private const int SimultaneousDeletesPerRound = 5;
 
     // Tempo para um passo que não deveria acontecer ter acontecido, se a porta estivesse aberta.
@@ -29,25 +29,25 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         {
             orderInsideTheDoor.SetResult();
             await releaseTheOrder.Task;
-            var acceptedOrder = NewAcceptedBuyOrderOutcome("PETR4", 100, 10.00m);
-            symbolExposureMemory.ApplyAcceptedOrder(acceptedOrder);
-            return acceptedOrder;
+            var acceptedOrderOutcome = NewAcceptedBuyOrderOutcome("PETR4", 100, 10.00m);
+            symbolExposureMemory.ApplyAcceptedOrder(acceptedOrderOutcome);
+            return acceptedOrderOutcome;
         }, CancellationToken.None);
         await orderInsideTheDoor.Task.WaitAsync(ConcurrencyStepDeadline);
 
-        var storedDeleteStarted = false;
+        var hasStoredDeleteStarted = false;
         var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
         {
-            storedDeleteStarted = true;
+            hasStoredDeleteStarted = true;
             return Task.CompletedTask;
         }, CancellationToken.None);
         await Task.Delay(TimeForABlockedStepToSneakIn);
-        var storedDeleteStartedWhileTheOrderWasInside = storedDeleteStarted;
+        var hadStoredDeleteStartedWhileTheOrderWasInside = hasStoredDeleteStarted;
         releaseTheOrder.SetResult();
         await Task.WhenAll(orderInProgress, deleteAllOrdersTask).WaitAsync(ConcurrencyStepDeadline);
 
-        Assert.False(storedDeleteStartedWhileTheOrderWasInside);
-        Assert.True(storedDeleteStarted);
+        Assert.False(hadStoredDeleteStartedWhileTheOrderWasInside);
+        Assert.True(hasStoredDeleteStarted);
         Assert.Equal([new("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)], symbolExposureMemory.CurrentSymbolExposures());
     }
 
@@ -65,20 +65,20 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         }, CancellationToken.None);
         await deleteInsideTheDoor.Task.WaitAsync(ConcurrencyStepDeadline);
 
-        var orderProcessingStarted = false;
+        var hasOrderProcessingStarted = false;
         var orderArrivingDuringDelete = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(() =>
         {
-            orderProcessingStarted = true;
-            var acceptedOrder = NewAcceptedBuyOrderOutcome("PETR4", 100, 10.00m);
-            symbolExposureMemory.ApplyAcceptedOrder(acceptedOrder);
-            return Task.FromResult(acceptedOrder);
+            hasOrderProcessingStarted = true;
+            var acceptedOrderOutcome = NewAcceptedBuyOrderOutcome("PETR4", 100, 10.00m);
+            symbolExposureMemory.ApplyAcceptedOrder(acceptedOrderOutcome);
+            return Task.FromResult(acceptedOrderOutcome);
         }, CancellationToken.None);
         await Task.Delay(TimeForABlockedStepToSneakIn);
-        var orderStartedWhileTheDeleteWasInside = orderProcessingStarted;
+        var hadOrderStartedWhileTheDeleteWasInside = hasOrderProcessingStarted;
         releaseTheDelete.SetResult();
         await Task.WhenAll(deleteAllOrdersTask, orderArrivingDuringDelete).WaitAsync(ConcurrencyStepDeadline);
 
-        Assert.False(orderStartedWhileTheDeleteWasInside);
+        Assert.False(hadOrderStartedWhileTheDeleteWasInside);
         Assert.Equal([new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)], symbolExposureMemory.CurrentSymbolExposures());
     }
 
@@ -189,34 +189,34 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<SymbolExposureMemory>();
         var orderAccumulatorClient = orderAccumulatorTestApp.CreateClient();
         var orderQuantityGenerator = new Random(concurrencyRound);
-        var ordersStoredBeforeTheDeletes = 0;
+        var storedOrdersCountBeforeTheDeletes = 0;
         var enoughOrdersStoredToFireTheDeletes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var ordersBeforeTheDeletes = NewOrdersMixingSymbolsAndSides(OrdersPerWave, orderQuantityGenerator).Select(symbolAndSideMixedOrder => Task.Run(async () =>
         {
             var orderOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(symbolAndSideMixedOrder);
-            if (Interlocked.Increment(ref ordersStoredBeforeTheDeletes) == StoredOrdersBeforeFiringTheDeletes)
+            if (Interlocked.Increment(ref storedOrdersCountBeforeTheDeletes) == StoredOrdersCountBeforeFiringTheDeletes)
                 enoughOrdersStoredToFireTheDeletes.TrySetResult();
             return orderOutcome;
         })).ToList();
         await enoughOrdersStoredToFireTheDeletes.Task.WaitAsync(TimeSpan.FromMinutes(2));
-        var ordersInProgressWhenTheDeletesFired = ordersBeforeTheDeletes.Count(orderBeforeTheDeletes => !orderBeforeTheDeletes.IsCompleted);
+        var ordersInProgressCountWhenTheDeletesFired = ordersBeforeTheDeletes.Count(orderBeforeTheDeletes => !orderBeforeTheDeletes.IsCompleted);
         var deleteResponses = await Task.WhenAll(Enumerable.Range(0, SimultaneousDeletesPerRound)
             .Select(_ => Task.Run(() => orderAccumulatorClient.DeleteAsync("/api/orders")))).WaitAsync(TimeSpan.FromMinutes(2));
         var ordersAfterTheDeletes = NewOrdersMixingSymbolsAndSides(OrdersPerWave, orderQuantityGenerator)
             .Select(symbolAndSideMixedOrder => Task.Run(() => appOrderProcessor.ProcessIncomingOrderAsync(symbolAndSideMixedOrder))).ToList();
         var orderOutcomes = await Task.WhenAll(ordersBeforeTheDeletes.Concat(ordersAfterTheDeletes)).WaitAsync(TimeSpan.FromMinutes(2));
 
-        var remainingStoredOrders = await orderAccumulatorDatabase.CountStoredOrdersAsync();
+        var remainingStoredOrdersCount = await orderAccumulatorDatabase.CountStoredOrdersAsync();
         var storedExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
         concurrencyTestOutput.WriteLine(
-            $"rodada {concurrencyRound}: {ordersInProgressWhenTheDeletesFired} ordens em curso quando os apagar saíram; " +
-            $"{remainingStoredOrders} ordens sobraram; " +
+            $"rodada {concurrencyRound}: {ordersInProgressCountWhenTheDeletesFired} ordens em curso quando os apagar saíram; " +
+            $"{remainingStoredOrdersCount} ordens sobraram; " +
             string.Join(", ", storedExposures.Select(storedExposure => $"{storedExposure.Symbol}={storedExposure.Exposure}")));
         Assert.All(orderOutcomes, orderOutcome => Assert.True(orderOutcome.Accepted));
         Assert.All(deleteResponses, deleteResponse => Assert.Equal(System.Net.HttpStatusCode.NoContent, deleteResponse.StatusCode));
-        Assert.InRange(ordersInProgressWhenTheDeletesFired, 1, OrdersPerWave - StoredOrdersBeforeFiringTheDeletes);
-        Assert.InRange(remainingStoredOrders, OrdersPerWave, 2 * OrdersPerWave - StoredOrdersBeforeFiringTheDeletes);
+        Assert.InRange(ordersInProgressCountWhenTheDeletesFired, 1, OrdersPerWave - StoredOrdersCountBeforeFiringTheDeletes);
+        Assert.InRange(remainingStoredOrdersCount, OrdersPerWave, 2 * OrdersPerWave - StoredOrdersCountBeforeFiringTheDeletes);
         Assert.Equal(storedExposures, appSymbolExposureMemory.CurrentSymbolExposures());
         foreach (var storedExposure in storedExposures)
             Assert.Equal(await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync(storedExposure.Symbol), storedExposure.Exposure);

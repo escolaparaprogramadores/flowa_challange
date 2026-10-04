@@ -47,11 +47,11 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
 
         await orderAccumulatorTestApp.CreateClient().DeleteAsync("/api/orders");
         var exposureMemoryAfterDelete = appSymbolExposureMemory.CurrentSymbolExposures();
-        var orderAfterDelete = await orderAccumulatorTestApp.Services.GetRequiredService<IOrderProcessor>()
+        var orderOutcomeAfterDelete = await orderAccumulatorTestApp.Services.GetRequiredService<IOrderProcessor>()
             .ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 2.50m));
 
         Assert.Equal(ZeroedSymbolExposures, exposureMemoryAfterDelete);
-        Assert.True(orderAfterDelete.Accepted);
+        Assert.True(orderOutcomeAfterDelete.Accepted);
         SymbolExposure[] exposuresAfterTheNewOrder = [new("PETR4", 0m), new("VALE3", 25.00m), new("VIIA4", 0m)];
         Assert.Equal(exposuresAfterTheNewOrder, appSymbolExposureMemory.CurrentSymbolExposures());
         Assert.Equal(exposuresAfterTheNewOrder, await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
@@ -113,10 +113,10 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         await ProcessOneOrderOnEachSymbolAsync(orderAccumulatorTestApp);
         var orderAccumulatorClient = orderAccumulatorTestApp.CreateClient();
 
-        var preflightResponse = await orderAccumulatorClient.SendAsync(OrdersRequestFromOtherSite(HttpMethod.Options, ("Access-Control-Request-Method", "DELETE")));
+        var preflightResponse = await orderAccumulatorClient.SendAsync(NewOrdersRequestFromOtherSite(HttpMethod.Options, ("Access-Control-Request-Method", "DELETE")));
         var ordersCountAfterPreflight = await orderAccumulatorDatabase.CountStoredOrdersAsync();
-        var getFromOtherSiteResponse = await orderAccumulatorClient.SendAsync(OrdersRequestFromOtherSite(HttpMethod.Get));
-        var deleteFromOtherSiteResponse = await orderAccumulatorClient.SendAsync(OrdersRequestFromOtherSite(HttpMethod.Delete));
+        var getFromOtherSiteResponse = await orderAccumulatorClient.SendAsync(NewOrdersRequestFromOtherSite(HttpMethod.Get));
+        var deleteFromOtherSiteResponse = await orderAccumulatorClient.SendAsync(NewOrdersRequestFromOtherSite(HttpMethod.Delete));
 
         Assert.Equal(HttpStatusCode.MethodNotAllowed, preflightResponse.StatusCode);
         Assert.Equal(3L, ordersCountAfterPreflight);
@@ -138,10 +138,10 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         await new PostgresOrderProcessor(deleteFailureDataSource).ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
         var symbolExposureMemory = new SymbolExposureMemory();
         symbolExposureMemory.LoadStoredExposures(await deleteFailureExposureReader.GetSymbolExposuresAsync());
-        var orderHistory = new PostgresOrderHistory(deleteFailureDataSource);
+        var orderHistoryRepository = new OrderHistoryRepository(deleteFailureDataSource);
 
         var refusedDeleteException = await Assert.ThrowsAsync<PostgresException>(() => symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(
-            () => orderHistory.DeleteAllOrdersAndZeroExposuresAsync(), CancellationToken.None));
+            () => orderHistoryRepository.DeleteAllOrdersAndZeroExposuresAsync(), CancellationToken.None));
 
         Assert.Equal("P0001", refusedDeleteException.SqlState);
         SymbolExposure[] exposuresBeforeTheFailedDelete = [new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
@@ -151,7 +151,7 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         Assert.Equal(1L, await deleteFailureConnection.ExecuteScalarAsync<long>("SELECT count(*) FROM orders"));
     }
 
-    private static HttpRequestMessage OrdersRequestFromOtherSite(HttpMethod ordersRouteMethod, params (string Name, string Value)[] extraRequestHeaders)
+    private static HttpRequestMessage NewOrdersRequestFromOtherSite(HttpMethod ordersRouteMethod, params (string Name, string Value)[] extraRequestHeaders)
     {
         var ordersRequestFromOtherSite = new HttpRequestMessage(ordersRouteMethod, "/api/orders");
         ordersRequestFromOtherSite.Headers.Add("Origin", OtherSiteOrigin);

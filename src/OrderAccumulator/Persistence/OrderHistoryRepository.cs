@@ -6,7 +6,7 @@ using Npgsql;
 namespace OrderAccumulator.Persistence;
 
 // A lista de ordens da tela e o "Deletar tudo" (GET e DELETE /api/orders).
-public sealed class PostgresOrderHistory(NpgsqlDataSource orderDatabaseDataSource)
+public sealed class OrderHistoryRepository(NpgsqlDataSource orderDatabaseDataSource)
 {
     public const int OrdersPerPage = 10;
 
