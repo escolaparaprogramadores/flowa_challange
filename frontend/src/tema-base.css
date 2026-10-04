@@ -80,6 +80,13 @@
   --fundo-linhas-da-grade: linear-gradient(to right, rgba(232, 239, 238, 0.035) 1px, transparent 1px), linear-gradient(to bottom, rgba(232, 239, 238, 0.035) 1px, transparent 1px);
   --tamanho-quadro-da-grade: 56px 56px;
   --mascara-some-para-baixo: linear-gradient(to bottom, #000 0, transparent 100%);
+  --texto-numero-do-ativo: 20px;
+  --tamanho-icone-do-ativo: 34px;
+  --raio-icone-do-ativo: 10px;
+  --fundo-cartao-do-ativo: linear-gradient(#0f1f22, #0e1b1e);
+  --altura-barra-uso-do-limite: 6px;
+  --barra-uso-do-limite: linear-gradient(90deg, #2fc795, #4fe3b0);
+  --barra-uso-perto-do-limite: linear-gradient(90deg, #e9a73c, #f4c56a);
 }
 * { box-sizing: border-box; }
 /* A página abre em 90% sem a pessoa mexer no zoom do navegador. O zoom quebra 100dvh e position: sticky:
@@ -125,14 +132,33 @@ button { cursor: pointer; }
 .boleta { grid-area: nova-ordem; }
 .painel { background: var(--cor-card); border: 1px solid var(--cor-borda); border-radius: var(--raio-painel); box-shadow: var(--sombra-cartao); overflow: hidden; min-width: 0; }
 .painel-cabeca { margin: 0; padding: var(--espaco-4-5) var(--espaco-5); font-size: var(--texto-corpo); font-weight: 800; border-bottom: 1px solid var(--cor-borda); }
-.exposicao-lista { margin: 0; padding: 0; list-style: none; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
-.exposicao-item { padding: var(--espaco-4) var(--espaco-5); border-left: 1px solid var(--cor-divisor); }
-.exposicao-item:first-child { border-left: 0; }
-.exposicao-simbolo { font-weight: 800; font-size: var(--texto-corpo); }
-.exposicao-dados { margin: var(--espaco-2) 0 0; display: grid; grid-template-columns: auto 1fr; gap: var(--espaco-1-5) var(--espaco-3); }
-.exposicao-dados dt { font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-rotulo); }
-.exposicao-dados dd { margin: 0; font-size: var(--texto-corpo-menor); font-weight: 700; text-align: right; }
-.exposicao-aviso { padding: var(--espaco-4) var(--espaco-5); font-size: var(--texto-rotulo); color: var(--cor-texto-apagado); line-height: 1.5; }
+/* Cada ativo é um cartão próprio; a seção guarda a classe "painel" só para a grade, sem o visual de painel. */
+.exposicao.painel { background: none; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+.exposicao-cabeca { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--espaco-2) var(--espaco-4); margin-bottom: var(--espaco-3-5); }
+.exposicao-titulo { margin: 0; font-family: var(--fonte-display); font-weight: 600; font-size: var(--texto-cartao-titulo); }
+.exposicao-limite { margin: 0; font-size: var(--texto-rotulo); font-weight: 600; color: var(--cor-texto-rotulo); }
+.exposicao-lista { margin: 0; padding: 0; list-style: none; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--espaco-3-5); }
+.exposicao-item { display: flex; flex-direction: column; gap: var(--espaco-4); min-width: 0; padding: var(--espaco-4-5) var(--espaco-5); background: var(--fundo-cartao-do-ativo); border: 1px solid var(--cor-borda); border-radius: var(--raio-painel); box-shadow: var(--sombra-cartao); }
+.exposicao-ativo { display: flex; align-items: center; gap: var(--espaco-3); }
+.exposicao-icone { display: inline-grid; place-items: center; flex: none; width: var(--tamanho-icone-do-ativo); height: var(--tamanho-icone-do-ativo); background: var(--cor-afundado); border: 1px solid var(--cor-borda); border-radius: var(--raio-icone-do-ativo); color: var(--cor-acento); }
+.exposicao-icone svg { width: 16px; height: 16px; }
+.exposicao-simbolo { margin: 0; font-family: var(--fonte-display); font-weight: 700; font-size: var(--texto-corpo); }
+/* Os dois valores ficam lado a lado; sem espaço, "Falta até o limite" desce inteira, e nenhum número quebra no meio. */
+.exposicao-dados { margin: 0; display: flex; flex-wrap: wrap; gap: var(--espaco-3) var(--espaco-6); }
+.exposicao-dados > div { flex: 1 1 0; min-width: max-content; }
+.exposicao-dados dt { font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-rotulo); white-space: nowrap; }
+.exposicao-dados dd { margin: var(--espaco-1-5) 0 0; font-family: var(--fonte-display); font-weight: 600; font-size: var(--texto-corpo); white-space: nowrap; }
+.exposicao-dados .exposicao-atual { font-size: var(--texto-numero-do-ativo); }
+.uso-do-limite { display: flex; flex-direction: column; gap: var(--espaco-2); }
+.uso-do-limite-trilho { height: var(--altura-barra-uso-do-limite); background: var(--cor-divisor); border-radius: var(--raio-pill); overflow: hidden; }
+.uso-do-limite-preenchimento { display: block; height: 100%; background-image: var(--barra-uso-do-limite); border-radius: var(--raio-pill); }
+/* Exposição diferente de zero sempre aparece na barra, mesmo quando a fatia do limite não chega a 1 px. */
+.uso-do-limite-preenchimento.com-exposicao { min-width: var(--altura-barra-uso-do-limite); }
+.uso-do-limite-preenchimento.perto-do-limite { background-image: var(--barra-uso-perto-do-limite); }
+.uso-do-limite-legenda { margin: 0; display: flex; justify-content: space-between; gap: var(--espaco-3); font-size: var(--texto-legenda); color: var(--cor-texto-rotulo); }
+.uso-do-limite-legenda .num { font-weight: 700; color: var(--cor-texto); }
+.uso-do-limite-legenda .perto-do-limite { color: var(--cor-aviso-texto); }
+.exposicao-aviso { margin: 0; padding: var(--espaco-4) var(--espaco-5); background: var(--cor-card); border: 1px solid var(--cor-borda); border-radius: var(--raio-painel); font-size: var(--texto-rotulo); color: var(--cor-texto-apagado); line-height: 1.5; }
 .exposicao-aviso.erro { color: var(--cor-perigo-texto); font-weight: 700; }
 .cartao {
   background: var(--cor-card);
@@ -164,7 +190,5 @@ button { cursor: pointer; }
   .titulo { font-size: var(--texto-titulo-celular); }
   .grade { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'ativos' 'nova-ordem' 'compra-venda'; }
   .exposicao-lista { grid-auto-flow: row; }
-  .exposicao-item { border-left: 0; border-top: 1px solid var(--cor-divisor); }
-  .exposicao-item:first-child { border-top: 0; }
   .cartao { padding: var(--espaco-5); }
 }
