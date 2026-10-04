@@ -235,6 +235,9 @@ test('CA-11 e RNF-01: em 1440 px os códigos de 32 letras aparecem inteiros, cad
   expect(tabelaCabeSemRolar).toBe(true);
   await expect(molduraDaTabela).toHaveCSS('background-color', 'rgb(11, 23, 25)');
   const cabecalhoDaData = cartaoCompraVenda(page).locator('thead th').first();
+  // Em 1440 px vale a tabela da maquete: cabeçalho à vista e a ordem numa linha só, sem rótulo por campo.
+  await expect(cabecalhoDaData).toBeVisible();
+  await expect(linhaDoTopo).toHaveCSS('display', 'table-row');
   await expect(cabecalhoDaData).toHaveCSS('font-size', '11px');
   await expect(cabecalhoDaData).toHaveCSS('text-transform', 'uppercase');
   await expect(cabecalhoDaData).toHaveCSS('color', 'rgb(143, 163, 161)');
@@ -259,5 +262,32 @@ for (const larguraDaJanela of [375, 860, 1440, 1920]) {
     const larguraDoConteudo = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
     expect(larguraDoConteudo).toBe(true);
     if (larguraDaJanela === 375) await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, '06-lista-375.png'), fullPage: true });
+  });
+}
+
+const ROTULOS_DOS_CAMPOS_DA_ORDEM = [
+  ['data', 'Data'], ['status', 'Status'], ['ativo', 'Ativo'], ['lado', 'Lado'], ['quantidade', 'Quantidade'],
+  ['preco', 'Preço'], ['numero-da-ordem', 'Número da ordem'], ['identificador-do-envio', 'Identificador do envio'],
+] as const;
+
+for (const larguraDaJanela of [375, 860, 1280]) {
+  test(`CA-26 e ASSUMI-04: em ${larguraDaJanela} px cada ordem vira um bloco com os 8 campos rotulados, todos à vista dentro do cartão`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 900 });
+    await page.goto('/');
+    const linhaDoTopo = linhasDaLista(page).first();
+    await expect(linhaDoTopo).toBeVisible();
+    await expect(linhaDoTopo).toHaveCSS('display', 'block');
+    const caixaDoCartao = (await cartaoCompraVenda(page).boundingBox())!;
+    for (const [colunaDoCampo, rotuloDoCampo] of ROTULOS_DOS_CAMPOS_DA_ORDEM) {
+      const celulaDoCampo = celulaDaLinha(linhaDoTopo, colunaDoCampo);
+      await expect(celulaDoCampo, colunaDoCampo).toBeVisible();
+      expect(await celulaDoCampo.evaluate((celulaNaPagina) => getComputedStyle(celulaNaPagina, '::before').content), colunaDoCampo).toBe(`"${rotuloDoCampo}"`);
+      const caixaDoCampo = (await celulaDoCampo.boundingBox())!;
+      expect(caixaDoCampo.x, `${colunaDoCampo}: começa dentro do cartão`).toBeGreaterThanOrEqual(caixaDoCartao.x);
+      expect(caixaDoCampo.x + caixaDoCampo.width, `${colunaDoCampo}: termina dentro do cartão`).toBeLessThanOrEqual(caixaDoCartao.x + caixaDoCartao.width);
+    }
+    const molduraSemRolagem = await cartaoCompraVenda(page).locator('.tabela-de-ordens-moldura').evaluate((molduraNaPagina) => molduraNaPagina.scrollWidth <= molduraNaPagina.clientWidth);
+    expect(molduraSemRolagem).toBe(true);
+    await expect(celulaDaLinha(linhaDoTopo, 'identificador-do-envio')).toHaveText(/^[0-9a-f]{32}$/i);
   });
 }

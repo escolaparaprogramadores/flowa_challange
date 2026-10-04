@@ -101,19 +101,21 @@ function LinhaDaOrdem({ ordemDaLista }: { ordemDaLista: OrdemDaLista }) {
   const recebidaNoHorarioDeBrasilia = formatarInstanteNoHorarioDeBrasilia(ordemDaLista.recebidaEm);
   return (
     <tr data-testid="linha-da-ordem">
-      <td data-coluna="data">
-        <span className="linha-da-ordem-dia num">{recebidaNoHorarioDeBrasilia.diaMesAno}</span>
-        <span className="linha-da-ordem-hora num">{recebidaNoHorarioDeBrasilia.horaMinuto}</span>
+      <td data-coluna="data" data-rotulo="Data">
+        <span className="linha-da-ordem-instante">
+          <span className="linha-da-ordem-dia num">{recebidaNoHorarioDeBrasilia.diaMesAno}</span>
+          <span className="linha-da-ordem-hora num">{recebidaNoHorarioDeBrasilia.horaMinuto}</span>
+        </span>
       </td>
-      <td data-coluna="status">
+      <td data-coluna="status" data-rotulo="Status">
         <span className={`selo-da-ordem selo-${ordemDaLista.situacao}`}>{ROTULO_DA_SITUACAO_DA_ORDEM_GRAVADA[ordemDaLista.situacao]}</span>
       </td>
-      <td data-coluna="ativo">{ordemDaLista.simbolo ?? '—'}</td>
-      <td data-coluna="lado">{ordemDaLista.lado ?? '—'}</td>
-      <td data-coluna="quantidade" className="num">{formatarQuantidade(ordemDaLista.quantidade)}</td>
-      <td data-coluna="preco" className="num">{formatarReais(ordemDaLista.precoEmReais)}</td>
-      <td data-coluna="numero-da-ordem" className="num linha-da-ordem-codigo">{ordemDaLista.orderId}</td>
-      <td data-coluna="identificador-do-envio" className="num linha-da-ordem-codigo">{ordemDaLista.clOrdId}</td>
+      <td data-coluna="ativo" data-rotulo="Ativo">{ordemDaLista.simbolo ?? '—'}</td>
+      <td data-coluna="lado" data-rotulo="Lado">{ordemDaLista.lado ?? '—'}</td>
+      <td data-coluna="quantidade" data-rotulo="Quantidade" className="num">{formatarQuantidade(ordemDaLista.quantidade)}</td>
+      <td data-coluna="preco" data-rotulo="Preço" className="num">{formatarReais(ordemDaLista.precoEmReais)}</td>
+      <td data-coluna="numero-da-ordem" data-rotulo="Número da ordem" className="num linha-da-ordem-codigo">{ordemDaLista.orderId}</td>
+      <td data-coluna="identificador-do-envio" data-rotulo="Identificador do envio" className="num linha-da-ordem-codigo">{ordemDaLista.clOrdId}</td>
     </tr>
   );
 }
