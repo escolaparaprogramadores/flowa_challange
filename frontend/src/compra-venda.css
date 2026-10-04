@@ -90,7 +90,8 @@
 /* A tabela inteira só cabe com o cartão largo (1440 px de tela ou mais). Abaixo disso, cada ordem
    vira um bloco com os campos empilhados e rotulados: nada fica escondido atrás de rolagem. */
 @container (max-width: 1030px) {
-  .tabela-de-ordens thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* Cada campo leva o próprio rótulo (td::before); o cabeçalho da tabela sai de cena. */
+  .tabela-de-ordens thead { display: none; }
   .tabela-de-ordens, .tabela-de-ordens tbody, .tabela-de-ordens tr { display: block; }
   .tabela-de-ordens tr { padding: var(--espaco-2) 0; border-top: 1px solid var(--cor-divisor); }
   .tabela-de-ordens tbody tr:first-child { border-top: 0; }

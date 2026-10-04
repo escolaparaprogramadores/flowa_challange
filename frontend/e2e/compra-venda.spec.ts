@@ -101,21 +101,26 @@ test('CA-14: sem ordens no banco, o cartão mostra o vazio com ícone e texto, s
 
 test('CA-11 e CA-36: duas ordens enviadas aparecem no topo, a mais nova em cima, com os 8 campos e os selos', async ({ page }) => {
   await apagarTodasAsOrdensNoServidor(page);
-  await page.goto('/');
-  await expect(cartaoCompraVenda(page).getByTestId('lista-de-ordens-vazia')).toBeVisible();
-  // Com a exposição zerada, a primeira compra grande cabe no limite e a segunda não: aceita e depois rejeitada.
-  const primeiroEnvio = await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '99.999', preco: '999,99' });
-  const segundoEnvio = await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '99.999', preco: '999,99' });
-  expect(primeiroEnvio.status).toBe('accepted');
-  expect(segundoEnvio.status).toBe('rejected');
+  try {
+    await page.goto('/');
+    await expect(cartaoCompraVenda(page).getByTestId('lista-de-ordens-vazia')).toBeVisible();
+    // Com a exposição zerada, a primeira compra grande cabe no limite e a segunda não: aceita e depois rejeitada.
+    const primeiroEnvio = await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '99.999', preco: '999,99' });
+    const segundoEnvio = await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '99.999', preco: '999,99' });
+    expect(primeiroEnvio.status).toBe('accepted');
+    expect(segundoEnvio.status).toBe('rejected');
 
-  const paginaNoServidor = await lerPrimeiraPaginaNoServidor(page);
-  expect(paginaNoServidor.orders.map((ordemNoServidor) => ordemNoServidor.clOrdId)).toEqual([segundoEnvio.clOrdId, primeiroEnvio.clOrdId]);
-  await expect(cartaoCompraVenda(page).locator('thead th')).toHaveText(COLUNAS_DA_LISTA);
-  await expect(linhasDaLista(page)).toHaveCount(2);
-  const precoEsperado = formatadorDeReais.format(999.99);
-  await conferirLinhaContraOServidor(linhasDaLista(page).nth(0), paginaNoServidor.orders[0], { ativo: 'PETR4', lado: 'Compra', quantidade: '99.999', preco: precoEsperado, selo: 'Rejeitada' });
-  await conferirLinhaContraOServidor(linhasDaLista(page).nth(1), paginaNoServidor.orders[1], { ativo: 'PETR4', lado: 'Compra', quantidade: '99.999', preco: precoEsperado, selo: 'Aceita' });
+    const paginaNoServidor = await lerPrimeiraPaginaNoServidor(page);
+    expect(paginaNoServidor.orders.map((ordemNoServidor) => ordemNoServidor.clOrdId)).toEqual([segundoEnvio.clOrdId, primeiroEnvio.clOrdId]);
+    await expect(cartaoCompraVenda(page).locator('thead th')).toHaveText(COLUNAS_DA_LISTA);
+    await expect(linhasDaLista(page)).toHaveCount(2);
+    const precoEsperado = formatadorDeReais.format(999.99);
+    await conferirLinhaContraOServidor(linhasDaLista(page).nth(0), paginaNoServidor.orders[0], { ativo: 'PETR4', lado: 'Compra', quantidade: '99.999', preco: precoEsperado, selo: 'Rejeitada' });
+    await conferirLinhaContraOServidor(linhasDaLista(page).nth(1), paginaNoServidor.orders[1], { ativo: 'PETR4', lado: 'Compra', quantidade: '99.999', preco: precoEsperado, selo: 'Aceita' });
+  } finally {
+    // A compra grande deixa PETR4 quase no limite; zerar de novo impede que as specs seguintes vejam rejeição.
+    await apagarTodasAsOrdensNoServidor(page);
+  }
 });
 
 test('CA-12: a ordem nova entra no topo sem recarregar e continua lá depois de recarregar', async ({ page }) => {
