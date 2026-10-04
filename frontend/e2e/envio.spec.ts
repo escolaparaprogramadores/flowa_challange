@@ -12,7 +12,7 @@ const COR_DO_STATUS_REJEITADO = 'rgb(255, 164, 151)';
 type OrdemDoTeste = { simbolo: string; lado: 'Compra' | 'Venda'; quantidade: string; preco: string };
 
 async function enviarOrdemPelaBoleta(paginaDaBoleta: Page, ordemDoTeste: OrdemDoTeste) {
-  await paginaDaBoleta.getByLabel('Símbolo').selectOption(ordemDoTeste.simbolo);
+  await paginaDaBoleta.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: ordemDoTeste.simbolo, exact: true }).click();
   await paginaDaBoleta.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: ordemDoTeste.lado }).click();
   await paginaDaBoleta.getByLabel(/^Quantidade de/).fill(ordemDoTeste.quantidade);
   await paginaDaBoleta.getByLabel('Preço por ação (R$)').fill(ordemDoTeste.preco);

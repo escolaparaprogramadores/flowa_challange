@@ -1,5 +1,18 @@
-/* Boleta (Nova ordem). Os tokens moram no :root de tema-base.css. */
-.alternador { display: grid; grid-template-columns: 1fr 1fr; gap: var(--espaco-1); padding: var(--espaco-1-5); margin: 0; border-radius: var(--raio-aba); border: 1px solid var(--cor-borda); background: var(--cor-afundado); }
+/* Boleta (Nova ordem). Os tokens gerais moram no :root de tema-base.css; aqui ficam só os que a boleta usa sozinha. */
+:root {
+  --cor-borda-trilho: #1e3236;
+  --brilho-opcao-compra: 0 0 18px rgba(79, 227, 176, 0.35);
+  --brilho-opcao-venda: 0 0 18px rgba(255, 164, 151, 0.32);
+  --brilho-enviar-compra: 0 10px 28px -6px rgba(79, 227, 176, 0.45);
+  --brilho-enviar-venda: 0 10px 28px -6px rgba(255, 164, 151, 0.42);
+  --anel-de-foco-do-campo: 0 0 0 3px rgba(79, 227, 176, 0.22);
+  --raio-campo: var(--raio-quantidade);
+  --recuo-do-foco-no-passo: -4px;
+  --altura-botao-enviar: 52px;
+  --letra-rotulo-do-campo: 0.08em;
+  --tamanho-icone-da-nota: 16px;
+}
+.alternador { display: grid; grid-template-columns: 1fr 1fr; gap: var(--espaco-1); padding: var(--espaco-1-5); margin: 0; border-radius: var(--raio-aba); border: 1px solid var(--cor-borda-trilho); background: var(--cor-afundado); }
 .alternador-opcao {
   height: var(--altura-aba);
   border: 0;
@@ -8,39 +21,58 @@
   color: var(--cor-texto-secundario);
   font-size: var(--texto-corpo-menor);
   font-weight: 700;
-  transition: background var(--transicao), color var(--transicao);
+  transition: background var(--transicao), color var(--transicao), box-shadow var(--transicao);
 }
 .alternador-opcao:hover { background: var(--cor-hover); }
-.alternador-opcao.compra[aria-pressed='true'] { background: var(--cor-acento); color: var(--cor-texto-sobre-acento); }
-.alternador-opcao.venda[aria-pressed='true'] { background: var(--cor-venda); color: var(--cor-texto-sobre-venda); }
+.alternador-opcao.compra[aria-pressed='true'] { background: var(--cor-acento); color: var(--cor-texto-sobre-acento); box-shadow: var(--brilho-opcao-compra); }
+.alternador-opcao.venda[aria-pressed='true'] { background: var(--cor-venda); color: var(--cor-texto-sobre-venda); box-shadow: var(--brilho-opcao-venda); }
 .campo { display: flex; flex-direction: column; gap: var(--espaco-2); }
-.campo-rotulo { font-size: var(--texto-rotulo); font-weight: 700; color: var(--cor-texto-terciario); }
-.seletor, .entrada {
+.campo-rotulo { font-size: var(--texto-legenda); font-weight: 700; letter-spacing: var(--letra-rotulo-do-campo); text-transform: uppercase; color: var(--cor-texto-rotulo); }
+.trilho-simbolo { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--espaco-1); padding: var(--espaco-1-5); border-radius: var(--raio-aba); border: 1px solid var(--cor-borda-trilho); background: var(--cor-afundado); }
+.simbolo-opcao {
+  height: var(--altura-aba);
+  min-width: 0;
+  border: 0;
+  border-radius: var(--raio-aba-interna);
+  background: transparent;
+  color: var(--cor-texto-secundario);
+  font-size: var(--texto-corpo-menor);
+  font-weight: 700;
+  transition: background var(--transicao), color var(--transicao);
+}
+.simbolo-opcao:hover { background: var(--cor-hover); }
+.simbolo-opcao[aria-pressed='true'] { background: var(--cor-texto); color: var(--cor-fundo); }
+.entrada {
   height: var(--altura-botao);
-  border-radius: var(--raio-botao);
+  border-radius: var(--raio-campo);
   border: 1.5px solid var(--cor-borda-forte);
   background: var(--cor-fundo);
   color: var(--cor-texto);
   padding: 0 var(--espaco-3-5);
   font-size: var(--texto-corpo);
   font-weight: 700;
-  transition: border-color var(--transicao);
+  transition: border-color var(--transicao), box-shadow var(--transicao);
 }
 .entrada::placeholder { color: var(--cor-texto-apagado); }
-.seletor:focus, .entrada:focus { border-color: var(--cor-acento); outline: none; }
-.quantidade { display: grid; grid-template-columns: var(--largura-passo-quantidade) minmax(0, 1fr) var(--largura-passo-quantidade); border: 1.5px solid var(--cor-borda-forte); border-radius: var(--raio-quantidade); overflow: hidden; transition: border-color var(--transicao); }
-.quantidade:focus-within { border-color: var(--cor-acento); }
+.entrada:focus { border-color: var(--cor-acento); box-shadow: var(--anel-de-foco-do-campo); outline: none; }
+.quantidade { display: grid; grid-template-columns: var(--largura-passo-quantidade) minmax(0, 1fr) var(--largura-passo-quantidade); border: 1.5px solid var(--cor-borda-forte); border-radius: var(--raio-campo); overflow: hidden; transition: border-color var(--transicao), box-shadow var(--transicao); }
+.quantidade:focus-within { border-color: var(--cor-acento); box-shadow: var(--anel-de-foco-do-campo); }
 .quantidade button { border: 0; background: var(--cor-afundado); color: var(--cor-texto); font-size: var(--texto-numero-grande); height: var(--altura-quantidade); transition: background var(--transicao); }
 .quantidade button:hover { background: var(--cor-hover); }
+/* A caixa corta o que passa da borda (overflow: hidden): o contorno de foco do − e do + fica para dentro. */
+.quantidade button:focus-visible { background: var(--cor-hover); outline-offset: var(--recuo-do-foco-no-passo); }
 .quantidade input { border: 0; background: var(--cor-fundo); color: var(--cor-texto); text-align: center; font-family: var(--fonte-display); font-size: var(--texto-numero-grande); font-weight: 600; min-width: 0; outline: none; }
 .entrada[aria-invalid='true'], .quantidade.invalida { border-color: var(--cor-perigo-texto); }
 .erro-campo { margin: 0; font-size: var(--texto-rotulo); font-weight: 700; color: var(--cor-perigo-texto); line-height: 1.4; }
-.resumo { margin: 0; }
-.resumo-linha { display: flex; justify-content: space-between; gap: var(--espaco-3); font-size: var(--texto-corpo-menor); color: var(--cor-texto-terciario); padding: var(--espaco-1-5) 0; }
+.resumo { margin: 0; padding: var(--espaco-2) var(--espaco-4); border-radius: var(--raio-aba); border: 1px solid var(--cor-borda-trilho); background: var(--cor-afundado); }
+.resumo-linha { display: flex; justify-content: space-between; align-items: center; gap: var(--espaco-3); font-size: var(--texto-corpo-menor); color: var(--cor-texto-terciario); padding: var(--espaco-2-5) 0; }
+.resumo-linha + .resumo-linha { border-top: 1px solid var(--cor-divisor); }
 .resumo-linha dd { margin: 0; color: var(--cor-texto); font-weight: 700; text-align: right; }
-.botao-enviar { height: var(--altura-botao); border: 0; border-radius: var(--raio-botao); font-size: var(--texto-corpo); font-weight: 800; transition: filter var(--transicao), background var(--transicao), color var(--transicao); }
-.botao-enviar.compra { background: var(--cor-acento); color: var(--cor-texto-sobre-acento); }
-.botao-enviar.venda { background: var(--cor-venda); color: var(--cor-texto-sobre-venda); }
+.resumo-linha .resumo-total { font-family: var(--fonte-display); font-size: var(--texto-numero-grande); font-weight: 600; }
+.botao-enviar { height: var(--altura-botao-enviar); border: 0; border-radius: var(--raio-campo); font-size: var(--texto-corpo); font-weight: 800; transition: filter var(--transicao), background var(--transicao), color var(--transicao), box-shadow var(--transicao); }
+.botao-enviar.compra { background: var(--cor-acento); color: var(--cor-texto-sobre-acento); box-shadow: var(--brilho-enviar-compra); }
+.botao-enviar.venda { background: var(--cor-venda); color: var(--cor-texto-sobre-venda); box-shadow: var(--brilho-enviar-venda); }
 .botao-enviar:hover { filter: brightness(1.07); }
-.botao-enviar:disabled { background: var(--cor-desabilitado-fundo); color: var(--cor-desabilitado-texto); cursor: progress; filter: none; }
-.nota { margin: 0; color: var(--cor-texto-rotulo); font-size: var(--texto-rotulo); line-height: 1.5; }
+.botao-enviar:disabled { background: var(--cor-desabilitado-fundo); color: var(--cor-desabilitado-texto); box-shadow: none; cursor: progress; filter: none; }
+.nota { margin: 0; display: flex; align-items: flex-start; gap: var(--espaco-2-5); padding: var(--espaco-3) var(--espaco-3-5); border-radius: var(--raio-campo); border: 1px solid var(--cor-borda-trilho); background: var(--cor-afundado); color: var(--cor-texto-rotulo); font-size: var(--texto-rotulo); line-height: 1.5; }
+.nota-icone { flex: none; width: var(--tamanho-icone-da-nota); height: var(--tamanho-icone-da-nota); margin-top: var(--espessura-divisor); color: var(--cor-acento); }
