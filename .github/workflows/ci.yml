@@ -43,7 +43,7 @@ jobs:
       # Sem filtro: entram os testes com PostgreSQL em container e os de integração com o compose.
       # O Docker é o do próprio runner.
       - run: dotnet build Flowa.sln
-      - run: dotnet test Flowa.sln --no-build
+      - run: dotnet test Flowa.sln --no-build -m:1
 
   e2e-tela:
     runs-on: ubuntu-latest

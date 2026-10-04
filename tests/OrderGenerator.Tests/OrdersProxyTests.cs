@@ -29,7 +29,7 @@ public sealed class OrdersProxyTests : IDisposable
     [Theory]
     [InlineData(1, new[] { 12, 11, 10, 9, 8, 7, 6, 5, 4, 3 })]
     [InlineData(2, new[] { 2, 1 })]
-    public async Task Lista_repassa_a_pagina_e_devolve_o_mesmo_corpo_com_200(int requestedOrdersPage, int[] orderNumbersNewestFirst)
+    public async Task Lista_de_ordens_repassa_a_pagina_e_devolve_o_mesmo_corpo_com_200(int requestedOrdersPage, int[] orderNumbersNewestFirst)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
         {
@@ -59,7 +59,7 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("-1")]
     [InlineData("1001")]
     [InlineData("abc")]
-    public async Task Pagina_invalida_devolve_o_400_do_accumulator_com_o_mesmo_corpo(string invalidOrdersPage)
+    public async Task Pagina_de_ordens_invalida_devolve_o_400_do_accumulator_com_o_mesmo_corpo(string invalidOrdersPage)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
         {
@@ -84,7 +84,7 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("/api/orders?page=1%262", "GET ?page=1%262")]
     [InlineData("/api/orders?page=1&page=2", "GET ?page=1%2C2")]
     [InlineData("/api/orders", "GET ")]
-    public async Task So_a_pagina_chega_ao_accumulator_sem_mudar(string ordersPagePathAskedByClient, string expectedAccumulatorOrdersRequest)
+    public async Task So_a_pagina_de_ordens_chega_ao_accumulator_sem_mudar(string ordersPagePathAskedByClient, string expectedAccumulatorOrdersRequest)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
         {
@@ -101,7 +101,7 @@ public sealed class OrdersProxyTests : IDisposable
     }
 
     [Fact]
-    public async Task Deletar_repassa_ao_accumulator_e_devolve_204_sem_corpo()
+    public async Task Deletar_todas_as_ordens_repassa_ao_accumulator_e_devolve_204_sem_corpo()
     {
         await using var fakeAccumulator = await StartFakeAccumulator(ordersHttpContext =>
         {
@@ -121,7 +121,7 @@ public sealed class OrdersProxyTests : IDisposable
     [Theory]
     [InlineData("GET", OrdersPageCommunicationMessage)]
     [InlineData("DELETE", OrdersDeletionCommunicationMessage)]
-    public async Task Accumulator_fora_do_ar_responde_503_em_portugues(string ordersHttpMethod, string expectedCommunicationMessage)
+    public async Task Rotas_de_ordens_com_accumulator_fora_do_ar_respondem_503_em_portugues(string ordersHttpMethod, string expectedCommunicationMessage)
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}");
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -137,7 +137,7 @@ public sealed class OrdersProxyTests : IDisposable
     [Theory]
     [InlineData("GET", OrdersPageCommunicationMessage)]
     [InlineData("DELETE", OrdersDeletionCommunicationMessage)]
-    public async Task Accumulator_que_nao_responde_em_5_segundos_vira_503(string ordersHttpMethod, string expectedCommunicationMessage)
+    public async Task Rotas_de_ordens_com_accumulator_sem_resposta_em_5_segundos_respondem_503(string ordersHttpMethod, string expectedCommunicationMessage)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
             await Task.Delay(TimeSpan.FromSeconds(8), ordersHttpContext.RequestAborted));
@@ -159,7 +159,7 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("DELETE", StatusCodes.Status500InternalServerError, OrdersDeletionCommunicationMessage, "DELETE ")]
     [InlineData("DELETE", StatusCodes.Status200OK, OrdersDeletionCommunicationMessage, "DELETE ")]
     [InlineData("DELETE", StatusCodes.Status400BadRequest, OrdersDeletionCommunicationMessage, "DELETE ")]
-    public async Task Status_inesperado_do_accumulator_vira_503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedCommunicationMessage,
+    public async Task Status_inesperado_do_accumulator_nas_rotas_de_ordens_vira_503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedCommunicationMessage,
         string expectedAccumulatorOrdersRequest)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
@@ -182,7 +182,7 @@ public sealed class OrdersProxyTests : IDisposable
     // CA-29: abrir o endereço, link pré-carregado, formulário ou outro verbo não apagam nada.
     // O DELETE de verdade no fim é a sentinela: prova que o accumulator falso estava ouvindo e só ele chegou.
     [Fact]
-    public async Task So_o_verbo_DELETE_apaga_e_nenhum_outro_cai_no_index()
+    public async Task So_o_verbo_DELETE_apaga_as_ordens_e_nenhum_outro_cai_no_index()
     {
         await using var fakeAccumulator = await StartFakeAccumulator(AnswerOrdersPageOrDeletion);
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(),
@@ -200,11 +200,11 @@ public sealed class OrdersProxyTests : IDisposable
             (new HttpRequestMessage(HttpMethod.Head, "/api/orders"), HttpStatusCode.NotFound),
             (new HttpRequestMessage(HttpMethod.Options, "/api/orders"), HttpStatusCode.NotFound),
         };
-        foreach (var (ordersRequest, expectedStatus) in ordersRequestsThatMustNotDelete)
+        foreach (var (ordersRequest, expectedOrdersResponseStatus) in ordersRequestsThatMustNotDelete)
         {
             var ordersRequestDescription = $"{ordersRequest.Method} {ordersRequest.Content?.Headers.ContentType?.MediaType}";
             var ordersResponse = await orderGeneratorClient.SendAsync(ordersRequest);
-            Assert.True(expectedStatus == ordersResponse.StatusCode, $"{ordersRequestDescription}: esperado {expectedStatus}, veio {ordersResponse.StatusCode}");
+            Assert.True(expectedOrdersResponseStatus == ordersResponse.StatusCode, $"{ordersRequestDescription}: esperado {expectedOrdersResponseStatus}, veio {ordersResponse.StatusCode}");
             Assert.DoesNotContain("boleta-de-teste", await ordersResponse.Content.ReadAsStringAsync());
         }
         Assert.Equal(["GET "], fakeAccumulator.ReceivedOrdersRequests);
@@ -219,7 +219,7 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("GET", HttpStatusCode.OK, "GET ?page=1")]
     [InlineData("DELETE", HttpStatusCode.NoContent, "DELETE ")]
     [InlineData("OPTIONS", HttpStatusCode.NotFound, null)]
-    public async Task Rotas_de_ordens_nao_liberam_CORS_para_outro_site(string ordersHttpMethod, HttpStatusCode expectedStatus, string? expectedAccumulatorOrdersRequest)
+    public async Task Rotas_de_ordens_nao_liberam_CORS_para_outro_site(string ordersHttpMethod, HttpStatusCode expectedOrdersResponseStatus, string? expectedAccumulatorOrdersRequest)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(AnswerOrdersPageOrDeletion);
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
@@ -231,7 +231,7 @@ public sealed class OrdersProxyTests : IDisposable
         var crossSiteOrdersResponse = await orderGeneratorClient.SendAsync(crossSiteOrdersRequest);
 
         // A rota respondeu de verdade: sem isto, uma rota sumida (404 sem cabeçalho) também passaria.
-        Assert.Equal(expectedStatus, crossSiteOrdersResponse.StatusCode);
+        Assert.Equal(expectedOrdersResponseStatus, crossSiteOrdersResponse.StatusCode);
         Assert.Equal(expectedAccumulatorOrdersRequest is null ? [] : [expectedAccumulatorOrdersRequest], fakeAccumulator.ReceivedOrdersRequests);
         var crossSiteResponseHeaderNames = crossSiteOrdersResponse.Headers.Select(responseHeader => responseHeader.Key)
             .Concat(crossSiteOrdersResponse.Content.Headers.Select(contentHeader => contentHeader.Key));
@@ -245,7 +245,7 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("GET", "/api/orders?page=abc", true, HttpStatusCode.BadRequest)]
     [InlineData("DELETE", "/api/orders", true, HttpStatusCode.NoContent)]
     [InlineData("GET", "/api/orders?page=1", false, HttpStatusCode.ServiceUnavailable)]
-    public async Task Rotas_de_ordens_nao_escrevem_log_Information(string ordersHttpMethod, string ordersPath, bool isAccumulatorRunning, HttpStatusCode expectedStatus)
+    public async Task Rotas_de_ordens_nao_escrevem_log_Information(string ordersHttpMethod, string ordersPath, bool isAccumulatorRunning, HttpStatusCode expectedOrdersResponseStatus)
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async ordersHttpContext =>
         {
@@ -274,7 +274,7 @@ public sealed class OrdersProxyTests : IDisposable
 
         var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), ordersPath));
 
-        Assert.Equal(expectedStatus, ordersResponse.StatusCode);
+        Assert.Equal(expectedOrdersResponseStatus, ordersResponse.StatusCode);
         Assert.DoesNotContain(orderGeneratorCapturedLogs.CapturedLogLines, capturedLogLine => capturedLogLine.StartsWith($"{LogLevel.Information} "));
     }
 
