@@ -85,7 +85,7 @@ async function conferirCartaoDoAtivo(
   simboloDoAtivo: string,
   // larguraDaBarrinha: fração do trilho preenchida; 'marca-minima' = exposição diferente de zero que não chega
   // a 1 px do trilho e aparece como um ponto do tamanho da altura da barrinha.
-  cartaoEsperado: {
+  cartaoDoAtivoEsperado: {
     exposicaoAtual: string;
     faltaAteOLimite: string;
     usoDoLimite: string;
@@ -94,24 +94,24 @@ async function conferirCartaoDoAtivo(
     larguraDaBarrinha: number | 'marca-minima';
   },
 ) {
-  const cartao = localizarCartaoDoAtivo(paginaDaBoleta, simboloDoAtivo);
-  await expect(cartao.getByTestId('exposicao-atual')).toHaveText(cartaoEsperado.exposicaoAtual);
-  await expect(cartao.getByTestId('exposicao-restante')).toHaveText(cartaoEsperado.faltaAteOLimite);
-  await expect(cartao.getByTestId('uso-do-limite-porcentagem')).toHaveText(cartaoEsperado.usoDoLimite);
+  const cartaoDoAtivo = localizarCartaoDoAtivo(paginaDaBoleta, simboloDoAtivo);
+  await expect(cartaoDoAtivo.getByTestId('exposicao-atual')).toHaveText(cartaoDoAtivoEsperado.exposicaoAtual);
+  await expect(cartaoDoAtivo.getByTestId('exposicao-restante')).toHaveText(cartaoDoAtivoEsperado.faltaAteOLimite);
+  await expect(cartaoDoAtivo.getByTestId('uso-do-limite-porcentagem')).toHaveText(cartaoDoAtivoEsperado.usoDoLimite);
   // A porcentagem acompanha a cor da barrinha: âmbar perto do limite, texto normal no resto.
-  await expect(cartao.getByTestId('uso-do-limite-porcentagem')).toHaveCSS(
+  await expect(cartaoDoAtivo.getByTestId('uso-do-limite-porcentagem')).toHaveCSS(
     'color',
-    cartaoEsperado.barrinha === BARRINHA_AMBAR ? COR_DA_PORCENTAGEM_PERTO_DO_LIMITE : COR_DO_TEXTO,
+    cartaoDoAtivoEsperado.barrinha === BARRINHA_AMBAR ? COR_DA_PORCENTAGEM_PERTO_DO_LIMITE : COR_DO_TEXTO,
   );
-  const barrinha = cartao.getByRole('meter', { name: 'Uso do limite de ' + simboloDoAtivo });
-  await expect(barrinha).toHaveAttribute('aria-valuetext', cartaoEsperado.usoDoLimite);
-  await expect(barrinha).toHaveAttribute('aria-valuenow', cartaoEsperado.valorDoMedidor);
-  const preenchimentoDaBarrinha = cartao.getByTestId('uso-do-limite-preenchimento');
-  await expect(preenchimentoDaBarrinha).toHaveCSS('background-image', cartaoEsperado.barrinha);
+  const barrinha = cartaoDoAtivo.getByRole('meter', { name: 'Uso do limite de ' + simboloDoAtivo });
+  await expect(barrinha).toHaveAttribute('aria-valuetext', cartaoDoAtivoEsperado.usoDoLimite);
+  await expect(barrinha).toHaveAttribute('aria-valuenow', cartaoDoAtivoEsperado.valorDoMedidor);
+  const preenchimentoDaBarrinha = cartaoDoAtivo.getByTestId('uso-do-limite-preenchimento');
+  await expect(preenchimentoDaBarrinha).toHaveCSS('background-image', cartaoDoAtivoEsperado.barrinha);
   const caixaDoTrilho = await medirRetanguloNaTela(barrinha);
   const larguraPreenchida = (await preenchimentoDaBarrinha.boundingBox())?.width ?? 0;
-  if (cartaoEsperado.larguraDaBarrinha === 'marca-minima') expect(larguraPreenchida).toBeCloseTo(caixaDoTrilho.height, 1);
-  else expect(larguraPreenchida / caixaDoTrilho.width).toBeCloseTo(cartaoEsperado.larguraDaBarrinha, 2);
+  if (cartaoDoAtivoEsperado.larguraDaBarrinha === 'marca-minima') expect(larguraPreenchida).toBeCloseTo(caixaDoTrilho.height, 1);
+  else expect(larguraPreenchida / caixaDoTrilho.width).toBeCloseTo(cartaoDoAtivoEsperado.larguraDaBarrinha, 2);
 }
 
 // Com a página em 90%, o Chrome arredonda bordas e contornos para o pixel inteiro da tela, e a
@@ -185,6 +185,14 @@ function calcularContraste(corDoTexto: string, corDoFundo: string) {
   return (luminanciaMaior + 0.05) / (luminanciaMenor + 0.05);
 }
 
+// Borda fina inteira: os quatro lados, não só o de cima, na cor e no traço da maquete.
+async function conferirBordaFinaNosQuatroLados(elementoComBorda: Locator) {
+  for (const ladoDaBorda of ['top', 'right', 'bottom', 'left']) {
+    await expect(elementoComBorda).toHaveCSS(`border-${ladoDaBorda}-style`, 'solid');
+    await expect(elementoComBorda).toHaveCSS(`border-${ladoDaBorda}-color`, COR_DA_BORDA);
+  }
+}
+
 async function lerCorCalculada(elementoNaTela: Locator, propriedadeDaCor: 'color' | 'background-color') {
   return elementoNaTela.evaluate((elementoNaPagina, propriedade) => getComputedStyle(elementoNaPagina).getPropertyValue(propriedade), propriedadeDaCor);
 }
@@ -223,7 +231,7 @@ for (const larguraDaJanela of [1440, 1920]) {
       await expect(linkDoPainel).toHaveCSS('border-radius', '14px');
       expect(await lerMedidaDoCssEmPx(linkDoPainel, 'height')).toBeCloseTo(46, 1);
       await expect(linkDoPainel).toHaveCSS('background-color', COR_DO_FUNDO_DO_LINK);
-      await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DA_BORDA);
+      await conferirBordaFinaNosQuatroLados(linkDoPainel);
 
       const nomeDoPainel = linkDoPainel.locator('.painel-datadog-nome');
       await expect(nomeDoPainel).toHaveText(painelEsperado.nomeDoPainel);
@@ -289,17 +297,22 @@ for (const larguraDaJanela of [1440, 1920]) {
   test(`CA-10: em ${larguraDaJanela} px, à direita dos links fica o selo com escudo verde, "AMBIENTE" e "Demonstração"`, async ({ page }) => {
     await page.setViewportSize({ width: larguraDaJanela, height: 900 });
     await page.goto('/');
-    const selo = page.getByRole('banner').locator('.selo-ambiente');
-    await expect(selo).toHaveCount(1);
-    await expect(selo.locator('.selo-ambiente-rotulo')).toHaveText('AMBIENTE', { useInnerText: true });
-    await expect(selo.locator('.selo-ambiente-nome')).toHaveText('Demonstração');
-    await expect(selo.locator('.selo-ambiente-icone')).toHaveCSS('background-color', 'rgba(79, 227, 176, 0.13)');
-    await expect(selo.locator('.selo-ambiente-icone svg')).toHaveCSS('color', COR_DO_ACENTO);
-    await conferirDesenhoDoIcone(selo.locator('.selo-ambiente-icone svg'), 'IconeEscudo');
-    const caixaDoSelo = await medirRetanguloNaTela(selo);
+    const seloDoAmbiente = page.getByRole('banner').locator('.selo-ambiente');
+    await expect(seloDoAmbiente).toHaveCount(1);
+    await expect(seloDoAmbiente.locator('.selo-ambiente-rotulo')).toHaveText('AMBIENTE', { useInnerText: true });
+    await expect(seloDoAmbiente.locator('.selo-ambiente-nome')).toHaveText('Demonstração');
+    await expect(seloDoAmbiente.locator('.selo-ambiente-icone')).toHaveCSS('background-color', 'rgba(79, 227, 176, 0.13)');
+    await expect(seloDoAmbiente.locator('.selo-ambiente-icone svg')).toHaveCSS('color', COR_DO_ACENTO);
+    await conferirDesenhoDoIcone(seloDoAmbiente.locator('.selo-ambiente-icone svg'), 'IconeEscudo');
+    // "Demonstração" fica embaixo de "AMBIENTE", começando na mesma coluna.
+    const caixaDoRotuloDoAmbiente = await medirRetanguloNaTela(seloDoAmbiente.locator('.selo-ambiente-rotulo'));
+    const caixaDoNomeDoAmbiente = await medirRetanguloNaTela(seloDoAmbiente.locator('.selo-ambiente-nome'));
+    expect(caixaDoNomeDoAmbiente.y).toBeGreaterThanOrEqual(caixaDoRotuloDoAmbiente.y + caixaDoRotuloDoAmbiente.height);
+    expect(caixaDoNomeDoAmbiente.x).toBeCloseTo(caixaDoRotuloDoAmbiente.x, 0);
+    const caixaDoSeloDoAmbiente = await medirRetanguloNaTela(seloDoAmbiente);
     const caixaDoUltimoLink = await medirRetanguloNaTela(page.getByRole('banner').getByRole('link', { name: /Ordens e exposição/ }));
-    expect(caixaDoSelo.x).toBeGreaterThanOrEqual(caixaDoUltimoLink.x + caixaDoUltimoLink.width);
-    expect(Math.abs(caixaDoSelo.y + caixaDoSelo.height / 2 - (caixaDoUltimoLink.y + caixaDoUltimoLink.height / 2))).toBeLessThanOrEqual(1);
+    expect(caixaDoSeloDoAmbiente.x).toBeGreaterThanOrEqual(caixaDoUltimoLink.x + caixaDoUltimoLink.width);
+    expect(Math.abs(caixaDoSeloDoAmbiente.y + caixaDoSeloDoAmbiente.height / 2 - (caixaDoUltimoLink.y + caixaDoUltimoLink.height / 2))).toBeLessThanOrEqual(1);
   });
 }
 
@@ -348,47 +361,54 @@ for (const larguraDaJanela of [1440, 1920]) {
     let ladoDireitoDoCartaoAnterior = 0;
     let topoDoPrimeiroCartao: number | undefined;
     for (const simboloDoAtivo of SIMBOLOS_DOS_CARTOES) {
-      const cartao = localizarCartaoDoAtivo(page, simboloDoAtivo);
-      await expect(cartao).toHaveCount(1);
-      await expect(cartao).toBeVisible();
-      await expect(cartao.getByRole('heading', { level: 3 })).toHaveText(simboloDoAtivo);
-      await expect(cartao.locator('.exposicao-icone svg')).toBeVisible();
-      await conferirDesenhoDoIcone(cartao.locator('.exposicao-icone svg'), 'IconeGraficoSubindo');
-      expect(await lerMedidaDoCssEmPx(cartao.locator('.exposicao-icone'), 'width')).toBeCloseTo(34, 1);
-      expect(await lerMedidaDoCssEmPx(cartao.locator('.exposicao-icone'), 'height')).toBeCloseTo(34, 1);
-      await expect(cartao.locator('dt', { hasText: 'Exposição atual' })).toHaveCount(1);
-      await expect(cartao.locator('dt', { hasText: 'Falta até o limite' })).toHaveCount(1);
-      await expect(cartao.getByTestId('exposicao-atual')).toHaveCSS('font-family', /^Sora/);
-      await expect(cartao.getByTestId('exposicao-atual')).toHaveCSS('font-size', '20px');
-      await expect(cartao).toHaveCSS('border-radius', '20px');
-      await expect(cartao).toHaveCSS('border-top-color', COR_DA_BORDA);
-      await expect(cartao).toHaveCSS('background-image', 'linear-gradient(rgb(15, 31, 34), rgb(14, 27, 30))');
-      await expect(cartao).toHaveCSS('box-shadow', 'rgba(0, 0, 0, 0.35) 0px 24px 50px 0px');
-      await expect(cartao.getByText('Uso do limite', { exact: true })).toHaveCSS('font-size', '12px');
-      await expect(cartao.getByTestId('uso-do-limite-porcentagem')).toHaveCSS('font-size', '12px');
-      expect(await lerMedidaDoCssEmPx(cartao.getByRole('meter'), 'height')).toBeCloseTo(6, 1);
+      const cartaoDoAtivo = localizarCartaoDoAtivo(page, simboloDoAtivo);
+      await expect(cartaoDoAtivo).toHaveCount(1);
+      await expect(cartaoDoAtivo).toBeVisible();
+      await expect(cartaoDoAtivo.getByRole('heading', { level: 3 })).toHaveText(simboloDoAtivo);
+      await expect(cartaoDoAtivo.locator('.exposicao-icone svg')).toBeVisible();
+      await conferirDesenhoDoIcone(cartaoDoAtivo.locator('.exposicao-icone svg'), 'IconeGraficoSubindo');
+      expect(await lerMedidaDoCssEmPx(cartaoDoAtivo.locator('.exposicao-icone'), 'width')).toBeCloseTo(34, 1);
+      expect(await lerMedidaDoCssEmPx(cartaoDoAtivo.locator('.exposicao-icone'), 'height')).toBeCloseTo(34, 1);
+      await expect(cartaoDoAtivo.locator('dt', { hasText: 'Exposição atual' })).toHaveCount(1);
+      await expect(cartaoDoAtivo.locator('dt', { hasText: 'Falta até o limite' })).toHaveCount(1);
+      await expect(cartaoDoAtivo.getByTestId('exposicao-atual')).toHaveCSS('font-family', /^Sora/);
+      await expect(cartaoDoAtivo.getByTestId('exposicao-atual')).toHaveCSS('font-size', '20px');
+      await expect(cartaoDoAtivo).toHaveCSS('border-radius', '20px');
+      await conferirBordaFinaNosQuatroLados(cartaoDoAtivo);
+      await expect(cartaoDoAtivo).toHaveCSS('background-image', 'linear-gradient(rgb(15, 31, 34), rgb(14, 27, 30))');
+      await expect(cartaoDoAtivo).toHaveCSS('box-shadow', 'rgba(0, 0, 0, 0.35) 0px 24px 50px 0px');
+      const legendaDoUsoDoLimite = cartaoDoAtivo.getByText('Uso do limite', { exact: true });
+      const porcentagemDoUsoDoLimite = cartaoDoAtivo.getByTestId('uso-do-limite-porcentagem');
+      await expect(legendaDoUsoDoLimite).toHaveCSS('font-size', '12px');
+      await expect(porcentagemDoUsoDoLimite).toHaveCSS('font-size', '12px');
+      // A porcentagem fica à direita da legenda, na mesma linha.
+      const caixaDaLegendaDoUso = await medirRetanguloNaTela(legendaDoUsoDoLimite);
+      const caixaDaPorcentagemDoUso = await medirRetanguloNaTela(porcentagemDoUsoDoLimite);
+      expect(caixaDaPorcentagemDoUso.x).toBeGreaterThan(caixaDaLegendaDoUso.x + caixaDaLegendaDoUso.width);
+      expect(Math.abs(caixaDaPorcentagemDoUso.y - caixaDaLegendaDoUso.y)).toBeLessThanOrEqual(1);
+      expect(await lerMedidaDoCssEmPx(cartaoDoAtivo.getByRole('meter'), 'height')).toBeCloseTo(6, 1);
 
-      const caixaDoCartao = await medirRetanguloNaTela(cartao);
-      if (simboloDoAtivo !== SIMBOLOS_DOS_CARTOES[0]) expect(caixaDoCartao.x).toBeCloseTo(ladoDireitoDoCartaoAnterior + ESPACO_ENTRE_CARTOES_NA_TELA, 1);
-      ladoDireitoDoCartaoAnterior = caixaDoCartao.x + caixaDoCartao.width;
-      topoDoPrimeiroCartao ??= caixaDoCartao.y;
-      expect(caixaDoCartao.y).toBeCloseTo(topoDoPrimeiroCartao, 0);
+      const caixaDoCartaoDoAtivo = await medirRetanguloNaTela(cartaoDoAtivo);
+      if (simboloDoAtivo !== SIMBOLOS_DOS_CARTOES[0]) expect(caixaDoCartaoDoAtivo.x).toBeCloseTo(ladoDireitoDoCartaoAnterior + ESPACO_ENTRE_CARTOES_NA_TELA, 1);
+      ladoDireitoDoCartaoAnterior = caixaDoCartaoDoAtivo.x + caixaDoCartaoDoAtivo.width;
+      topoDoPrimeiroCartao ??= caixaDoCartaoDoAtivo.y;
+      expect(caixaDoCartaoDoAtivo.y).toBeCloseTo(topoDoPrimeiroCartao, 0);
 
-      const caixaDaExposicaoAtual = await medirRetanguloNaTela(cartao.getByTestId('exposicao-atual'));
-      const caixaDaFalta = await medirRetanguloNaTela(cartao.getByTestId('exposicao-restante'));
+      const caixaDaExposicaoAtual = await medirRetanguloNaTela(cartaoDoAtivo.getByTestId('exposicao-atual'));
+      const caixaDaFalta = await medirRetanguloNaTela(cartaoDoAtivo.getByTestId('exposicao-restante'));
       expect(caixaDaFalta.x).toBeGreaterThan(caixaDaExposicaoAtual.x);
       // Como na maquete: os dois rótulos começam na mesma altura e os dígitos dos dois valores assentam na mesma linha.
-      const caixaDoRotuloDaExposicao = await medirRetanguloNaTela(cartao.locator('dt', { hasText: 'Exposição atual' }));
-      const caixaDoRotuloDaFalta = await medirRetanguloNaTela(cartao.locator('dt', { hasText: 'Falta até o limite' }));
+      const caixaDoRotuloDaExposicao = await medirRetanguloNaTela(cartaoDoAtivo.locator('dt', { hasText: 'Exposição atual' }));
+      const caixaDoRotuloDaFalta = await medirRetanguloNaTela(cartaoDoAtivo.locator('dt', { hasText: 'Falta até o limite' }));
       expect(Math.abs(caixaDoRotuloDaFalta.y - caixaDoRotuloDaExposicao.y)).toBeLessThanOrEqual(0.5);
-      const linhaDeBaseDaExposicao = await medirLinhaDeBaseNaTela(cartao.getByTestId('exposicao-atual'));
-      const linhaDeBaseDaFalta = await medirLinhaDeBaseNaTela(cartao.getByTestId('exposicao-restante'));
+      const linhaDeBaseDaExposicao = await medirLinhaDeBaseNaTela(cartaoDoAtivo.getByTestId('exposicao-atual'));
+      const linhaDeBaseDaFalta = await medirLinhaDeBaseNaTela(cartaoDoAtivo.getByTestId('exposicao-restante'));
       expect(Math.abs(linhaDeBaseDaFalta - linhaDeBaseDaExposicao)).toBeLessThanOrEqual(1);
     }
 
     // O texto do limite termina na mesma borda direita do último cartão, como na maquete.
-    const caixaDoUltimoCartao = await medirRetanguloNaTela(localizarCartaoDoAtivo(page, 'VIIA4'));
-    expect(caixaDoLimite.x + caixaDoLimite.width).toBeCloseTo(caixaDoUltimoCartao.x + caixaDoUltimoCartao.width, 0);
+    const caixaDoUltimoCartaoDoAtivo = await medirRetanguloNaTela(localizarCartaoDoAtivo(page, 'VIIA4'));
+    expect(caixaDoLimite.x + caixaDoLimite.width).toBeCloseTo(caixaDoUltimoCartaoDoAtivo.x + caixaDoUltimoCartaoDoAtivo.width, 0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       await page.evaluate(() => document.documentElement.clientWidth),
     );
@@ -485,11 +505,11 @@ for (const larguraDaJanela of [860, 375]) {
     let fundoDoCartaoAnterior = 0;
     let esquerdaDoPrimeiroCartao: number | undefined;
     for (const simboloDoAtivo of SIMBOLOS_DOS_CARTOES) {
-      const caixaDoCartao = await medirRetanguloNaTela(localizarCartaoDoAtivo(page, simboloDoAtivo));
-      if (simboloDoAtivo !== SIMBOLOS_DOS_CARTOES[0]) expect(caixaDoCartao.y).toBeCloseTo(fundoDoCartaoAnterior + ESPACO_ENTRE_CARTOES_NA_TELA, 1);
-      fundoDoCartaoAnterior = caixaDoCartao.y + caixaDoCartao.height;
-      esquerdaDoPrimeiroCartao ??= caixaDoCartao.x;
-      expect(caixaDoCartao.x).toBeCloseTo(esquerdaDoPrimeiroCartao, 0);
+      const caixaDoCartaoDoAtivo = await medirRetanguloNaTela(localizarCartaoDoAtivo(page, simboloDoAtivo));
+      if (simboloDoAtivo !== SIMBOLOS_DOS_CARTOES[0]) expect(caixaDoCartaoDoAtivo.y).toBeCloseTo(fundoDoCartaoAnterior + ESPACO_ENTRE_CARTOES_NA_TELA, 1);
+      fundoDoCartaoAnterior = caixaDoCartaoDoAtivo.y + caixaDoCartaoDoAtivo.height;
+      esquerdaDoPrimeiroCartao ??= caixaDoCartaoDoAtivo.x;
+      expect(caixaDoCartaoDoAtivo.x).toBeCloseTo(esquerdaDoPrimeiroCartao, 0);
       // Nenhum valor quebra no meio do número: cada um ocupa uma linha só e cabe no cartão.
       for (const idDoValor of ['exposicao-atual', 'exposicao-restante']) {
         const valorDoCartao = localizarCartaoDoAtivo(page, simboloDoAtivo).getByTestId(idDoValor);
@@ -498,7 +518,7 @@ for (const larguraDaJanela of [860, 375]) {
         );
         expect(valorEmUmaLinha, `${simboloDoAtivo} / ${idDoValor}`).toBe(true);
         const caixaDoValor = await medirRetanguloNaTela(valorDoCartao);
-        expect(caixaDoValor.x + caixaDoValor.width).toBeLessThanOrEqual(caixaDoCartao.x + caixaDoCartao.width);
+        expect(caixaDoValor.x + caixaDoValor.width).toBeLessThanOrEqual(caixaDoCartaoDoAtivo.x + caixaDoCartaoDoAtivo.width);
       }
     }
 
