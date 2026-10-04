@@ -16,8 +16,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     private const int SimultaneousDeletesPerRound = 5;
 
     // Tempo para um passo que não deveria acontecer ter acontecido, se a porta estivesse aberta.
-    private static readonly TimeSpan BlockedStepWindow = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan StepDeadline = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan TimeForABlockedStepToSneakIn = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan ConcurrencyStepDeadline = TimeSpan.FromSeconds(10);
 
     [Fact]
     public async Task Delete_waits_for_the_order_in_progress_and_zeroes_the_memory_after_it()
@@ -29,11 +29,11 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         {
             orderInsideTheDoor.SetResult();
             await releaseTheOrder.Task;
-            var acceptedOrder = AcceptedBuyOutcome("PETR4", 100, 10.00m);
+            var acceptedOrder = NewAcceptedBuyOrderOutcome("PETR4", 100, 10.00m);
             symbolExposureMemory.ApplyAcceptedOrder(acceptedOrder);
             return acceptedOrder;
         }, CancellationToken.None);
-        await orderInsideTheDoor.Task.WaitAsync(StepDeadline);
+        await orderInsideTheDoor.Task.WaitAsync(ConcurrencyStepDeadline);
 
         var storedDeleteStarted = false;
         var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
@@ -41,10 +41,10 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             storedDeleteStarted = true;
             return Task.CompletedTask;
         }, CancellationToken.None);
-        await Task.Delay(BlockedStepWindow);
+        await Task.Delay(TimeForABlockedStepToSneakIn);
         var storedDeleteStartedWhileTheOrderWasInside = storedDeleteStarted;
         releaseTheOrder.SetResult();
-        await Task.WhenAll(orderInProgress, deleteAllOrdersTask).WaitAsync(StepDeadline);
+        await Task.WhenAll(orderInProgress, deleteAllOrdersTask).WaitAsync(ConcurrencyStepDeadline);
 
         Assert.False(storedDeleteStartedWhileTheOrderWasInside);
         Assert.True(storedDeleteStarted);
@@ -63,20 +63,20 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             deleteInsideTheDoor.SetResult();
             await releaseTheDelete.Task;
         }, CancellationToken.None);
-        await deleteInsideTheDoor.Task.WaitAsync(StepDeadline);
+        await deleteInsideTheDoor.Task.WaitAsync(ConcurrencyStepDeadline);
 
         var orderProcessingStarted = false;
         var orderArrivingDuringDelete = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(() =>
         {
             orderProcessingStarted = true;
-            var acceptedOrder = AcceptedBuyOutcome("PETR4", 100, 10.00m);
+            var acceptedOrder = NewAcceptedBuyOrderOutcome("PETR4", 100, 10.00m);
             symbolExposureMemory.ApplyAcceptedOrder(acceptedOrder);
             return Task.FromResult(acceptedOrder);
         }, CancellationToken.None);
-        await Task.Delay(BlockedStepWindow);
+        await Task.Delay(TimeForABlockedStepToSneakIn);
         var orderStartedWhileTheDeleteWasInside = orderProcessingStarted;
         releaseTheDelete.SetResult();
-        await Task.WhenAll(deleteAllOrdersTask, orderArrivingDuringDelete).WaitAsync(StepDeadline);
+        await Task.WhenAll(deleteAllOrdersTask, orderArrivingDuringDelete).WaitAsync(ConcurrencyStepDeadline);
 
         Assert.False(orderStartedWhileTheDeleteWasInside);
         Assert.Equal([new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)], symbolExposureMemory.CurrentSymbolExposures());
@@ -93,16 +93,16 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         {
             firstOrderInside.SetResult();
             await secondOrderInside.Task;
-            return AcceptedBuyOutcome("PETR4", 1, 1.00m);
+            return NewAcceptedBuyOrderOutcome("PETR4", 1, 1.00m);
         }, CancellationToken.None);
         var secondOrderTask = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(async () =>
         {
             secondOrderInside.SetResult();
             await firstOrderInside.Task;
-            return AcceptedBuyOutcome("VALE3", 1, 1.00m);
+            return NewAcceptedBuyOrderOutcome("VALE3", 1, 1.00m);
         }, CancellationToken.None);
 
-        await Task.WhenAll(firstOrderTask, secondOrderTask).WaitAsync(StepDeadline);
+        await Task.WhenAll(firstOrderTask, secondOrderTask).WaitAsync(ConcurrencyStepDeadline);
     }
 
     // Uma fila contínua de ordens não pode deixar o apagar esperando para sempre: ordem nova que chega
@@ -117,29 +117,29 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         {
             firstOrderInside.SetResult();
             await releaseTheFirstOrder.Task;
-            return AcceptedBuyOutcome("PETR4", 1, 1.00m);
+            return NewAcceptedBuyOrderOutcome("PETR4", 1, 1.00m);
         }, CancellationToken.None);
-        await firstOrderInside.Task.WaitAsync(StepDeadline);
+        await firstOrderInside.Task.WaitAsync(ConcurrencyStepDeadline);
 
-        var stepsInOrder = new List<string>();
+        var executedStepsInOrder = new List<string>();
         var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
         {
-            lock (stepsInOrder) stepsInOrder.Add("apagar");
+            lock (executedStepsInOrder) executedStepsInOrder.Add("apagar");
             return Task.CompletedTask;
         }, CancellationToken.None);
-        await Task.Delay(BlockedStepWindow);
+        await Task.Delay(TimeForABlockedStepToSneakIn);
         var laterOrderTask = symbolExposureMemory.ProcessOrderOutsideDeleteAllAsync(() =>
         {
-            lock (stepsInOrder) stepsInOrder.Add("ordem que chegou depois");
-            return Task.FromResult(AcceptedBuyOutcome("VALE3", 1, 1.00m));
+            lock (executedStepsInOrder) executedStepsInOrder.Add("ordem que chegou depois");
+            return Task.FromResult(NewAcceptedBuyOrderOutcome("VALE3", 1, 1.00m));
         }, CancellationToken.None);
-        await Task.Delay(BlockedStepWindow);
-        var stepsWhileTheFirstOrderWasInside = stepsInOrder.ToList();
+        await Task.Delay(TimeForABlockedStepToSneakIn);
+        var stepsWhileTheFirstOrderWasInside = executedStepsInOrder.ToList();
         releaseTheFirstOrder.SetResult();
-        await Task.WhenAll(firstOrderTask, deleteAllOrdersTask, laterOrderTask).WaitAsync(StepDeadline);
+        await Task.WhenAll(firstOrderTask, deleteAllOrdersTask, laterOrderTask).WaitAsync(ConcurrencyStepDeadline);
 
         Assert.Empty(stepsWhileTheFirstOrderWasInside);
-        Assert.Equal(["apagar", "ordem que chegou depois"], stepsInOrder);
+        Assert.Equal(["apagar", "ordem que chegou depois"], executedStepsInOrder);
     }
 
     // Pelo OrderProcessorWithMetrics de verdade: a ordem já gravada só sai da porta depois de somar na memória.
@@ -148,15 +148,15 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     [Fact]
     public async Task Order_through_the_metrics_processor_adds_to_memory_before_a_waiting_delete_runs()
     {
-        using var orderMetricsClient = OrderMetricsSetup.CreateOrderMetricsClient(DogStatsdPortWithoutListener(), new ConfigurationBuilder().Build());
+        using var orderMetricsClient = OrderMetricsSetup.CreateOrderMetricsClient(FindDogStatsdPortWithoutListener(), new ConfigurationBuilder().Build());
         for (var attempt = 0; attempt < 50; attempt++)
         {
             var symbolExposureMemory = new SymbolExposureMemory();
-            var blockedOrderProcessor = new OrderProcessorBlockedAfterStoring(AcceptedBuyOutcome("PETR4", 100, 10.00m));
-            var orderProcessorWithMetrics = new OrderProcessorWithMetrics(blockedOrderProcessor, orderMetricsClient, symbolExposureMemory);
+            var storedOrderHeldUntilReleased = new StoredOrderHeldUntilReleased(NewAcceptedBuyOrderOutcome("PETR4", 100, 10.00m));
+            var orderProcessorWithMetrics = new OrderProcessorWithMetrics(storedOrderHeldUntilReleased, orderMetricsClient, symbolExposureMemory);
 
             var orderInProgress = orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
-            await blockedOrderProcessor.OrderStored.WaitAsync(StepDeadline);
+            await storedOrderHeldUntilReleased.OrderStored.WaitAsync(ConcurrencyStepDeadline);
             IReadOnlyList<SymbolExposure>? exposureMemorySeenByTheDelete = null;
             var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
             {
@@ -164,8 +164,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
                 return Task.CompletedTask;
             }, CancellationToken.None);
             await Task.Delay(20);
-            blockedOrderProcessor.ReleaseTheStoredOrder();
-            await Task.WhenAll(orderInProgress, deleteAllOrdersTask).WaitAsync(StepDeadline);
+            storedOrderHeldUntilReleased.ReleaseTheStoredOrder();
+            await Task.WhenAll(orderInProgress, deleteAllOrdersTask).WaitAsync(ConcurrencyStepDeadline);
 
             Assert.Equal([new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)], exposureMemorySeenByTheDelete);
             Assert.Equal([new("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)], symbolExposureMemory.CurrentSymbolExposures());
@@ -192,9 +192,9 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var ordersStoredBeforeTheDeletes = 0;
         var enoughOrdersStoredToFireTheDeletes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var ordersBeforeTheDeletes = NewMixedOrders(OrdersPerWave, orderQuantityGenerator).Select(mixedOrder => Task.Run(async () =>
+        var ordersBeforeTheDeletes = NewOrdersMixingSymbolsAndSides(OrdersPerWave, orderQuantityGenerator).Select(symbolAndSideMixedOrder => Task.Run(async () =>
         {
-            var orderOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(mixedOrder);
+            var orderOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(symbolAndSideMixedOrder);
             if (Interlocked.Increment(ref ordersStoredBeforeTheDeletes) == StoredOrdersBeforeFiringTheDeletes)
                 enoughOrdersStoredToFireTheDeletes.TrySetResult();
             return orderOutcome;
@@ -203,8 +203,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var ordersInProgressWhenTheDeletesFired = ordersBeforeTheDeletes.Count(orderBeforeTheDeletes => !orderBeforeTheDeletes.IsCompleted);
         var deleteResponses = await Task.WhenAll(Enumerable.Range(0, SimultaneousDeletesPerRound)
             .Select(_ => Task.Run(() => orderAccumulatorClient.DeleteAsync("/api/orders")))).WaitAsync(TimeSpan.FromMinutes(2));
-        var ordersAfterTheDeletes = NewMixedOrders(OrdersPerWave, orderQuantityGenerator)
-            .Select(mixedOrder => Task.Run(() => appOrderProcessor.ProcessIncomingOrderAsync(mixedOrder))).ToList();
+        var ordersAfterTheDeletes = NewOrdersMixingSymbolsAndSides(OrdersPerWave, orderQuantityGenerator)
+            .Select(symbolAndSideMixedOrder => Task.Run(() => appOrderProcessor.ProcessIncomingOrderAsync(symbolAndSideMixedOrder))).ToList();
         var orderOutcomes = await Task.WhenAll(ordersBeforeTheDeletes.Concat(ordersAfterTheDeletes)).WaitAsync(TimeSpan.FromMinutes(2));
 
         var remainingStoredOrders = await orderAccumulatorDatabase.CountStoredOrdersAsync();
@@ -222,7 +222,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             Assert.Equal(await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync(storedExposure.Symbol), storedExposure.Exposure);
     }
 
-    private static List<IncomingOrder> NewMixedOrders(int orderCount, Random orderQuantityGenerator) =>
+    private static List<IncomingOrder> NewOrdersMixingSymbolsAndSides(int orderCount, Random orderQuantityGenerator) =>
         Enumerable.Range(0, orderCount)
             .Select(orderNumber => TestOrders.NewIncomingOrder(
                 OrderRules.AllowedOrderSymbols[orderNumber % 3],
@@ -230,10 +230,10 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
                 orderQuantityGenerator.Next(1, 1_000), 10.00m))
             .ToList();
 
-    private static int DogStatsdPortWithoutListener() => OrderAccumulatorFixTestHost.FindFreeFixAcceptorTcpPort();
+    private static int FindDogStatsdPortWithoutListener() => OrderAccumulatorFixTestHost.FindFreeFixAcceptorTcpPort();
 
     // Faz o papel do PostgresOrderProcessor: a ordem "já gravou" e fica parada até o teste soltar.
-    private sealed class OrderProcessorBlockedAfterStoring(OrderOutcome storedOrderOutcome) : IOrderProcessor
+    private sealed class StoredOrderHeldUntilReleased(OrderOutcome storedOrderOutcome) : IOrderProcessor
     {
         private readonly TaskCompletionSource orderStored = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource storedOrderReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -250,7 +250,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         }
     }
 
-    private static OrderOutcome AcceptedBuyOutcome(string symbol, decimal quantity, decimal price) =>
+    private static OrderOutcome NewAcceptedBuyOrderOutcome(string symbol, decimal quantity, decimal price) =>
         new(Guid.NewGuid().ToString("N"), "ordem", "execucao", symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price,
             Accepted: true, RejectReason: null, IsRepeat: false);
 }

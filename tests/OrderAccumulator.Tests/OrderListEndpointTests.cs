@@ -24,9 +24,9 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         var secondOrderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=2");
 
         var clOrdIdsNewestFirst = Enumerable.Reverse(clOrdIdsInArrivalOrder).ToList();
-        Assert.Equal((1, 10, 12L), ReadPageHeader(firstOrderPage));
+        Assert.Equal((1, 10, 12L), ReadOrderPageHeader(firstOrderPage));
         Assert.Equal(clOrdIdsNewestFirst.Take(10).ToList(), ReadListedClOrdIds(firstOrderPage));
-        Assert.Equal((2, 10, 12L), ReadPageHeader(secondOrderPage));
+        Assert.Equal((2, 10, 12L), ReadOrderPageHeader(secondOrderPage));
         Assert.Equal(clOrdIdsNewestFirst.Skip(10).ToList(), ReadListedClOrdIds(secondOrderPage));
     }
 
@@ -43,7 +43,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         var listedOrders = orderPage.GetProperty("orders").EnumerateArray().ToList();
 
         Assert.False(rejectedSellOutcome.Accepted);
-        Assert.Equal((1, 10, 2L), ReadPageHeader(orderPage));
+        Assert.Equal((1, 10, 2L), ReadOrderPageHeader(orderPage));
         Assert.Equal(2, listedOrders.Count);
         AssertListedOrder(listedOrders[0], storedReceivedAtByClOrdId[rejectedSellOutcome.ClOrdId], "rejected", "VALE3", "sell", 100_000m, 1.00m,
             rejectedSellOutcome.OrderId, rejectedSellOutcome.ClOrdId);
@@ -103,7 +103,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1&pageSize=50");
 
-        Assert.Equal((1, 10, 12L), ReadPageHeader(orderPage));
+        Assert.Equal((1, 10, 12L), ReadOrderPageHeader(orderPage));
         Assert.Equal(10, orderPage.GetProperty("orders").GetArrayLength());
     }
 
@@ -117,7 +117,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, $"/api/orders?page={pastLastPageNumber}");
 
-        Assert.Equal((pastLastPageNumber, 10, 12L), ReadPageHeader(orderPage));
+        Assert.Equal((pastLastPageNumber, 10, 12L), ReadOrderPageHeader(orderPage));
         Assert.Equal(0, orderPage.GetProperty("orders").GetArrayLength());
     }
 
@@ -129,7 +129,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders");
 
-        Assert.Equal((1, 10, 11L), ReadPageHeader(orderPage));
+        Assert.Equal((1, 10, 11L), ReadOrderPageHeader(orderPage));
         Assert.Equal(Enumerable.Reverse(clOrdIdsInArrivalOrder).Take(10).ToList(), ReadListedClOrdIds(orderPage));
     }
 
@@ -226,7 +226,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         return JsonDocument.Parse(await orderPageResponse.Content.ReadAsStringAsync()).RootElement;
     }
 
-    private static (int Page, int PageSize, long Total) ReadPageHeader(JsonElement orderPage) =>
+    private static (int Page, int PageSize, long Total) ReadOrderPageHeader(JsonElement orderPage) =>
         (orderPage.GetProperty("page").GetInt32(), orderPage.GetProperty("pageSize").GetInt32(), orderPage.GetProperty("total").GetInt64());
 
     private static List<string> ReadListedClOrdIds(JsonElement orderPage) =>
@@ -234,7 +234,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
 
     // Lê pelos nomes do contrato (camelCase): um nome trocado no código quebra o teste.
     private static void AssertListedOrder(
-        JsonElement listedOrder, DateTime storedReceivedAt, string status, string symbol, string side, decimal quantity, decimal price, string orderId, string clOrdId)
+        JsonElement listedOrder, DateTime storedReceivedAt, string expectedOrderStatus, string expectedOrderSymbol, string expectedOrderSide, decimal expectedOrderQuantity, decimal expectedOrderPrice, string expectedOrderId, string expectedClOrdId)
     {
         Assert.Equal(
             ["receivedAt", "status", "symbol", "side", "quantity", "price", "orderId", "clOrdId"],
@@ -242,12 +242,12 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         var listedReceivedAt = listedOrder.GetProperty("receivedAt").GetString()!;
         Assert.EndsWith("Z", listedReceivedAt);
         Assert.Equal(storedReceivedAt.ToUniversalTime(), DateTime.Parse(listedReceivedAt, null, System.Globalization.DateTimeStyles.AdjustToUniversal));
-        Assert.Equal(status, listedOrder.GetProperty("status").GetString());
-        Assert.Equal(symbol, listedOrder.GetProperty("symbol").GetString());
-        Assert.Equal(side, listedOrder.GetProperty("side").GetString());
-        Assert.Equal(quantity, listedOrder.GetProperty("quantity").GetDecimal());
-        Assert.Equal(price, listedOrder.GetProperty("price").GetDecimal());
-        Assert.Equal(orderId, listedOrder.GetProperty("orderId").GetString());
-        Assert.Equal(clOrdId, listedOrder.GetProperty("clOrdId").GetString());
+        Assert.Equal(expectedOrderStatus, listedOrder.GetProperty("status").GetString());
+        Assert.Equal(expectedOrderSymbol, listedOrder.GetProperty("symbol").GetString());
+        Assert.Equal(expectedOrderSide, listedOrder.GetProperty("side").GetString());
+        Assert.Equal(expectedOrderQuantity, listedOrder.GetProperty("quantity").GetDecimal());
+        Assert.Equal(expectedOrderPrice, listedOrder.GetProperty("price").GetDecimal());
+        Assert.Equal(expectedOrderId, listedOrder.GetProperty("orderId").GetString());
+        Assert.Equal(expectedClOrdId, listedOrder.GetProperty("clOrdId").GetString());
     }
 }

@@ -92,14 +92,14 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
     [Theory]
     [InlineData(null)]
     [InlineData("{}")]
-    public async Task Post_on_the_orders_route_returns_405_and_deletes_nothing(string? postBody)
+    public async Task Post_on_the_orders_route_returns_405_and_deletes_nothing(string? ordersPostBody)
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         await ProcessOneOrderOnEachSymbolAsync(orderAccumulatorTestApp);
         var exposuresBeforeThePost = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
 
         var postOrdersResponse = await orderAccumulatorTestApp.CreateClient().PostAsync(
-            "/api/orders", postBody is null ? null : new StringContent(postBody, Encoding.UTF8, "application/json"));
+            "/api/orders", ordersPostBody is null ? null : new StringContent(ordersPostBody, Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.MethodNotAllowed, postOrdersResponse.StatusCode);
         Assert.Equal(3L, await orderAccumulatorDatabase.CountStoredOrdersAsync());
@@ -140,10 +140,10 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         symbolExposureMemory.LoadStoredExposures(await deleteFailureExposureReader.GetSymbolExposuresAsync());
         var orderHistory = new PostgresOrderHistory(deleteFailureDataSource);
 
-        var deleteFailure = await Assert.ThrowsAsync<PostgresException>(() => symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(
+        var refusedDeleteException = await Assert.ThrowsAsync<PostgresException>(() => symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(
             () => orderHistory.DeleteAllOrdersAndZeroExposuresAsync(), CancellationToken.None));
 
-        Assert.Equal("P0001", deleteFailure.SqlState);
+        Assert.Equal("P0001", refusedDeleteException.SqlState);
         SymbolExposure[] exposuresBeforeTheFailedDelete = [new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
         Assert.Equal(exposuresBeforeTheFailedDelete, await deleteFailureExposureReader.GetSymbolExposuresAsync());
         Assert.Equal(exposuresBeforeTheFailedDelete, symbolExposureMemory.CurrentSymbolExposures());
@@ -151,12 +151,12 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         Assert.Equal(1L, await deleteFailureConnection.ExecuteScalarAsync<long>("SELECT count(*) FROM orders"));
     }
 
-    private static HttpRequestMessage OrdersRequestFromOtherSite(HttpMethod ordersRouteMethod, params (string Name, string Value)[] extraHeaders)
+    private static HttpRequestMessage OrdersRequestFromOtherSite(HttpMethod ordersRouteMethod, params (string Name, string Value)[] extraRequestHeaders)
     {
         var ordersRequestFromOtherSite = new HttpRequestMessage(ordersRouteMethod, "/api/orders");
         ordersRequestFromOtherSite.Headers.Add("Origin", OtherSiteOrigin);
-        foreach (var (headerName, headerValue) in extraHeaders)
-            ordersRequestFromOtherSite.Headers.Add(headerName, headerValue);
+        foreach (var (requestHeaderName, requestHeaderValue) in extraRequestHeaders)
+            ordersRequestFromOtherSite.Headers.Add(requestHeaderName, requestHeaderValue);
         return ordersRequestFromOtherSite;
     }
 
