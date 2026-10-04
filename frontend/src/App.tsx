@@ -2,10 +2,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Boleta } from './Boleta';
 import { CompraVenda, type EstadoDaListaDeOrdens, type FalhaNoEnvioDaOrdem } from './CompraVenda';
 import { ExposicaoPorAtivo, type EstadoDasExposicoes } from './ExposicaoPorAtivo';
+import { Paginacao } from './Paginacao';
 import { Topo } from './Topo';
 import './boleta.css';
 import './compra-venda.css';
+import { contarPaginasDaLista } from './lib/paginasVisiveis';
 import { enviarOrdem, lerExposicoes, listarOrdens, type OrdemParaEnviar } from './ordensService';
+
+// Outra aba pode ter apagado ordens: a página além da última volta vazia com o total real,
+// e aí a tela pede a última página que ainda existe em vez de mostrar a lista como vazia.
+async function lerPaginaDaListaDeOrdens(paginaPedida: number): Promise<EstadoDaListaDeOrdens> {
+  try {
+    const paginaDeOrdens = await listarOrdens(paginaPedida);
+    const ultimaPaginaComOrdens = contarPaginasDaLista(paginaDeOrdens.totalDeOrdens);
+    if (paginaDeOrdens.ordens.length === 0 && paginaPedida > ultimaPaginaComOrdens && ultimaPaginaComOrdens >= 1) {
+      return await lerPaginaDaListaDeOrdens(ultimaPaginaComOrdens);
+    }
+    return { situacao: 'pronto', paginaDeOrdens };
+  } catch (falhaNaLeitura) {
+    return { situacao: 'erro', mensagemDeErro: (falhaNaLeitura as Error).message };
+  }
+}
 
 export function PaginaDaBoletaEExposicao() {
   const [estadoDasExposicoes, setEstadoDasExposicoes] = useState<EstadoDasExposicoes>({ situacao: 'carregando' });
@@ -27,18 +44,16 @@ export function PaginaDaBoletaEExposicao() {
   }, []);
 
   // Mesma guarda da exposição: a lista lida antes do envio não pode cobrir a lida depois dele.
-  const atualizarListaDeOrdens = useCallback(async () => {
+  // Também vale entre cliques rápidos na paginação: só a última página pedida aparece.
+  const atualizarListaDeOrdens = useCallback(async (paginaPedida: number) => {
     const numeroDestaLeitura = ++numeroDaUltimaLeituraDaListaDeOrdens.current;
-    const estadoDaListaDeOrdensLido: EstadoDaListaDeOrdens = await listarOrdens(1).then(
-      (paginaDeOrdens) => ({ situacao: 'pronto', paginaDeOrdens }),
-      (falhaNaLeitura: Error) => ({ situacao: 'erro', mensagemDeErro: falhaNaLeitura.message }),
-    );
+    const estadoDaListaDeOrdensLido = await lerPaginaDaListaDeOrdens(paginaPedida);
     if (numeroDestaLeitura === numeroDaUltimaLeituraDaListaDeOrdens.current) setEstadoDaListaDeOrdens(estadoDaListaDeOrdensLido);
   }, []);
 
   useEffect(() => {
     void atualizarExposicoes();
-    void atualizarListaDeOrdens();
+    void atualizarListaDeOrdens(1);
   }, [atualizarExposicoes, atualizarListaDeOrdens]);
 
   async function aoEnviarOrdem(ordemParaEnviar: OrdemParaEnviar) {
@@ -51,7 +66,8 @@ export function PaginaDaBoletaEExposicao() {
       setEnviandoOrdem(false);
     }
     // Exposição e lista vêm sempre do servidor: a tela não soma nem monta linha por conta própria.
-    await Promise.all([atualizarExposicoes(), atualizarListaDeOrdens()]);
+    // A ordem nova é a mais recente, então a lista volta para a página 1, onde ela aparece no topo.
+    await Promise.all([atualizarExposicoes(), atualizarListaDeOrdens(1)]);
   }
 
   return (
@@ -67,7 +83,21 @@ export function PaginaDaBoletaEExposicao() {
 
       <main className="grade">
         <ExposicaoPorAtivo estadoDasExposicoes={estadoDasExposicoes} />
-        <CompraVenda estadoDaListaDeOrdens={estadoDaListaDeOrdens} enviandoOrdem={enviandoOrdem} falhaNoUltimoEnvio={falhaNoUltimoEnvio} />
+        <CompraVenda
+          estadoDaListaDeOrdens={estadoDaListaDeOrdens}
+          enviandoOrdem={enviandoOrdem}
+          falhaNoUltimoEnvio={falhaNoUltimoEnvio}
+          rodape={
+            estadoDaListaDeOrdens.situacao === 'pronto' && (
+              <Paginacao
+                paginaAtual={estadoDaListaDeOrdens.paginaDeOrdens.pagina}
+                totalDeOrdens={estadoDaListaDeOrdens.paginaDeOrdens.totalDeOrdens}
+                quantidadeDeOrdensNaPagina={estadoDaListaDeOrdens.paginaDeOrdens.ordens.length}
+                aoEscolherPagina={(paginaEscolhida) => void atualizarListaDeOrdens(paginaEscolhida)}
+              />
+            )
+          }
+        />
         <Boleta enviandoOrdem={enviandoOrdem} aoEnviarOrdem={aoEnviarOrdem} />
       </main>
     </div>

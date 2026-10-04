@@ -4,8 +4,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--espaco-3);
-  padding: var(--espaco-3-5) var(--espaco-4);
-  border-top: var(--espessura-divisor) solid var(--cor-divisor);
+  padding: 0 var(--espaco-1);
 }
 .paginacao-resumo { margin: 0; font-size: var(--texto-rotulo); color: var(--cor-texto-apagado); }
 .paginacao-botoes { display: flex; align-items: center; gap: var(--espaco-1-5); margin: 0; padding: 0; list-style: none; }
