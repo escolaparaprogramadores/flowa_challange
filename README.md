@@ -174,9 +174,23 @@ guardada no repositório. A fonte do desenho fica em `docs/arquitetura/arquitetu
 
 ## Observabilidade
 
-O [painel do Datadog](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-cb393cd3b3760676912c981fa71f3372)
-é público e abre sem login. Ele mostra a taxa de aceite, as ordens aceitas e rejeitadas ao longo do tempo e a exposição de cada
-ativo, com as linhas do limite de 100 milhões.
+São três painéis no Datadog, todos públicos e sem login. Os prints são da noite do teste de carga
+(03/10/2026, horário de Brasília).
+
+**[Four Golden Signals](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-a9e17306767d8f22537a7acb53350942)**:
+latência, tráfego, erros e saturação dos dois serviços.
+
+![Painel Four Golden Signals](docs/observabilidade/painel-four-golden-signals.png)
+
+**[Ordens e exposição](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-cb393cd3b3760676912c981fa71f3372)**:
+taxa de aceite, ordens aceitas e rejeitadas e a exposição de cada ativo perto do limite de 100 milhões.
+
+![Painel de ordens e exposição](docs/observabilidade/painel-ordens-e-exposicao.png)
+
+**[Jornada da ordem](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-b5d1b14c994996116b3fe646ff8d78d5)**:
+o rastro de cada ordem, do `POST /api/orders` até o Postgres, passando pelo FIX, com o tempo de cada etapa.
+
+![Painel da jornada da ordem](docs/observabilidade/painel-jornada-da-ordem.png)
 
 Na AWS, cada task roda um agente do Datadog ao lado do app. Os dois apps mandam rastros para o agente
 em `localhost:8126`, o OrderAccumulator manda também métricas em `localhost:8125`, e o agente envia
@@ -206,7 +220,9 @@ chegar a 1%. O commit é a versão do OrderGenerator no ar durante o teste.
 |---|---|---|---|---|---|---|---|
 | 2026-10-04 00:24 UTC | f6a268d | 899 | 0,00% | 79 ms | 90 ms | 101 ms | 146 ms |
 
-Foram 4500 ordens, todas aceitas. Para rodar de novo: em Actions, escolha o workflow `k6-carga.yml` e
-clique em "Run workflow". O relatório fica como anexo do run.
+Foram 4500 ordens, todas aceitas. O relatório completo está no
+[run do GitHub Actions](https://github.com/escolaparaprogramadores/flowa_challange/actions/runs/37164582295).
+Para rodar de novo: em Actions, escolha o workflow `k6-carga.yml` e clique em "Run workflow". O
+relatório fica como anexo do run.
 
 This is a challenge by [Coodesh](https://coodesh.com/)
