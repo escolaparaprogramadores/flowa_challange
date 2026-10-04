@@ -207,7 +207,9 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Assert.Equal(19876, fixSessionSettings.GetInt("SocketAcceptPort"));
         Assert.Equal(["Y", "Y", "Y"], new[] { "ResetOnLogon", "ResetOnLogout", "ResetOnDisconnect" }.Select(fixSessionSettings.GetString));
         Assert.Equal("Y", fixSessionSettings.GetString("UseDataDictionary"));
-        Assert.Equal(Path.Combine(AppContext.BaseDirectory, "FIX44.xml"), fixSessionSettings.GetString("DataDictionary"));
+        Assert.Equal(Path.Combine(AppContext.BaseDirectory, "FIX44-flowa.xml"), fixSessionSettings.GetString("DataDictionary"));
+        Assert.Equal("Y", fixSessionSettings.GetString("ValidateUserDefinedFields"));
+        Assert.Equal("N", fixSessionSettings.GetString("AllowUnknownMsgFields"));
         Assert.True(File.Exists(fixSessionSettings.GetString("DataDictionary")));
         // Sem Fix__AcceptorBindHost o acceptor escuta em todas as interfaces (o compose precisa disso).
         Assert.False(fixSessionSettings.Has("SocketAcceptHost"));

@@ -1,0 +1,56 @@
+variable "region" {
+  description = "Região da conta do Flowa. A policy da esteira nega qualquer outra."
+  type        = string
+  default     = "us-east-1"
+
+  validation {
+    condition     = var.region == "us-east-1"
+    error_message = "O Flowa roda só em us-east-1."
+  }
+}
+
+# Uma tag por serviço (CA-O24): o SHA do último commit que mudou o que a imagem daquele serviço copia.
+# A esteira passa as duas em todo apply; o serviço que não mudou recebe a tag que já roda, e a task dele
+# não é trocada.
+variable "generator_image_tag" {
+  description = "Tag da imagem do OrderGenerator no ECR (SHA completo do commit que a construiu)."
+  type        = string
+  # Sem default útil: o null deixa o `apply -target` dos ECR rodar antes de existir imagem, e a task
+  # definition que use a tag sem ela ser passada falha alto no plan.
+  default = null
+
+  validation {
+    condition     = var.generator_image_tag == null || can(regex("^[0-9a-f]{40}$", coalesce(var.generator_image_tag, "-")))
+    error_message = "generator_image_tag tem de ser o SHA completo do commit (40 caracteres hexadecimais)."
+  }
+}
+
+variable "accumulator_image_tag" {
+  description = "Tag da imagem do OrderAccumulator no ECR (SHA completo do commit que a construiu)."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.accumulator_image_tag == null || can(regex("^[0-9a-f]{40}$", coalesce(var.accumulator_image_tag, "-")))
+    error_message = "accumulator_image_tag tem de ser o SHA completo do commit (40 caracteres hexadecimais)."
+  }
+}
+
+locals {
+  prefixo_dos_recursos_flowa  = "flowa-challenge"
+  ambiente_dos_recursos_flowa = "dev"
+
+  # Um repositório de imagem e um log group por app, com o mesmo nome.
+  nomes_dos_servicos_flowa = {
+    generator   = "${local.prefixo_dos_recursos_flowa}-order-generator"
+    accumulator = "${local.prefixo_dos_recursos_flowa}-order-accumulator"
+  }
+
+  # Banco e usuário iguais aos do compose (docs/contracts/contracts.md, seção 4).
+  banco_nome    = "flowa"
+  banco_usuario = "flowa"
+  banco_porta   = 5432
+
+  porta_fix                 = 9876
+  porta_http_do_accumulator = 8081
+}

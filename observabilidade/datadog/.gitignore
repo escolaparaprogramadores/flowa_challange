@@ -1,0 +1,3 @@
+# Provider baixado pelo terraform init; a trava (.terraform.lock.hcl) é versionada.
+.terraform/
+tfplan

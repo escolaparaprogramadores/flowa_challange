@@ -1,3 +1,4 @@
+using Flowa.Shared.Fix;
 using QuickFix;
 using QuickFix.Store;
 
@@ -9,15 +10,16 @@ public sealed class FixAcceptorService(
     : IHostedService, IDisposable
 {
     private const string AcceptorSettingsFile = "acceptor.cfg";
-    private const string Fix44DictionaryFile = "FIX44.xml";
+    private const string Fix44DictionaryFile = "FIX44-flowa.xml";
 
     private ThreadedSocketAcceptor? fixAcceptor;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        // O log FIX vai para o ILoggerFactory do app, que escreve no stdout (D-34).
+        // O log FIX vai para o ILoggerFactory do app, que escreve no stdout (D-34), sem o valor da 5100.
         fixAcceptor = new ThreadedSocketAcceptor(
-            orderFixApplication, new MemoryStoreFactory(), LoadFixAcceptorSessionSettings(appConfiguration), orderAccumulatorLoggerFactory,
+            orderFixApplication, new MemoryStoreFactory(), LoadFixAcceptorSessionSettings(appConfiguration),
+            new LogDaSessaoFixSemTraceParent(orderAccumulatorLoggerFactory),
             new DefaultMessageFactory([typeof(QuickFix.FIX44.NewOrderSingle).Assembly], string.Empty));
         fixAcceptor.Start();
         return Task.CompletedTask;
@@ -63,5 +65,36 @@ public sealed class FixAcceptorService(
         }
 
         return loadedFixAcceptorSettings;
+    }
+
+    // O log de sessão do QuickFIX escreve a mensagem FIX crua; o valor da 5100 (trace id) fica de fora.
+    // A fábrica é a do app (injeção de dependência): quem a descarta é o host, não o acceptor.
+    private sealed class LogDaSessaoFixSemTraceParent(ILoggerFactory logDoApp) : ILoggerFactory
+    {
+        public ILogger CreateLogger(string categoriaDoLog) => new LogSemTraceParent(logDoApp.CreateLogger(categoriaDoLog));
+
+        public void AddProvider(ILoggerProvider provedorDoLog) => logDoApp.AddProvider(provedorDoLog);
+
+        public void Dispose() { }
+    }
+
+    private sealed class LogSemTraceParent(ILogger logDaCategoria) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState estadoDoEscopo) where TState : notnull => logDaCategoria.BeginScope(estadoDoEscopo);
+
+        public bool IsEnabled(LogLevel nivelDoLog) => logDaCategoria.IsEnabled(nivelDoLog);
+
+        public void Log<TState>(LogLevel nivelDoLog, EventId eventoDoLog, TState estadoDoLog, Exception? erroDoLog, Func<TState, Exception?, string> formatarLinha)
+        {
+            if (!logDaCategoria.IsEnabled(nivelDoLog))
+                return;
+
+            var linhaDoLog = formatarLinha(estadoDoLog, erroDoLog);
+            var linhaSemTraceParent = RastroDaOrdemFix.OcultarTraceParentNoLog(linhaDoLog);
+            if (ReferenceEquals(linhaDoLog, linhaSemTraceParent))
+                logDaCategoria.Log(nivelDoLog, eventoDoLog, estadoDoLog, erroDoLog, formatarLinha);
+            else
+                logDaCategoria.Log(nivelDoLog, eventoDoLog, linhaSemTraceParent, erroDoLog, static (linha, _) => linha);
+        }
     }
 }
