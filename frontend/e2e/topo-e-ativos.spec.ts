@@ -33,6 +33,7 @@ const BARRINHA_AMBAR = 'linear-gradient(90deg, rgb(233, 167, 60), rgb(244, 197, 
 const COR_DA_PORCENTAGEM_PERTO_DO_LIMITE = 'rgb(244, 197, 106)';
 const COR_DO_TEXTO = 'rgb(232, 239, 238)';
 const COR_DO_FUNDO_DO_LINK = 'rgb(14, 27, 30)';
+const COR_DO_FUNDO_DO_LINK_NO_HOVER = 'rgb(18, 36, 39)';
 // Os cartões ficam 14 px de CSS um do outro (maquete 01); na tela, com a página em 90%, são 12,6 px.
 const ESPACO_ENTRE_CARTOES_NA_TELA = 14 * 0.9;
 const PRECO_MAXIMO_DA_ORDEM_EM_CENTAVOS = 99_999;
@@ -250,10 +251,13 @@ for (const larguraDaJanela of [1440, 1920]) {
       expect(caixaDoLink.x).toBeGreaterThanOrEqual(ladoDireitoDoLinkAnterior);
       ladoDireitoDoLinkAnterior = caixaDoLink.x + caixaDoLink.width;
 
+      // No hover a borda inteira fica verde e o fundo clareia; ao sair, tudo volta.
       await linkDoPainel.hover();
-      await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DO_ACENTO);
+      for (const ladoDaBorda of ['top', 'right', 'bottom', 'left']) await expect(linkDoPainel).toHaveCSS(`border-${ladoDaBorda}-color`, COR_DO_ACENTO);
+      await expect(linkDoPainel).toHaveCSS('background-color', COR_DO_FUNDO_DO_LINK_NO_HOVER);
       await page.mouse.move(0, 0);
-      await expect(linkDoPainel).toHaveCSS('border-top-color', COR_DA_BORDA);
+      for (const ladoDaBorda of ['top', 'right', 'bottom', 'left']) await expect(linkDoPainel).toHaveCSS(`border-${ladoDaBorda}-color`, COR_DA_BORDA);
+      await expect(linkDoPainel).toHaveCSS('background-color', COR_DO_FUNDO_DO_LINK);
     }
 
     const caixaDoLogo = await medirRetanguloNaTela(page.getByRole('img', { name: 'Base investimentos' }));
@@ -265,17 +269,20 @@ for (const larguraDaJanela of [1440, 1920]) {
   });
 }
 
-test('CA-9: clicar num link do Datadog abre o painel em outra aba', async ({ page, context }) => {
+test('CA-9: clicar em cada link do Datadog abre o painel dele em outra aba', async ({ page, context }) => {
   await page.goto('/');
+  const enderecoDaBoleta = page.url();
   // A aba nova não chega a carregar o Datadog: o teste só confere qual endereço ela tentou abrir.
   await context.route(/datadoghq\.com/, (rotaDoDatadog) => rotaDoDatadog.fulfill({ status: 200, body: 'painel' }));
-  const painelEsperado = PAINEIS_DO_DATADOG_ESPERADOS[1];
-  const abaNova = context.waitForEvent('page');
-  await page.getByRole('banner').getByRole('link', { name: new RegExp(painelEsperado.nomeDoPainel) }).click();
-  const abaDoPainel = await abaNova;
-  await abaDoPainel.waitForLoadState();
-  expect(abaDoPainel.url()).toBe(painelEsperado.enderecoDoPainel);
-  expect(page.url()).toMatch(/\/$/);
+  for (const painelEsperado of PAINEIS_DO_DATADOG_ESPERADOS) {
+    const abaNova = context.waitForEvent('page');
+    await page.getByRole('banner').getByRole('link', { name: new RegExp(painelEsperado.nomeDoPainel) }).click();
+    const abaDoPainel = await abaNova;
+    await abaDoPainel.waitForLoadState();
+    expect(abaDoPainel.url()).toBe(painelEsperado.enderecoDoPainel);
+    expect(page.url()).toBe(enderecoDaBoleta);
+    await abaDoPainel.close();
+  }
 });
 
 for (const larguraDaJanela of [1440, 1920]) {
