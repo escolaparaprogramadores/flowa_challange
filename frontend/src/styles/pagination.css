@@ -1,0 +1,52 @@
+/* The footer is the last strip of the table frame: it takes up the card gap and closes the frame,
+   which drops its bottom border and corners only when the pagination shows. */
+.order-list .order-table-frame:has(+ .pagination) { border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: calc(-1 * var(--space-5-5));
+  padding: var(--space-3) var(--space-4);
+  border: var(--divider-thickness) solid var(--color-border);
+  border-top-color: var(--color-divider);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-bottom-left-radius: var(--radius-tab);
+  border-bottom-right-radius: var(--radius-tab);
+  background: var(--color-sunken);
+}
+.pagination-summary { margin: 0; font-size: var(--font-size-label); color: var(--color-text-muted); }
+.pagination-buttons { display: flex; align-items: center; gap: var(--space-1-5); margin: 0; padding: 0; list-style: none; }
+.pagination-button {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: var(--divider-thickness) solid var(--color-border);
+  border-radius: var(--radius-inner-tab);
+  background: var(--color-sunken);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-label);
+  font-weight: 700;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.pagination-button:hover:not(:disabled):not([aria-current='page']):not([data-loading='true']) { background: var(--color-hover); border-color: var(--color-border-strong); color: var(--color-text); }
+.pagination-button[aria-current='page'] { background: var(--color-text); border-color: var(--color-text); color: var(--color-background); cursor: default; }
+.pagination-button[data-loading='true'] { border-color: var(--color-accent); color: var(--color-accent); }
+.pagination-button:disabled { background: transparent; border-color: transparent; color: var(--color-disabled-text); cursor: default; }
+.pagination-ellipsis { min-width: 20px; text-align: center; color: var(--color-text-muted); font-size: var(--font-size-label); user-select: none; }
+
+/* Narrow card: the summary always keeps its own line, otherwise "Carregando…", shorter than
+   "Mostrando…", changes the wrapping and the buttons jump in the middle of a click. */
+@container (max-width: 719px) {
+  .pagination { justify-content: center; }
+  .pagination-summary { flex-basis: 100%; text-align: center; }
+}
+
+/* On a narrow screen the row (up to 7 numbers + ‹ ›) shrinks to fit the card. */
+@media (max-width: 520px) {
+  .pagination { padding: var(--space-3); }
+  .pagination-buttons { gap: var(--space-1); }
+  .pagination-button { min-width: 28px; height: 28px; padding: 0 var(--space-1-5); }
+}

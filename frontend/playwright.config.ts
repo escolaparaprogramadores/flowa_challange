@@ -1,19 +1,19 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// A página é servida pelo OrderGenerator (porta 8080 no contrato). E2E_PORTA_DESLOCO
-// desloca a porta para várias janelas rodarem na mesma máquina sem colidir.
-const portaDoGenerator = 8080 + Number(process.env.E2E_PORTA_DESLOCO ?? 0);
+// The page is served by the OrderGenerator (port 8080 in the contract). E2E_PORTA_DESLOCO
+// shifts the port so several windows can run on the same machine without colliding.
+const generatorPort = 8080 + Number(process.env.E2E_PORTA_DESLOCO ?? 0);
 
 export default defineConfig({
   testDir: './e2e',
-  // O cenário com o OrderAccumulator desligado tem config própria (playwright.sem-accumulator.config.ts).
-  testIgnore: ['**/sem-accumulator.spec.ts'],
+  // The scenario with the OrderAccumulator stopped has its own config (playwright.without-accumulator.config.ts).
+  testIgnore: ['**/without-accumulator.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  reporter: [['list'], ['json', { outputFile: 'test-results/resultado.json' }]],
+  reporter: [['list'], ['json', { outputFile: 'test-results/results.json' }]],
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? `http://localhost:${portaDoGenerator}`,
+    baseURL: process.env.E2E_BASE_URL ?? `http://localhost:${generatorPort}`,
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

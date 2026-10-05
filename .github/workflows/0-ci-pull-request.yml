@@ -38,7 +38,7 @@ jobs:
         run: npm test
       - name: Screen — no raw values outside the theme (CA-23)
         working-directory: frontend
-        run: node e2e/sem-valores-crus.mjs
+        run: node e2e/no-raw-values.mjs
 
       # No filter: the tests with PostgreSQL in a container and the integration tests with the compose run too.
       # Docker is the runner's own.
@@ -84,7 +84,7 @@ jobs:
       - name: Screen E2E without the OrderAccumulator
         if: ${{ !cancelled() && steps.compose.outcome == 'success' }}
         working-directory: frontend
-        run: npx playwright test -c playwright.sem-accumulator.config.ts
+        run: npx playwright test -c playwright.without-accumulator.config.ts
       - name: App logs on failure
         if: failure()
         run: docker compose logs --no-color ordergenerator orderaccumulator

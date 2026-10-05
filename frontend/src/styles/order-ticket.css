@@ -1,0 +1,78 @@
+/* Order ticket (Nova ordem). Shared tokens live in the :root of base-theme.css; only the ones the ticket alone uses stay here. */
+:root {
+  --color-track-border: #1e3236;
+  --glow-option-buy: 0 0 18px rgba(79, 227, 176, 0.35);
+  --glow-option-sell: 0 0 18px rgba(255, 164, 151, 0.32);
+  --glow-submit-buy: 0 10px 28px -6px rgba(79, 227, 176, 0.45);
+  --glow-submit-sell: 0 10px 28px -6px rgba(255, 164, 151, 0.42);
+  --field-focus-ring: 0 0 0 3px rgba(79, 227, 176, 0.22);
+  --radius-field: var(--radius-quantity-stepper);
+  --focus-inset-on-step: -4px;
+  --height-submit-button: 52px;
+  --letter-spacing-field-label: 0.08em;
+  --size-disclaimer-icon: 16px;
+}
+.side-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1); padding: var(--space-1-5); margin: 0; border-radius: var(--radius-tab); border: 1px solid var(--color-track-border); background: var(--color-sunken); }
+.side-toggle-option {
+  height: var(--height-tab);
+  border: 0;
+  border-radius: var(--radius-inner-tab);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body-small);
+  font-weight: 700;
+  transition: background var(--transition), color var(--transition), box-shadow var(--transition);
+}
+.side-toggle-option:hover { background: var(--color-hover); }
+.side-toggle-option.buy[aria-pressed='true'] { background: var(--color-accent); color: var(--color-text-on-accent); box-shadow: var(--glow-option-buy); }
+.side-toggle-option.sell[aria-pressed='true'] { background: var(--color-sell); color: var(--color-text-on-sell); box-shadow: var(--glow-option-sell); }
+.field { display: flex; flex-direction: column; gap: var(--space-2); }
+.field-label { font-size: var(--font-size-caption); font-weight: 700; letter-spacing: var(--letter-spacing-field-label); text-transform: uppercase; color: var(--color-text-label); }
+.symbol-track { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1); padding: var(--space-1-5); border-radius: var(--radius-tab); border: 1px solid var(--color-track-border); background: var(--color-sunken); }
+.symbol-option {
+  height: var(--height-tab);
+  min-width: 0;
+  border: 0;
+  border-radius: var(--radius-inner-tab);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body-small);
+  font-weight: 700;
+  transition: background var(--transition), color var(--transition);
+}
+.symbol-option:hover { background: var(--color-hover); }
+.symbol-option[aria-pressed='true'] { background: var(--color-text); color: var(--color-background); }
+.text-input {
+  height: var(--height-button);
+  border-radius: var(--radius-field);
+  border: 1.5px solid var(--color-border-strong);
+  background: var(--color-background);
+  color: var(--color-text);
+  padding: 0 var(--space-3-5);
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.text-input::placeholder { color: var(--color-text-muted); }
+.text-input:focus { border-color: var(--color-accent); box-shadow: var(--field-focus-ring); outline: none; }
+.quantity-stepper { display: grid; grid-template-columns: var(--width-quantity-step) minmax(0, 1fr) var(--width-quantity-step); border: 1.5px solid var(--color-border-strong); border-radius: var(--radius-field); overflow: hidden; transition: border-color var(--transition), box-shadow var(--transition); }
+.quantity-stepper:focus-within { border-color: var(--color-accent); box-shadow: var(--field-focus-ring); }
+.quantity-stepper button { border: 0; background: var(--color-sunken); color: var(--color-text); font-size: var(--font-size-large-figure); height: var(--height-quantity-stepper); transition: background var(--transition); }
+.quantity-stepper button:hover { background: var(--color-hover); }
+/* The box clips what crosses its border (overflow: hidden): the focus outline of − and + goes inwards. */
+.quantity-stepper button:focus-visible { background: var(--color-hover); outline-offset: var(--focus-inset-on-step); }
+.quantity-stepper input { border: 0; background: var(--color-background); color: var(--color-text); text-align: center; font-family: var(--font-display); font-size: var(--font-size-large-figure); font-weight: 600; min-width: 0; outline: none; }
+.text-input[aria-invalid='true'], .quantity-stepper.invalid { border-color: var(--color-danger-text); }
+.field-error { margin: 0; font-size: var(--font-size-label); font-weight: 700; color: var(--color-danger-text); line-height: 1.4; }
+.order-summary { margin: 0; padding: var(--space-2) var(--space-4); border-radius: var(--radius-tab); border: 1px solid var(--color-track-border); background: var(--color-sunken); }
+.order-summary-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); font-size: var(--font-size-body-small); color: var(--color-text-tertiary); padding: var(--space-2-5) 0; }
+.order-summary-row + .order-summary-row { border-top: 1px solid var(--color-divider); }
+.order-summary-row dd { margin: 0; color: var(--color-text); font-weight: 700; text-align: right; }
+.order-summary-row .order-summary-total { font-family: var(--font-display); font-size: var(--font-size-large-figure); font-weight: 600; }
+.submit-order-button { height: var(--height-submit-button); border: 0; border-radius: var(--radius-field); font-size: var(--font-size-body); font-weight: 800; transition: filter var(--transition), background var(--transition), color var(--transition), box-shadow var(--transition); }
+.submit-order-button.buy { background: var(--color-accent); color: var(--color-text-on-accent); box-shadow: var(--glow-submit-buy); }
+.submit-order-button.sell { background: var(--color-sell); color: var(--color-text-on-sell); box-shadow: var(--glow-submit-sell); }
+.submit-order-button:hover { filter: brightness(1.07); }
+.submit-order-button:disabled { background: var(--color-disabled-background); color: var(--color-disabled-text); box-shadow: none; cursor: progress; filter: none; }
+.disclaimer { margin: 0; display: flex; align-items: flex-start; gap: var(--space-2-5); padding: var(--space-3) var(--space-3-5); border-radius: var(--radius-field); border: 1px solid var(--color-track-border); background: var(--color-sunken); color: var(--color-text-label); font-size: var(--font-size-label); line-height: 1.5; }
+.disclaimer-icon { flex: none; width: var(--size-disclaimer-icon); height: var(--size-disclaimer-icon); margin-top: var(--divider-thickness); color: var(--color-accent); }

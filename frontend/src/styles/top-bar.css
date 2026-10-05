@@ -1,0 +1,67 @@
+/* Datadog dashboard links and the environment badge, right of the logo. Tokens only the top bar uses stay here. */
+:root {
+  --color-datadog-logo-background: #ffffff;
+  --color-datadog-logo: #632ca6;
+  --font-size-dashboard-brand: 10px;
+  --letter-spacing-dashboard-brand: 0.08em;
+  --radius-top-bar-link: 14px;
+  --radius-dashboard-logo: 7px;
+  --radius-badge-icon: 8px;
+}
+.top-bar { flex-wrap: wrap; }
+.top-bar-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-2-5); min-width: 0; }
+.top-bar-dashboards { display: flex; flex-wrap: wrap; gap: var(--space-2-5); margin: 0; padding: 0; list-style: none; }
+.datadog-dashboard-link,
+.environment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2-5);
+  height: var(--height-button);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-top-bar-link);
+}
+.datadog-dashboard-link { color: var(--color-text); text-decoration: none; transition: border-color var(--transition), background var(--transition); }
+.datadog-dashboard-link:hover { border-color: var(--color-accent); background: var(--color-hover); }
+/* 3 px of CSS become 2 px on screen with the page at 90%; the general 2 px focus would shrink to 1 px. */
+.datadog-dashboard-link:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 2px; }
+.datadog-dashboard-logo {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  background: var(--color-datadog-logo-background);
+  color: var(--color-datadog-logo);
+  border-radius: var(--radius-dashboard-logo);
+}
+.datadog-dashboard-logo svg { width: 20px; height: 20px; }
+.datadog-dashboard-texts,
+.environment-badge-texts { display: flex; flex-direction: column; gap: var(--space-1); line-height: 1; }
+.datadog-dashboard-brand,
+.environment-badge-label {
+  font-size: var(--font-size-dashboard-brand);
+  font-weight: 700;
+  letter-spacing: var(--letter-spacing-dashboard-brand);
+  text-transform: uppercase;
+  color: var(--color-text-label);
+}
+.datadog-dashboard-name,
+.environment-badge-name { font-size: var(--font-size-label); font-weight: 800; white-space: nowrap; }
+.datadog-dashboard-arrow { flex: none; width: 14px; height: 14px; color: var(--color-text-muted); transition: color var(--transition); }
+.datadog-dashboard-link:hover .datadog-dashboard-arrow { color: var(--color-accent); }
+.environment-badge-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  background: var(--color-success-background);
+  color: var(--color-accent);
+  border-radius: var(--radius-badge-icon);
+}
+.environment-badge-icon svg { width: 16px; height: 16px; }
+@media (max-width: 860px) {
+  .top-bar-actions { justify-content: flex-start; }
+}
