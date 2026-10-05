@@ -67,7 +67,8 @@ public sealed class OrderLogTests
         }
 
         var orderSending = Assert.Single(orderSendingSpans);
-        var communicationWarning = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.Category == FixOrderClientCategory);
+        var communicationWarning = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
+        Assert.Equal(FixOrderClientCategory, communicationWarning.Category);
         Assert.Equal(("Warning", "Order not sent: the FIX session is not logged on."), (communicationWarning.LogLevel, communicationWarning.Message));
         Assert.Equal("communication_error", communicationWarning.ReadLogField("ErrorCode"));
         Assert.Equal(orderSending.TraceId.ToHexString(), communicationWarning.TraceId);
@@ -90,7 +91,8 @@ public sealed class OrderLogTests
         }
 
         var unansweredClOrdId = Assert.Single(silentFixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
-        var communicationWarning = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.Category == FixOrderClientCategory);
+        var communicationWarning = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
+        Assert.Equal(FixOrderClientCategory, communicationWarning.Category);
         Assert.Equal(("Warning", "No ExecutionReport for the order within 5 seconds."), (communicationWarning.LogLevel, communicationWarning.Message));
         Assert.Equal("communication_error", communicationWarning.ReadLogField("ErrorCode"));
         Assert.Equal(unansweredClOrdId, communicationWarning.TraceId);
@@ -114,38 +116,45 @@ public sealed class OrderLogTests
         }
 
         var answeredClOrdId = Assert.Single(fixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
-        var unexpectedAnswerError = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.Category == FixOrderClientCategory);
+        var unexpectedAnswerError = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
+        Assert.Equal(FixOrderClientCategory, unexpectedAnswerError.Category);
         Assert.Equal(("Error", "Unexpected ExecutionReport for the order."), (unexpectedAnswerError.LogLevel, unexpectedAnswerError.Message));
         Assert.Equal("error", unexpectedAnswerError.ReadLogField("ErrorCode"));
         Assert.Equal(answeredClOrdId, unexpectedAnswerError.TraceId);
         Assert.StartsWith("System.InvalidOperationException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
     }
 
+    // Route is the route template, not the path the caller typed: the path can vary (case), the template cannot.
     [Theory]
-    [InlineData("GET", "/api/exposures")]
-    [InlineData("GET", "/api/orders")]
-    [InlineData("DELETE", "/api/orders")]
-    public async Task Forwarded_call_with_the_order_accumulator_down_logs_one_warning(string forwardedHttpMethod, string forwardedRoute)
+    [InlineData("GET", "/api/exposures", "/api/exposures")]
+    [InlineData("GET", "/api/orders?page=2", "/api/orders")]
+    [InlineData("DELETE", "/api/orders", "/api/orders")]
+    [InlineData("GET", "/API/Exposures", "/api/exposures")]
+    public async Task Forwarded_call_with_the_order_accumulator_down_logs_one_warning(string forwardedHttpMethod, string requestedPath, string expectedRouteTemplate)
     {
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         var accumulatorBaseUrlWithNobodyListening = $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}";
         await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), accumulatorBaseUrlWithNobodyListening))
         {
             using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
-            var forwardedCallResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(forwardedHttpMethod), forwardedRoute));
+            var forwardedCallResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(forwardedHttpMethod), requestedPath));
             Assert.Equal(HttpStatusCode.ServiceUnavailable, forwardedCallResponse.StatusCode);
         }
 
-        // The test host has no wwwroot, so the static files middleware warns about it; the app does not.
-        var forwardedCallWarning = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine =>
-            jsonLogLine.LogLevel is "Warning" or "Error" && jsonLogLine.Category != "Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware");
+        var forwardedCallWarning = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
         Assert.Equal(("Program", "Warning", "The OrderAccumulator did not answer the forwarded call."),
             (forwardedCallWarning.Category, forwardedCallWarning.LogLevel, forwardedCallWarning.Message));
         Assert.Equal("communication_error", forwardedCallWarning.ReadLogField("ErrorCode"));
         Assert.Equal(forwardedHttpMethod, forwardedCallWarning.ReadLogField("Method"));
-        Assert.Equal(forwardedRoute, forwardedCallWarning.ReadLogField("Route"));
+        Assert.Equal(expectedRouteTemplate, forwardedCallWarning.ReadLogField("Route"));
         Assert.Null(forwardedCallWarning.Exception);
     }
+
+    // Exactly one log per error counts every Warning or Error line the app wrote, whatever class wrote it. The test
+    // host has no wwwroot, so the static files middleware warns about that at startup; that line is not about the call.
+    private static JsonLogLine AssertSingleWarningOrErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture) =>
+        Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine =>
+            jsonLogLine.LogLevel is "Warning" or "Error" && jsonLogLine.Category != "Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware");
 
     private static Task<HttpResponseMessage> PostOrder(HttpClient orderGeneratorClient, string orderJson) =>
         orderGeneratorClient.PostAsync("/api/orders", new StringContent(orderJson, Encoding.UTF8, "application/json"));

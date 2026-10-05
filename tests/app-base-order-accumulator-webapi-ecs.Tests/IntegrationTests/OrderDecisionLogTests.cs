@@ -19,6 +19,7 @@ namespace Base.OrderAccumulator.Tests;
 public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
     private const string NewOrderSingleConsumerCategory = "Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer";
+    private const string FixSessionLogCategory = "Base.OrderAccumulator.Infrastructure.Fix.FixSessionLog";
 
     public Task InitializeAsync() => orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
 
@@ -39,7 +40,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
             Assert.Equal(ExecType.REJECTED, (await fixTestInitiator.SendExpectingExecutionReportAsync(saleOverTheLimit)).ExecType.Value);
         }
 
-        var rejectionLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, saleOverTheLimit.ClOrdID.Value);
+        var rejectionLogLine = AssertSingleWarningOrErrorLineOfTheOrder(stdoutJsonLogCapture, saleOverTheLimit.ClOrdID.Value);
         Assert.Equal(("Warning", "Order rejected: exposure limit exceeded."), (rejectionLogLine.LogLevel, rejectionLogLine.Message));
         Assert.Equal("exposure_limit_exceeded", rejectionLogLine.ReadLogField("ErrorCode"));
         Assert.Null(rejectionLogLine.Exception);
@@ -62,7 +63,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
             Assert.Equal(ExecType.REJECTED, (await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithUnknownSymbol)).ExecType.Value);
         }
 
-        var rejectionLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, orderWithUnknownSymbol.ClOrdID.Value);
+        var rejectionLogLine = AssertSingleWarningOrErrorLineOfTheOrder(stdoutJsonLogCapture, orderWithUnknownSymbol.ClOrdID.Value);
         Assert.Equal(("Warning", "Order rejected: invalid fields."), (rejectionLogLine.LogLevel, rejectionLogLine.Message));
         Assert.Equal("invalid_order_fields", rejectionLogLine.ReadLogField("ErrorCode"));
         Assert.Null(rejectionLogLine.Exception);
@@ -81,12 +82,15 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
             await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithUnknownSymbol);
         }
 
-        var consumerLogLines = stdoutJsonLogCapture.JsonLogLines
-            .Where(jsonLogLine => jsonLogLine.Category == NewOrderSingleConsumerCategory && jsonLogLine.TraceId == orderWithUnknownSymbol.ClOrdID.Value)
+        // Every line of the order that is not a FIX message, whatever class wrote it: the first rejection and the repeat.
+        var orderLinesBesidesFixMessages = stdoutJsonLogCapture.JsonLogLines
+            .Where(jsonLogLine => jsonLogLine.TraceId == orderWithUnknownSymbol.ClOrdID.Value && jsonLogLine.Category != FixSessionLogCategory)
             .ToList();
-        Assert.Equal(2, consumerLogLines.Count);
-        Assert.Single(consumerLogLines, consumerLogLine => consumerLogLine.LogLevel == "Warning" && consumerLogLine.Message == "Order rejected: invalid fields.");
-        var repeatLogLine = Assert.Single(consumerLogLines, consumerLogLine => consumerLogLine.LogLevel == "Information");
+        Assert.Equal(2, orderLinesBesidesFixMessages.Count);
+        Assert.All(orderLinesBesidesFixMessages, orderLogLine => Assert.Equal(NewOrderSingleConsumerCategory, orderLogLine.Category));
+        var rejectionLogLine = AssertSingleWarningOrErrorLineOfTheOrder(stdoutJsonLogCapture, orderWithUnknownSymbol.ClOrdID.Value);
+        Assert.Equal("Order rejected: invalid fields.", rejectionLogLine.Message);
+        var repeatLogLine = Assert.Single(orderLinesBesidesFixMessages, orderLogLine => orderLogLine.LogLevel == "Information");
         Assert.Equal("Repeated ClOrdID: sending the stored answer back.", repeatLogLine.Message);
         Assert.Null(repeatLogLine.ReadLogField("ErrorCode"));
     }
@@ -104,7 +108,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
                 .OnMessage(orderWithoutLoggedOnSession, new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR"));
         }
 
-        var notSentLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, orderWithoutLoggedOnSession.ClOrdID.Value);
+        var notSentLogLine = AssertSingleWarningOrErrorLineOfTheOrder(stdoutJsonLogCapture, orderWithoutLoggedOnSession.ClOrdID.Value);
         Assert.Equal(("Warning", "ExecutionReport not sent: the FIX session is not logged on."), (notSentLogLine.LogLevel, notSentLogLine.Message));
         Assert.Equal("execution_report_not_sent", notSentLogLine.ReadLogField("ErrorCode"));
         Assert.Null(notSentLogLine.Exception);
@@ -125,16 +129,21 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
             await fixTestInitiator.ExpectNoAnswerAsync(orderThatHitsTheDatabaseFailure, TimeSpan.FromSeconds(2));
         }
 
-        var failureLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, orderThatHitsTheDatabaseFailure.ClOrdID.Value);
+        var failureLogLine = AssertSingleWarningOrErrorLineOfTheOrder(stdoutJsonLogCapture, orderThatHitsTheDatabaseFailure.ClOrdID.Value);
         Assert.Equal(("Error", "Order decision failed; no ExecutionReport sent."), (failureLogLine.LogLevel, failureLogLine.Message));
         Assert.Equal("error", failureLogLine.ReadLogField("ErrorCode"));
         Assert.StartsWith("Npgsql.NpgsqlException", failureLogLine.Exception);
         Assert.Contains(OrderRepositoryFailingForClOrdId.SimulatedDatabaseFailure, failureLogLine.Exception);
     }
 
-    private static JsonLogLine AssertSingleConsumerLogLine(StdoutJsonLogCapture stdoutJsonLogCapture, string orderClOrdId) =>
-        Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine =>
-            jsonLogLine.Category == NewOrderSingleConsumerCategory && jsonLogLine.TraceId == orderClOrdId);
+    // Exactly one log per error counts every Warning or Error line the app wrote, whatever class wrote it and with or
+    // without a trace id; that one line has to be the FIX consumer's, carrying the ClOrdID as trace id.
+    private static JsonLogLine AssertSingleWarningOrErrorLineOfTheOrder(StdoutJsonLogCapture stdoutJsonLogCapture, string orderClOrdId)
+    {
+        var warningOrErrorLine = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Warning" or "Error");
+        Assert.Equal((NewOrderSingleConsumerCategory, orderClOrdId), (warningOrErrorLine.Category, warningOrErrorLine.TraceId));
+        return warningOrErrorLine;
+    }
 
     private static NewOrderSingle NewTracedOrder(string symbol, char side, decimal quantity, decimal price)
     {

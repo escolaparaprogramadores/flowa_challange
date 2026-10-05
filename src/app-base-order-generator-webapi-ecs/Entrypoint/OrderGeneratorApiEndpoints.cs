@@ -151,7 +151,7 @@ public static class OrderGeneratorApiEndpoints
     private static IResult RespondOrderAccumulatorUnavailable(IApplicationLogger<Program> forwardedCallLogger, HttpRequest forwardedHttpRequest, string communicationErrorMessage)
     {
         forwardedCallLogger.LogWarning("The OrderAccumulator did not answer the forwarded call.",
-            new { ErrorCode = CommunicationErrorCode, Method = forwardedHttpRequest.Method, Route = forwardedHttpRequest.Path.Value });
+            new { ErrorCode = CommunicationErrorCode, Method = forwardedHttpRequest.Method, Route = (forwardedHttpRequest.HttpContext.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText });
         return BuildOrderAccumulatorCommunicationErrorResponse(communicationErrorMessage);
     }
 
