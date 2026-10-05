@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="app-base-order-generator-webapi-ecs.Tests" />
+    <InternalsVisibleTo Include="OrderGenerator.Tests" />
   </ItemGroup>
 
   <!-- A sessão vai junto do binário; o dicionário (FIX44-flowa.xml) chega pelo Flowa.Shared. -->

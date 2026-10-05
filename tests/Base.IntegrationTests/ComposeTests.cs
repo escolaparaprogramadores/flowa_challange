@@ -17,8 +17,8 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
 
         Assert.Equal("running", orderGeneratorContainer.ContainerStatus);
         Assert.Equal("running", orderAccumulatorContainer.ContainerStatus);
-        Assert.Equal("dotnet app-base-order-generator-webapi-ecs.dll", orderGeneratorContainer.ContainerEntrypoint);
-        Assert.Equal("dotnet app-base-order-accumulator-webapi-ecs.dll", orderAccumulatorContainer.ContainerEntrypoint);
+        Assert.Equal("dotnet OrderGenerator.dll", orderGeneratorContainer.ContainerEntrypoint);
+        Assert.Equal("dotnet OrderAccumulator.dll", orderAccumulatorContainer.ContainerEntrypoint);
 
         var generatorFixMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync("ordergenerator"));
         var initiatorLogon = generatorFixMessages.First(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERGENERATOR");

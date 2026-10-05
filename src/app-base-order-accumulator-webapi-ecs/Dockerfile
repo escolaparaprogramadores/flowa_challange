@@ -21,8 +21,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY Directory.Build.props ./
 COPY src/Flowa.Shared/Flowa.Shared.csproj src/Flowa.Shared/
-COPY src/app-base-order-accumulator-webapi-ecs/app-base-order-accumulator-webapi-ecs.csproj src/app-base-order-accumulator-webapi-ecs/
-RUN dotnet restore src/app-base-order-accumulator-webapi-ecs/app-base-order-accumulator-webapi-ecs.csproj
+COPY src/app-base-order-accumulator-webapi-ecs/OrderAccumulator.csproj src/app-base-order-accumulator-webapi-ecs/
+RUN dotnet restore src/app-base-order-accumulator-webapi-ecs/OrderAccumulator.csproj
 COPY src/Flowa.Shared/ src/Flowa.Shared/
 COPY src/app-base-order-accumulator-webapi-ecs/ src/app-base-order-accumulator-webapi-ecs/
 # Os apps só sobem com o commit gravado no build (rota /version). O build precisa do .git no contexto:
@@ -31,7 +31,7 @@ ARG SOURCE_REVISION_ID=
 RUN --mount=type=bind,source=.git,target=/repo/.git \
     sha="${SOURCE_REVISION_ID:-$(git -c safe.directory='*' -C /repo rev-parse HEAD 2>/dev/null)}"; \
     if [ ${#sha} -ne 40 ]; then echo "Sem o commit: o .git não deu o SHA (worktree?); passe SOURCE_REVISION_ID=<sha completo>" >&2; exit 1; fi; \
-    dotnet publish src/app-base-order-accumulator-webapi-ecs/app-base-order-accumulator-webapi-ecs.csproj -c Release -o /app --no-restore \
+    dotnet publish src/app-base-order-accumulator-webapi-ecs/OrderAccumulator.csproj -c Release -o /app --no-restore \
         -p:SourceRevisionId=$sha -p:EnableSourceControlManagerQueries=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
@@ -48,4 +48,4 @@ ENV CORECLR_ENABLE_PROFILING=1 \
     DD_TRACE_SAMPLE_RATE=1.0
 USER $APP_UID
 EXPOSE 8081 9876
-ENTRYPOINT ["dotnet", "app-base-order-accumulator-webapi-ecs.dll"]
+ENTRYPOINT ["dotnet", "OrderAccumulator.dll"]
