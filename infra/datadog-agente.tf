@@ -117,8 +117,8 @@ locals {
       [FILTER]
           Name  lua
           Match *-firelens-*
-          call  preparar_registro_do_app
-          code  function preparar_registro_do_app(tag, timestamp, registro) if registro["Message"] ~= nil then registro["message"] = registro["Message"]; registro["Message"] = nil elseif registro["log"] ~= nil then registro["message"] = registro["log"]; registro["log"] = nil end if registro["LogLevel"] ~= nil then registro["level"] = registro["LogLevel"]; registro["LogLevel"] = nil end local trace_id = type(registro["State"]) == "table" and registro["State"]["TraceId"] or nil local span_id = nil if type(registro["Scopes"]) == "table" then for _, escopo in ipairs(registro["Scopes"]) do if type(escopo) == "table" then trace_id = trace_id or escopo["dd_trace_id"] or escopo["TraceId"]; span_id = span_id or escopo["dd_span_id"] end end end if trace_id ~= nil then registro["dd"] = { trace_id = trace_id, span_id = span_id } end return 2, timestamp, registro end
+          call  prepare_app_record
+          code  function prepare_app_record(tag, timestamp, record) if record["Message"] ~= nil then record["message"] = record["Message"]; record["Message"] = nil elseif record["log"] ~= nil then record["message"] = record["log"]; record["log"] = nil end if record["LogLevel"] ~= nil then record["level"] = record["LogLevel"]; record["LogLevel"] = nil end local trace_id = type(record["State"]) == "table" and record["State"]["TraceId"] or nil local span_id = nil if type(record["Scopes"]) == "table" then for _, scope in ipairs(record["Scopes"]) do if type(scope) == "table" then trace_id = trace_id or scope["dd_trace_id"] or scope["TraceId"]; span_id = span_id or scope["dd_span_id"] end end end if trace_id ~= nil then record["dd"] = { trace_id = trace_id, span_id = span_id } end return 2, timestamp, record end
 
       [FILTER]
           Name         throttle

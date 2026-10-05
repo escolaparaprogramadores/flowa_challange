@@ -306,3 +306,24 @@ jobs:
 
           terraform_quieto apply tfplan
           grep -E '^Apply complete!' "$TERRAFORM_LOG"
+
+      # Read-only proof that the log collector also writes to CloudWatch (CA-41): counts, in each app log group,
+      # the lines of the order used as evidence in the last 24 h. It never fails the deploy.
+      - name: App logs in CloudWatch
+        if: steps.infra.outputs.existe == 'true' && steps.datadog.outputs.ligado == 'true'
+        continue-on-error: true
+        env:
+          EVIDENCE_ORDER_CLORDID: 6ac35ed0000000000d3ba64b5a3b4c38
+        run: |
+          search_start_ms=$(( ($(date +%s) - 86400) * 1000 ))
+          for app_log_group in flowa-challenge-order-generator flowa-challenge-order-accumulator; do
+            # AWS errors carry account ARNs; they stay out of this public log.
+            if ! evidence_order_lines=$(aws logs filter-log-events --log-group-name "$app_log_group" \
+                 --log-stream-name-prefix app/ --start-time "$search_start_ms" \
+                 --filter-pattern "\"$EVIDENCE_ORDER_CLORDID\"" --query 'events[].message' --output json 2> /dev/null); then
+              echo "$app_log_group: could not read CloudWatch (the deploy role needs logs:FilterLogEvents)"
+              continue
+            fi
+            echo "$app_log_group: $(jq length <<< "$evidence_order_lines") line(s) of order $EVIDENCE_ORDER_CLORDID"
+            jq -r '.[] | .[0:300]' <<< "$evidence_order_lines"
+          done
