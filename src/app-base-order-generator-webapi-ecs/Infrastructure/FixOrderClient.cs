@@ -11,7 +11,7 @@ using FixSide = QuickFix.Fields.Side;
 
 namespace Base.OrderGenerator.Infrastructure;
 
-// Ponta initiator da sessão FIX: manda a NewOrderSingle e espera o ExecutionReport do mesmo ClOrdID.
+// Initiator end of the FIX session: sends the NewOrderSingle and waits for the ExecutionReport with the same ClOrdID.
 public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHostedService, IDisposable
 {
     public static readonly TimeSpan ExecutionReportTimeout = TimeSpan.FromSeconds(5);
@@ -41,13 +41,13 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
 
     private async Task<SentOrderResult> SendNewOrderSingleAndWaitForExecutionReportAsync(string clOrdId, OrderToSend orderToSend, string? orderSendingTraceParent)
     {
-        // Sem sessão logada a ordem não sai: o QuickFIX a guardaria na store e mandaria depois do logon (D-34).
+        // Without a logged-on session the order does not leave: QuickFIX would keep it in the store and send it after the logon (D-34).
         var initiatorSessionId = _initiatorSessionId;
         var initiatorSession = initiatorSessionId is null ? null : Session.LookupSession(initiatorSessionId);
         if (initiatorSessionId is null || initiatorSession is null || !initiatorSession.IsLoggedOn)
             return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
-        // A espera é registrada antes do envio porque a resposta pode chegar antes do Send voltar.
+        // The wait is registered before sending because the answer can arrive before Send returns.
         var executionReportWaiter = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
         _ordersAwaitingExecutionReport[clOrdId] = executionReportWaiter;
         try
@@ -74,16 +74,16 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
     {
         var initiatorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, "initiator.cfg"));
         var acceptorHost = orderGeneratorConfiguration[OrderGeneratorConfigurationKeys.FixAcceptorHost]
-            ?? throw new InvalidOperationException("Configuração Fix:AcceptorHost ausente.");
+            ?? throw new InvalidOperationException("Configuration Fix:AcceptorHost is missing.");
         var acceptorPort = orderGeneratorConfiguration.GetValue<int?>(OrderGeneratorConfigurationKeys.FixAcceptorPort)
-            ?? throw new InvalidOperationException("Configuração Fix:AcceptorPort ausente.");
+            ?? throw new InvalidOperationException("Configuration Fix:AcceptorPort is missing.");
 
         foreach (var configuredSessionId in initiatorSettings.GetSessions())
         {
             var configuredSession = initiatorSettings.Get(configuredSessionId);
             configuredSession.SetString(SessionSettings.SOCKET_CONNECT_HOST, acceptorHost);
             configuredSession.SetLong(SessionSettings.SOCKET_CONNECT_PORT, acceptorPort);
-            // Caminho absoluto: o processo pode subir de qualquer pasta.
+            // Absolute path: the process can start from any folder.
             configuredSession.SetString(SessionSettings.DATA_DICTIONARY, Path.Combine(AppContext.BaseDirectory, "FIX44-flowa.xml"));
         }
 
@@ -124,7 +124,7 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
         if (incomingFixApplicationMessage.Header.GetString(Tags.MsgType) != MsgType.EXECUTION_REPORT || !incomingFixApplicationMessage.IsSetField(Tags.ClOrdID))
             return;
 
-        // Resposta que chega depois dos 5 s não acha mais quem esperava e é descartada.
+        // An answer that arrives after the 5 s no longer finds anyone waiting and is dropped.
         if (_ordersAwaitingExecutionReport.TryGetValue(incomingFixApplicationMessage.GetString(Tags.ClOrdID), out var executionReportWaiter))
             executionReportWaiter.TrySetResult(incomingFixApplicationMessage);
     }

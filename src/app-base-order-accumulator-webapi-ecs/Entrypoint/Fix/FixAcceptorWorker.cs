@@ -5,7 +5,7 @@ using QuickFix;
 
 namespace Base.OrderAccumulator.Entrypoint.Fix;
 
-// Liga o acceptor FIX junto com o app e desliga na parada.
+// Starts the FIX acceptor together with the app and shuts it down on stop.
 public sealed class FixAcceptorWorker(
     NewOrderSingleConsumer newOrderSingleConsumer, IConfiguration appConfiguration, FixSessionLogFactory fixSessionLogFactory)
     : IHostedService, IDisposable
@@ -34,7 +34,7 @@ public sealed class FixAcceptorWorker(
 
     public void Dispose() => ShutDownFixAcceptor();
 
-    // Parar e descartar chegam em qualquer ordem (até juntos); só quem tira o acceptor da referência o desliga.
+    // Stop and dispose arrive in any order (even together); only the one that takes the acceptor out of the reference shuts it down.
     private void ShutDownFixAcceptor()
     {
         var runningFixAcceptor = Interlocked.Exchange(ref fixAcceptor, null);
@@ -45,14 +45,14 @@ public sealed class FixAcceptorWorker(
         runningFixAcceptor.Dispose();
     }
 
-    // A sessão vem do acceptor.cfg. A porta vem da configuração (Fix__AcceptorPort) e o dicionário
-    // é procurado ao lado do executável, para não depender da pasta de onde o app foi iniciado.
-    // Fix__AcceptorBindHost é opcional: sem ele o acceptor escuta em todas as interfaces, como o
-    // compose precisa; os testes usam 127.0.0.1 para não abrir a porta para a rede.
+    // The session comes from acceptor.cfg. The port comes from configuration (Fix__AcceptorPort) and the dictionary
+    // is looked up next to the executable, so it does not depend on the folder the app was started from.
+    // Fix__AcceptorBindHost is optional: without it the acceptor listens on all interfaces, as the
+    // compose needs; the tests use 127.0.0.1 so the port is not opened to the network.
     public static SessionSettings LoadFixAcceptorSessionSettings(IConfiguration appConfiguration)
     {
         var fixAcceptorPort = appConfiguration.GetValue<int?>(OrderAccumulatorConfigurationKeys.FixAcceptorPort)
-            ?? throw new InvalidOperationException("Defina a porta do acceptor FIX em Fix__AcceptorPort.");
+            ?? throw new InvalidOperationException("Set the FIX acceptor port in Fix__AcceptorPort.");
         var fixAcceptorBindHost = appConfiguration[OrderAccumulatorConfigurationKeys.FixAcceptorBindHost];
 
         var loadedFixAcceptorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, AcceptorSettingsFile));

@@ -17,8 +17,8 @@ using Message = QuickFix.Message;
 
 namespace Base.OrderAccumulator.Tests;
 
-// O OrderAccumulator inteiro (Program.cs), com o acceptor FIX em 127.0.0.1 numa porta livre
-// (ou na porta pedida) e o banco do container.
+// The whole OrderAccumulator (Program.cs), with the FIX acceptor on 127.0.0.1 on a free port
+// (or on the requested port) and the container database.
 public sealed class OrderAccumulatorFixTestHost : WebApplicationFactory<Program>
 {
     public const string FixAcceptorLoopbackBindHost = "127.0.0.1";
@@ -47,7 +47,7 @@ public sealed class OrderAccumulatorFixTestHost : WebApplicationFactory<Program>
             orderAccumulatorWebHostBuilder.ConfigureTestServices(replaceOrderAccumulatorServices);
     }
 
-    // Força a subida do host (e do acceptor) sem precisar de uma chamada HTTP antes.
+    // Forces the host (and the acceptor) to start without needing an HTTP call first.
     public OrderAccumulatorFixTestHost StartWithFixAcceptor()
     {
         _ = Services;
@@ -64,7 +64,7 @@ public sealed class OrderAccumulatorFixTestHost : WebApplicationFactory<Program>
     }
 }
 
-// Guarda o que o app escreveu no log, para conferir o log FIX (D-34).
+// Keeps what the app wrote to the log, to check the FIX log (D-34).
 public sealed class OrderAccumulatorCapturedLogs : ILoggerProvider
 {
     private readonly ConcurrentQueue<string> capturedOrderAccumulatorLogLines = new();
@@ -82,7 +82,7 @@ public sealed class OrderAccumulatorCapturedLogs : ILoggerProvider
     }
 }
 
-// A ponta initiator usada só nos testes: faz o papel do OrderGenerator sem depender dele.
+// The initiator end used only in the tests: plays the OrderGenerator without depending on it.
 public sealed class FixTestInitiator : IApplication, IDisposable
 {
     private static readonly TimeSpan FixAnswerTimeout = TimeSpan.FromSeconds(10);
@@ -142,7 +142,7 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     public static NewOrderSingle NewBuyOrder(string symbol, decimal quantity, decimal price) =>
         NewOrder(Guid.NewGuid().ToString("N"), symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price);
 
-    // Manda a ordem e devolve o ExecutionReport que voltou para ela.
+    // Sends the order and returns the ExecutionReport that came back for it.
     public async Task<ExecutionReport> SendExpectingExecutionReportAsync(NewOrderSingle newOrderSingle)
     {
         Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));
@@ -151,24 +151,24 @@ public sealed class FixTestInitiator : IApplication, IDisposable
         return receivedExecutionReport;
     }
 
-    // Manda a ordem e confere que nada volta dentro do prazo: nem ExecutionReport, nem BusinessMessageReject.
+    // Sends the order and checks that nothing comes back within the deadline: neither ExecutionReport nor BusinessMessageReject.
     public async Task ExpectNoAnswerAsync(NewOrderSingle newOrderSingle, TimeSpan noAnswerWindow)
     {
         Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));
-        // Leitura cancelável: um ReadAsync pendurado depois do prazo engoliria o próximo relatório.
+        // Cancellable read: a ReadAsync left hanging after the deadline would swallow the next report.
         using var noAnswerTimeout = new CancellationTokenSource(noAnswerWindow);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => executionReports.Reader.ReadAsync(noAnswerTimeout.Token).AsTask());
-        Assert.False(businessMessageRejects.Reader.TryRead(out _), "Veio um BusinessMessageReject onde não devia vir resposta nenhuma.");
+        Assert.False(businessMessageRejects.Reader.TryRead(out _), "A BusinessMessageReject came where no answer at all should come.");
     }
 
-    // Manda uma mensagem que a aplicação do acceptor não aceita e devolve a recusa (35=j) que voltou.
+    // Sends a message the acceptor application does not accept and returns the refusal (35=j) that came back.
     public async Task<BusinessMessageReject> SendExpectingBusinessRejectAsync(NewOrderSingle newOrderSingle)
     {
         Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));
         return await businessMessageRejects.Reader.ReadAsync().AsTask().WaitAsync(FixAnswerTimeout);
     }
 
-    // Manda uma mensagem que a validação da sessão FIX barra e devolve a recusa de sessão (35=3).
+    // Sends a message the FIX session validation blocks and returns the session refusal (35=3).
     public async Task<Reject> SendExpectingSessionRejectAsync(NewOrderSingle newOrderSingle)
     {
         Assert.True(Session.SendToTarget(newOrderSingle, fixSessionId!));

@@ -28,7 +28,7 @@ public sealed class ProblemDetailsForAnyClientWriter(
                 {
                     ErrorCode = responseProblemDetails.Type,
                     Method = httpContext.Request.Method,
-                    Route = ApiProblemDetails.ReadRouteTemplate(httpContext)
+                    Route = ApiProblemDetailsExtensions.ReadRouteTemplate(httpContext)
                 }));
 
         return new ValueTask(httpContext.Response.WriteAsJsonAsync(

@@ -7,7 +7,7 @@ namespace Base.OrderAccumulator.Infrastructure.Metrics;
 
 public static class OrderMetricsExtensions
 {
-    // O agente do Datadog roda como sidecar na mesma task (contrato da F5).
+    // The Datadog agent runs as a sidecar in the same task (F5 contract).
     public const string DatadogAgentHost = "localhost";
     public const int DatadogAgentDogStatsdPort = 8125;
 
@@ -15,11 +15,11 @@ public static class OrderMetricsExtensions
     {
         orderAccumulatorServices.AddSingleton<IDogStatsd>(_ =>
             CreateOrderMetricsClient(DatadogAgentDogStatsdPort, orderAccumulatorConfiguration));
-        orderAccumulatorServices.AddSingleton<IOrderMetrics, DatadogOrderMetricsAdapter>();
+        orderAccumulatorServices.AddSingleton<IOrderMetricsPort, DatadogOrderMetricsAdapter>();
         return orderAccumulatorServices;
     }
 
-    // env, service e version vêm das variáveis DD_* que a task define; fora da AWS ficam sem valor.
+    // env, service and version come from the DD_* variables the task defines; outside AWS they have no value.
     public static DogStatsdService CreateOrderMetricsClient(int dogStatsdPort, IConfiguration orderAccumulatorConfiguration)
     {
         var orderMetricsClient = new DogStatsdService();
@@ -36,14 +36,14 @@ public static class OrderMetricsExtensions
         return orderMetricsClient;
     }
 
-    // Uma única leitura na subida, antes do acceptor FIX abrir; depois disso o gauge só lê a memória.
+    // A single read at startup, before the FIX acceptor opens; after that the gauge only reads memory.
     public static async Task LoadSymbolExposureMemoryAsync(this IServiceProvider orderAccumulatorServiceProvider, CancellationToken cancellationToken = default)
     {
         var storedSymbolExposures = await orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>().GetSymbolExposuresAsync(cancellationToken);
         orderAccumulatorServiceProvider.GetRequiredService<SymbolExposureMemoryService>().LoadStoredExposures(storedSymbolExposures);
     }
 
-    // Sem agente escutando (local, testes, agente desligado) o UDP falha a cada envio. Métrica é
-    // acessória: a ordem segue e o log não ganha uma linha por ordem.
+    // With no agent listening (local, tests, agent turned off) UDP fails on every send. The metric is
+    // secondary: the order goes on and the log does not gain one line per order.
     private static void IgnoreDogStatsdSendFailure(Exception dogStatsdSendFailure) { }
 }

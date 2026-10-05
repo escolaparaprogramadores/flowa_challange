@@ -12,13 +12,13 @@ using Base.OrderGenerator.Infrastructure.Tracing;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 
-// O /version promete o sha completo; sem ele o app não sobe, para o erro aparecer no build e não no aceite.
+// /version promises the full sha; without it the app does not start, so the error shows up at build time and not at acceptance.
 var buildCommitSha = OrderGeneratorApiEndpoints.ReadBuildCommitSha() is { Length: 40 } shaFromBuild
     ? shaFromBuild
     : throw new InvalidOperationException(
-        "O build não gravou o commit. Compile dentro do repositório git ou passe -p:SourceRevisionId=<sha completo>.");
+        "The build did not record the commit. Build inside the git repository or pass -p:SourceRevisionId=<full sha>.");
 
-// Raiz na pasta do binário: appsettings.json e wwwroot são achados de qualquer pasta de onde o processo suba.
+// Root in the binary folder: appsettings.json and wwwroot are found from whatever folder the process starts in.
 var orderGeneratorBuilder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
@@ -41,7 +41,7 @@ orderGeneratorBuilder.Services.AddHttpClient<IOrderAccumulatorHttpClient, OrderA
     OrderAccumulatorHttpClient.OrderAccumulatorHttpClientName, (orderGeneratorServices, accumulatorClient) =>
 {
     var accumulatorBaseUrl = orderGeneratorServices.GetRequiredService<IConfiguration>()[OrderGeneratorConfigurationKeys.OrderAccumulatorBaseUrl]
-        ?? throw new InvalidOperationException("Configuração OrderAccumulator:BaseUrl ausente.");
+        ?? throw new InvalidOperationException("Configuration OrderAccumulator:BaseUrl is missing.");
     accumulatorClient.BaseAddress = new Uri(accumulatorBaseUrl);
     accumulatorClient.Timeout = TimeSpan.FromSeconds(5);
 });
@@ -50,7 +50,7 @@ orderGeneratorBuilder.Services.AddHttpClient<IOrderAccumulatorHttpClient, OrderA
 orderGeneratorBuilder.Services.ConfigureHttpJsonOptions(jsonOptions => jsonOptions.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 // The own writer comes before AddProblemDetails: it is the first in line and answers any caller.
 orderGeneratorBuilder.Services.AddSingleton<IProblemDetailsWriter, ProblemDetailsForAnyClientWriter>();
-orderGeneratorBuilder.Services.AddProblemDetails(problemDetailsOptions => problemDetailsOptions.CustomizeProblemDetails = ApiProblemDetails.CompleteProblemDetails);
+orderGeneratorBuilder.Services.AddProblemDetails(problemDetailsOptions => problemDetailsOptions.CustomizeProblemDetails = ApiProblemDetailsExtensions.CompleteProblemDetails);
 orderGeneratorBuilder.Services.AddExceptionHandler<GlobalErrorHandler>();
 
 var orderGeneratorApp = orderGeneratorBuilder.Build();
@@ -65,5 +65,5 @@ orderGeneratorApp.MapFallbackToFile("index.html");
 
 orderGeneratorApp.Run();
 
-// Deixa o WebApplicationFactory dos testes enxergar o ponto de entrada.
+// Lets the WebApplicationFactory of the tests see the entry point.
 public partial class Program;

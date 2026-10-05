@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Base.OrderAccumulator.Tests;
 
-// CA-21, CA-32, CA-33, CA-42 e CA-34: GET /api/orders?page=n contra o PostgreSQL real, no formato do contrato.
+// CA-21, CA-32, CA-33, CA-42 and CA-34: GET /api/orders?page=n against the real PostgreSQL, in the contract format.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
@@ -65,19 +65,19 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         Assert.Equal(JsonValueKind.Null, listedOrder.GetProperty("side").ValueKind);
     }
 
-    // Duas ordens no mesmo instante: o id maior vem primeiro. Uma ordem mais antiga com id maior vem depois:
-    // a data manda, o id só desempata.
+    // Two orders at the same instant: the higher id comes first. An older order with a higher id comes after:
+    // the date rules, the id only breaks ties.
     [Fact]
     public async Task Orders_are_sorted_by_received_at_descending_and_ties_by_id_descending()
     {
-        await InsertStoredOrderAsync("mesmo-instante-id-menor", "2026-10-04T12:00:02Z");
-        await InsertStoredOrderAsync("mais-antiga-id-do-meio", "2026-10-04T12:00:01Z");
-        await InsertStoredOrderAsync("mesmo-instante-id-maior", "2026-10-04T12:00:02Z");
+        await InsertStoredOrderAsync("same-instant-lower-id", "2026-10-04T12:00:02Z");
+        await InsertStoredOrderAsync("older-middle-id", "2026-10-04T12:00:01Z");
+        await InsertStoredOrderAsync("same-instant-higher-id", "2026-10-04T12:00:02Z");
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1");
 
-        Assert.Equal(["mesmo-instante-id-maior", "mesmo-instante-id-menor", "mais-antiga-id-do-meio"], ReadListedClOrdIds(orderPage));
+        Assert.Equal(["same-instant-higher-id", "same-instant-lower-id", "older-middle-id"], ReadListedClOrdIds(orderPage));
         Assert.Equal(
             ["2026-10-04T12:00:02Z", "2026-10-04T12:00:02Z", "2026-10-04T12:00:01Z"],
             orderPage.GetProperty("orders").EnumerateArray().Select(listedOrder => listedOrder.GetProperty("receivedAt").GetString()).ToList());
@@ -182,7 +182,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
             logLinesOfTheListing);
     }
 
-    // Uma por vez, para cada ordem ter received_at e id maiores que a anterior.
+    // One at a time, so each order has received_at and id greater than the previous one.
     private static async Task<List<string>> DecideOrdersOneAfterAnotherAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp, int orderCount)
     {
         var appOrderDecisionServices = orderAccumulatorTestApp.Services;
@@ -226,7 +226,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     private static List<string> ReadListedClOrdIds(JsonElement orderPage) =>
         orderPage.GetProperty("orders").EnumerateArray().Select(listedOrder => listedOrder.GetProperty("clOrdId").GetString()!).ToList();
 
-    // Lê pelos nomes do contrato (camelCase): um nome trocado no código quebra o teste.
+    // Reads by the contract names (camelCase): a name changed in the code breaks the test.
     private static void AssertListedOrder(
         JsonElement listedOrder, DateTime storedReceivedAt, string expectedOrderStatus, string expectedOrderSymbol, string expectedOrderSide, decimal expectedOrderQuantity, decimal expectedOrderPrice, string expectedOrderId, string expectedClOrdId)
     {

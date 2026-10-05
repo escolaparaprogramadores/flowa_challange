@@ -13,7 +13,7 @@ namespace Base.OrderAccumulator.Tests;
 public sealed class DecideIncomingOrderTestRunner(
     NpgsqlDataSource orderDatabaseDataSource,
     SymbolExposureMemoryService symbolExposureMemory,
-    IOrderMetrics orderMetrics,
+    IOrderMetricsPort orderMetrics,
     Func<IOrderRepository, IOrderRepository>? wrapOrderRepository = null)
 {
     public DecideIncomingOrderTestRunner(NpgsqlDataSource orderDatabaseDataSource)
@@ -38,7 +38,7 @@ public sealed class DecideIncomingOrderTestRunner(
     }
 }
 
-public sealed class UncountedOrderMetrics : IOrderMetrics
+public sealed class UncountedOrderMetrics : IOrderMetricsPort
 {
     public void CountAnsweredOrder(string? orderSymbol, char orderSide, bool orderAccepted)
     {

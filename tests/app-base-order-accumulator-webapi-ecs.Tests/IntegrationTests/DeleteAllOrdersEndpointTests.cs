@@ -12,7 +12,7 @@ using Npgsql;
 
 namespace Base.OrderAccumulator.Tests;
 
-// CA-20, CA-22, CA-29 e CA-30: DELETE /api/orders contra o PostgreSQL real.
+// CA-20, CA-22, CA-29 and CA-30: DELETE /api/orders against the real PostgreSQL.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
@@ -127,9 +127,9 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
             Assert.False(ordersRouteResponse.Headers.Contains("Access-Control-Allow-Origin"), $"{ordersRouteResponse.RequestMessage!.Method} trouxe Access-Control-Allow-Origin");
     }
 
-    // Tudo ou nada: uma trava só deste banco de teste faz o DELETE de orders falhar. Ela confere antes que a
-    // exposição já foi zerada na mesma transação (P0001); se as ordens fossem apagadas primeiro, o erro seria P0002.
-    // Nada pode ficar zerado, nem no banco nem na memória.
+    // All or nothing: a guard that exists only in this test database makes the DELETE on orders fail. It first checks
+    // that the exposure was already zeroed in the same transaction (P0001); if the orders were deleted first, the error
+    // would be P0002. Nothing may stay zeroed, neither in the database nor in memory.
     [Fact]
     public async Task Failed_delete_rolls_back_the_zeroed_exposures_and_leaves_the_memory_untouched()
     {
@@ -194,9 +194,9 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
             CREATE FUNCTION refuse_deleting_orders() RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
                 IF (SELECT exposure FROM exposures WHERE symbol = 'PETR4') <> 0 THEN
-                    RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'as ordens foram apagadas antes de zerar a exposição';
+                    RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'the orders were deleted before the exposure was zeroed';
                 END IF;
-                RAISE EXCEPTION 'apagar ordens recusado neste banco de teste';
+                RAISE EXCEPTION 'deleting orders refused in this test database';
             END $$;
             CREATE TRIGGER refuse_deleting_orders BEFORE DELETE ON orders FOR EACH STATEMENT EXECUTE FUNCTION refuse_deleting_orders();
             """);

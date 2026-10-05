@@ -10,14 +10,14 @@ using QuickFix.Fields;
 using QuickFix.Logger;
 using QuickFix.Store;
 
-// Os testes sobem sessões FIX com o mesmo SessionID; o QuickFIX guarda as sessões num registro
-// estático, então duas classes rodando juntas brigariam pelo mesmo nome.
+// The tests start FIX sessions with the same SessionID; QuickFIX keeps the sessions in a static
+// registry, so two classes running together would fight over the same name.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
 namespace Base.OrderGenerator.Tests;
 
-// Faz o papel do OrderAccumulator só no que o OrderGenerator enxerga: aceita a sessão FIX,
-// guarda as NewOrderSingle recebidas e responde com o ExecutionReport que o teste escolher.
+// Plays the OrderAccumulator only in what the OrderGenerator sees: accepts the FIX session,
+// keeps the received NewOrderSingle messages and answers with the ExecutionReport the test chooses.
 public sealed class FixTestAcceptor : IApplication, IDisposable
 {
     private ThreadedSocketAcceptor? _threadedFixAcceptor;
@@ -30,16 +30,16 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
 
     public ConcurrentQueue<Message> ReceivedOrders { get; } = new();
 
-    // Cada ExecutionReport mandado de volta, pelo ClOrdID que ele carrega.
+    // Each ExecutionReport sent back, by the ClOrdID it carries.
     public ConcurrentDictionary<string, Message> SentExecutionReports { get; } = new();
 
-    // Monta a resposta para a ordem recebida; null deixa a ordem sem resposta (acceptor mudo).
+    // Builds the answer to the received order; null leaves the order without an answer (silent acceptor).
     public Func<Message, Message?> ExecutionReportResponder { get; set; } = receivedOrder => null;
 
-    // Quanto esperar antes de mandar a resposta, por ordem.
+    // How long to wait before sending the answer, per order.
     public Func<Message, TimeSpan> ExecutionReportDelay { get; set; } = receivedOrder => TimeSpan.Zero;
 
-    // Relatório extra mandado antes da resposta, com ClOrdID que não é o da ordem.
+    // Extra report sent before the answer, with a ClOrdID that is not the one of the order.
     public Func<Message, Message?> StrayExecutionReport { get; set; } = receivedOrder => null;
 
     public void ResetToAcceptEveryOrder()
@@ -83,7 +83,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
         _threadedFixAcceptor = null;
     }
 
-    // Espera as duas pontas: o acceptor recebeu o Logon e o initiator já recebeu a resposta dele.
+    // Waits for both ends: the acceptor received the Logon and the initiator already received its answer.
     public async Task WaitForFixSessionLogonAsync()
     {
         await _acceptorLogon.Task.WaitAsync(TimeSpan.FromSeconds(15));
@@ -92,7 +92,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
         while (Session.LookupSession(initiatorSessionId)?.IsLoggedOn != true)
         {
             if (fixLogonClock.Elapsed > TimeSpan.FromSeconds(15))
-                throw new TimeoutException("O initiator não logou.");
+                throw new TimeoutException("The initiator did not log on.");
             await Task.Delay(50);
         }
     }
@@ -137,7 +137,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
         if (executionReportDelay == TimeSpan.Zero)
             SendExecutionReport(executionReport, orderGeneratorFixSessionId);
         else
-            // Fora da thread da sessão, para as outras ordens seguirem chegando enquanto esta espera.
+            // Off the session thread, so the other orders keep arriving while this one waits.
             _ = Task.Delay(executionReportDelay).ContinueWith(_ => SendExecutionReport(executionReport, orderGeneratorFixSessionId), TaskScheduler.Default);
     }
 
@@ -166,7 +166,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
 
 public static class OrderGeneratorTestHost
 {
-    // Porta livre na hora do teste; ninguém escuta nela até alguém subir algo.
+    // A port free at test time; nobody listens on it until something starts on it.
     public static int FindFreeTcpPort()
     {
         var freeTcpPortProbe = new TcpListener(IPAddress.Loopback, 0);
@@ -179,8 +179,8 @@ public static class OrderGeneratorTestHost
     public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixAcceptorPort, string accumulatorBaseUrl = "http://127.0.0.1:1", string? orderGeneratorWebRoot = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(orderGeneratorWebHostBuilder =>
         {
-            // Em Development o ASP.NET põe o wwwroot do projeto (static web assets) na frente da raiz do teste;
-            // com o build da tela presente, o index.html real venceria. Production é como o app roda de verdade.
+            // In Development ASP.NET puts the project wwwroot (static web assets) in front of the test root;
+            // with the screen build present, the real index.html would win. Production is how the app really runs.
             orderGeneratorWebHostBuilder.UseEnvironment(Environments.Production);
             orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
             orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorPort", fixAcceptorPort.ToString());
@@ -194,7 +194,7 @@ public static class OrderGeneratorTestHost
         var testConditionClock = Stopwatch.StartNew();
         while (!expectedCondition())
         {
-            Assert.True(testConditionClock.Elapsed < TimeSpan.FromSeconds(10), "a condição esperada não aconteceu em 10 s");
+            Assert.True(testConditionClock.Elapsed < TimeSpan.FromSeconds(10), "the expected condition did not happen in 10 s");
             await Task.Delay(50);
         }
     }

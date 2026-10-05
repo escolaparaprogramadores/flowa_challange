@@ -1,6 +1,6 @@
 namespace Base.OrderAccumulator.Infrastructure.Metrics;
 
-// Nomes combinados com o painel do Datadog (observabilidade/datadog/). Mudar aqui apaga o gráfico.
+// Names agreed with the Datadog dashboard (observabilidade/datadog/). Changing them here erases the chart.
 public static class OrderMetricNames
 {
     public const string AcceptedOrders = "flowa.ordens.aceitas";

@@ -26,13 +26,13 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         using var orderSending = OrderSendingTestSource.StartActivity("fix.envio_da_ordem", ActivityKind.Producer);
         Assert.NotNull(orderSending);
-        var orderWithTrace = FixTestInitiator.NewOrder("rastro-com-5100", "PETR4", '1', 100, 10.50m);
+        var orderWithTrace = FixTestInitiator.NewOrder("trace-with-5100", "PETR4", '1', 100, 10.50m);
         orderWithTrace.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, orderSending.Id!));
 
         var orderExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithTrace);
 
         Assert.Equal(ExecType.NEW, orderExecutionReport.ExecType.Value);
-        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("rastro-com-5100"));
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("trace-with-5100"));
         var orderReceiving = Assert.Single(capturedOrderTraceSpans.OrderReceivingSpans);
         Assert.Equal(orderSending.TraceId, orderReceiving.TraceId);
         Assert.Equal(orderSending.SpanId, orderReceiving.ParentSpanId);
@@ -82,12 +82,12 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         using var capturedOrderTraceSpans = new CapturedOrderTraceSpans();
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-        var orderWithoutTrace = FixTestInitiator.NewOrder("rastro-sem-5100", "VALE3", '2', 200, 61.37m);
+        var orderWithoutTrace = FixTestInitiator.NewOrder("trace-without-5100", "VALE3", '2', 200, 61.37m);
 
         var orderExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithoutTrace);
 
         Assert.Equal(ExecType.NEW, orderExecutionReport.ExecType.Value);
-        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("rastro-sem-5100"));
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("trace-without-5100"));
         var orderReceiving = Assert.Single(capturedOrderTraceSpans.OrderReceivingSpans);
         Assert.Equal(default, orderReceiving.ParentSpanId);
         Assert.Null(orderReceiving.ParentId);
@@ -95,7 +95,7 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
     }
 
     [Theory]
-    [InlineData("nao-e-um-traceparent")]
+    [InlineData("not-a-traceparent")]
     [InlineData("00-00000000000000000000000000000000-0000000000000000-01")]
     [InlineData("00-0af7651916cd43dd8448eb211c80319c-b7ad6b71692033")]
     public async Task Order_with_malformed_tag_5100_is_accepted_and_opens_a_new_trace(string malformedTraceParent)
@@ -103,13 +103,13 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         using var capturedOrderTraceSpans = new CapturedOrderTraceSpans();
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-        var orderWithMalformedTrace = FixTestInitiator.NewOrder("rastro-malformado", "VIIA4", '1', 10, 3.21m);
+        var orderWithMalformedTrace = FixTestInitiator.NewOrder("malformed-trace", "VIIA4", '1', 10, 3.21m);
         orderWithMalformedTrace.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, malformedTraceParent));
 
         var orderExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithMalformedTrace);
 
         Assert.Equal(ExecType.NEW, orderExecutionReport.ExecType.Value);
-        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("rastro-malformado"));
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("malformed-trace"));
         var orderReceiving = Assert.Single(capturedOrderTraceSpans.OrderReceivingSpans);
         Assert.Equal(default, orderReceiving.ParentSpanId);
         Assert.NotEqual(default, orderReceiving.TraceId);
@@ -120,15 +120,15 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-        var orderWithUnknownField = FixTestInitiator.NewOrder("campo-5101", "PETR4", '1', 100, 10.50m);
-        orderWithUnknownField.SetField(new StringField(5101, "fora-do-dicionario"));
+        var orderWithUnknownField = FixTestInitiator.NewOrder("field-5101", "PETR4", '1', 100, 10.50m);
+        orderWithUnknownField.SetField(new StringField(5101, "outside-the-dictionary"));
 
         var fixSessionReject = await fixTestInitiator.SendExpectingSessionRejectAsync(orderWithUnknownField);
 
         Assert.Equal(5101, fixSessionReject.RefTagID.Value);
         // A tag the dictionary does not even define: QuickFIX refuses it as an invalid tag number (373=0).
         Assert.Equal(SessionRejectReason.INVALID_TAG_NUMBER, fixSessionReject.SessionRejectReason.Value);
-        Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("campo-5101"));
+        Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("field-5101"));
     }
 
     // Listens only to the order trace source and keeps each receiving span when it starts, before the answer goes out.

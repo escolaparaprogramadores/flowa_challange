@@ -7,7 +7,7 @@ using Npgsql;
 
 namespace Base.OrderAccumulator.Tests;
 
-// O app sobe contra um banco vazio próprio: a migração tem de rodar na subida.
+// The app starts against its own empty database: the migration has to run at startup.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
@@ -27,7 +27,7 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
         orderAccumulatorApp = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(orderAccumulatorHost => orderAccumulatorHost
                 .UseSetting("ConnectionStrings:Flowa", emptyOrderAccumulatorDatabaseConnectionString)
-                // O acceptor FIX sobe junto: porta livre e só no loopback, sem disputar a 9876 nem abrir para a rede.
+                // The FIX acceptor starts too: a free port and only on loopback, without competing for 9876 or opening to the network.
                 .UseSetting("Fix:AcceptorPort", "0")
                 .UseSetting("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost));
     }
@@ -48,7 +48,7 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
     {
         var orderAccumulatorVersionResponse = await orderAccumulatorApp.CreateClient().GetAsync("/version");
 
-        // Contrato §1: {"commit":"<sha completo, 40 caracteres>"}.
+        // Contract §1: {"commit":"<full sha, 40 characters>"}.
         var gitHeadSha = ReadGitHeadSha();
         Assert.Equal(40, gitHeadSha.Length);
         Assert.Equal(HttpStatusCode.OK, orderAccumulatorVersionResponse.StatusCode);

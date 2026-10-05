@@ -5,8 +5,8 @@ using System.Text.RegularExpressions;
 
 namespace Base.IntegrationTests;
 
-// Sobe o docker-compose.yml da raiz num projeto próprio (nome, porta e volume isolados),
-// para não brigar com um compose que já esteja de pé na máquina. Derruba tudo no fim.
+// Starts the root docker-compose.yml in a project of its own (isolated name, port and volume),
+// so it does not clash with a compose already up on the machine. Takes everything down at the end.
 public sealed class ComposeFixture : IAsyncLifetime
 {
     public const string ComposeProjectName = "flowa-it";
@@ -15,8 +15,8 @@ public sealed class ComposeFixture : IAsyncLifetime
     private static readonly TimeSpan ImageBuildTimeout = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan AppStartTimeout = TimeSpan.FromMinutes(2);
 
-    // Os apps exigem o commit gravado no build. Numa worktree o .git é só um arquivo e o
-    // Docker não consegue lê-lo, então o SHA vai pronto como argumento do build.
+    // The apps require the commit stamped at build time. In a worktree .git is only a file and
+    // Docker cannot read it, so the SHA goes ready-made as a build argument.
     private string? sourceRevisionId;
 
     public string RepoRoot { get; } = RepoPaths.FindRepoRoot();
@@ -37,7 +37,7 @@ public sealed class ComposeFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        // O down fica no finally: falhar ao gravar o log FIX da prova não pode deixar o compose de pé.
+        // The down stays in the finally: failing to write the FIX log of the evidence must not leave the compose up.
         try
         {
             var fixLogFolder = Environment.GetEnvironmentVariable("FLOWA_IT_LOG_DIR");
@@ -72,14 +72,14 @@ public sealed class ComposeFixture : IAsyncLifetime
     public async Task<ServiceContainerState> InspectServiceContainerAsync(string serviceName)
     {
         var containerId = (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "ps", "-q", serviceName)).Trim();
-        Assert.False(string.IsNullOrEmpty(containerId), $"o serviço {serviceName} não tem container");
+        Assert.False(string.IsNullOrEmpty(containerId), $"service {serviceName} has no container");
 
         var containerInspectJson = await CaptureComposeTestCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "inspect", containerId);
         using var containerInspectDocument = JsonDocument.Parse(containerInspectJson);
         var serviceContainer = containerInspectDocument.RootElement[0];
         var containerState = serviceContainer.GetProperty("State");
 
-        // Uma entrada por ligação no host: uma segunda ligação da mesma porta não pode sumir da comparação.
+        // One entry per host binding: a second binding of the same port must not vanish from the comparison.
         var publishedPortBindings = new List<string>();
         foreach (var exposedContainerPort in serviceContainer.GetProperty("NetworkSettings").GetProperty("Ports").EnumerateObject())
         {
@@ -110,8 +110,8 @@ public sealed class ComposeFixture : IAsyncLifetime
     public async Task<JsonDocument> ReadResolvedComposeConfigAsync() =>
         JsonDocument.Parse(await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "config", "--format", "json"));
 
-    // Conta os Logon de resposta do acceptor no log do OrderGenerator. Contamos em vez de
-    // filtrar por hora porque o relógio do Docker pode não bater com o da máquina.
+    // Counts the answer Logons of the acceptor in the OrderGenerator log. We count instead of
+    // filtering by time because the Docker clock may not match the machine clock.
     public async Task<int> CountFixLogonsFromAcceptorAsync() =>
         FixLog.ParseFixMessages(await ReadServiceLogAsync("ordergenerator"))
             .Count(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERACCUMULATOR");
@@ -124,7 +124,7 @@ public sealed class ComposeFixture : IAsyncLifetime
             if (await CountFixLogonsFromAcceptorAsync() > logonsAlreadySeen) return;
             await Task.Delay(500);
         }
-        Assert.Fail($"o OrderGenerator não recebeu logon novo do OrderAccumulator em {AppStartTimeout}");
+        Assert.Fail($"the OrderGenerator got no new logon from the OrderAccumulator within {AppStartTimeout}");
     }
 
     // The OrderAccumulator has no healthcheck, so `up --force-recreate --wait` only waits for the new container to run.
@@ -140,12 +140,12 @@ public sealed class ComposeFixture : IAsyncLifetime
             {
                 var orderAccumulatorRestartCount = await ReadOrderAccumulatorRestartCountAsync();
                 if (orderAccumulatorRestartCount != 0)
-                    Assert.Fail(await DescribeOrderAccumulatorStateAsync($"o OrderAccumulator recriado reiniciou {orderAccumulatorRestartCount} vez(es)"));
+                    Assert.Fail(await DescribeOrderAccumulatorStateAsync($"the recreated OrderAccumulator restarted {orderAccumulatorRestartCount} time(s)"));
                 return;
             }
             await Task.Delay(500);
         }
-        Assert.Fail(await DescribeOrderAccumulatorStateAsync($"o OrderAccumulator recriado não ficou pronto em {AppStartTimeout}"));
+        Assert.Fail(await DescribeOrderAccumulatorStateAsync($"the recreated OrderAccumulator was not ready within {AppStartTimeout}"));
     }
 
     private async Task<bool> IsOrderGeneratorLogonLoggedByOrderAccumulatorAsync() =>
@@ -189,7 +189,7 @@ public sealed class ComposeFixture : IAsyncLifetime
             catch (TaskCanceledException) { }
             await Task.Delay(500);
         }
-        Assert.Fail($"/health do OrderGenerator não respondeu em {AppStartTimeout}");
+        Assert.Fail($"the OrderGenerator /health did not answer within {AppStartTimeout}");
     }
 
     private Task<string> CaptureComposeTestCommandOutputAsync(string commandExecutable, TimeSpan commandTimeout, params string[] commandArguments)
@@ -203,7 +203,7 @@ public sealed class ComposeFixture : IAsyncLifetime
 
 public static class ExternalCommand
 {
-    // Variável com valor nulo é removida do ambiente do processo filho.
+    // A variable with a null value is removed from the environment of the child process.
     public static async Task<string> CaptureExternalCommandOutputAsync(
         string commandExecutable,
         TimeSpan commandTimeout,
@@ -236,11 +236,11 @@ public static class ExternalCommand
         catch (OperationCanceledException)
         {
             commandProcess.Kill(entireProcessTree: true);
-            throw new TimeoutException($"{commandLine} passou de {commandTimeout}");
+            throw new TimeoutException($"{commandLine} took longer than {commandTimeout}");
         }
 
         if (commandProcess.ExitCode != 0)
-            throw new InvalidOperationException($"{commandLine} saiu com {commandProcess.ExitCode}: {await commandStandardError}");
+            throw new InvalidOperationException($"{commandLine} exited with {commandProcess.ExitCode}: {await commandStandardError}");
         return await commandStandardOutput;
     }
 }
@@ -260,12 +260,12 @@ public static class RepoPaths
         for (var repoRootCandidateDirectory = new DirectoryInfo(AppContext.BaseDirectory); repoRootCandidateDirectory is not null; repoRootCandidateDirectory = repoRootCandidateDirectory.Parent)
             if (File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "docker-compose.yml")) && File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "Flowa.slnx")))
                 return repoRootCandidateDirectory.FullName;
-        throw new InvalidOperationException("não achei a raiz do repositório (docker-compose.yml + Flowa.slnx)");
+        throw new InvalidOperationException("repository root not found (docker-compose.yml + Flowa.slnx)");
     }
 }
 
-// Mensagem FIX crua como o QuickFIX/n escreve no stdout. O separador é SOH (0x01);
-// aceitamos também "|" para o caso de o log já vir trocado.
+// Raw FIX message as QuickFIX/n writes it to stdout. The separator is SOH (0x01);
+// "|" is accepted too, for a log that already comes with it replaced.
 public sealed record FixMessage(string RawFixText, IReadOnlyDictionary<int, string> ValuesByFixTag)
 {
     public string? ReadFixTagValue(int fixTag) => ValuesByFixTag.TryGetValue(fixTag, out var fixTagValue) ? fixTagValue : null;

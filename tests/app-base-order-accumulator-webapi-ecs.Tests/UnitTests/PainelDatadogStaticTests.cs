@@ -4,9 +4,9 @@ using Base.OrderAccumulator.Infrastructure.Metrics;
 
 namespace Base.OrderAccumulator.Tests;
 
-// O painel e a esteira dele só rodam no GitHub, depois do merge. Estes testes leem os arquivos e
-// barram antes disso o que quebraria a regra: pull_request com as chaves, state no lugar errado,
-// painel apagável, chave ou endereço da org no repositório público.
+// The dashboard and its pipeline only run on GitHub, after the merge. These tests read the files and
+// block before that whatever would break the rule: pull_request with the keys, state in the wrong place,
+// a deletable dashboard, a key or the org address in the public repository.
 public sealed class PainelDatadogStaticTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
@@ -166,16 +166,16 @@ public sealed class PainelDatadogStaticTests
 
         Assert.All(painelFiles, painelFile =>
         {
-            // Atributo do provider com a chave ou o site escrito no código; DD_API_KEY do ambiente não conta.
+            // A provider attribute with the key or the site written in the code; DD_API_KEY from the environment does not count.
             Assert.DoesNotMatch(new Regex(@"\b(api_key|app_key|api_url|validate)\s*="), painelFile);
             Assert.DoesNotMatch(new Regex(@"datadoghq\.|ddog-gov\.|https?://", RegexOptions.IgnoreCase), painelFile);
-            // Chave de API do Datadog tem 32 hex e a de app, 40; o SHA das actions é o único hex longo aceito.
+            // A Datadog API key has 32 hex characters and an app key 40; the SHA of the actions is the only long hex accepted.
             var linesWithoutActions = string.Join('\n', painelFile.Split('\n').Where(linha => !linha.TrimStart().StartsWith("- uses:") && !linha.TrimStart().StartsWith("uses:")));
             Assert.DoesNotMatch(new Regex(@"\b[0-9a-f]{32,}\b", RegexOptions.IgnoreCase), linesWithoutActions);
         });
     }
 
-    // O checkout no Windows pode trazer CRLF; as assertivas comparam linhas terminadas em \n.
+    // A checkout on Windows may bring CRLF; the assertions compare lines ending in \n.
     private static string ReadText(string filePath) => File.ReadAllText(filePath).ReplaceLineEndings("\n");
 
     private static string QuietTerraformFunction(string workflowText) =>

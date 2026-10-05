@@ -1,6 +1,6 @@
 namespace Base.OrderAccumulator.Commons;
 
-public interface IOrderMetrics
+public interface IOrderMetricsPort
 {
     void CountAnsweredOrder(string? orderSymbol, char orderSide, bool orderAccepted);
 

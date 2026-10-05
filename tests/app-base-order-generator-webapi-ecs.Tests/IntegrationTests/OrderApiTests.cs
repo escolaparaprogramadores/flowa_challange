@@ -9,7 +9,7 @@ using QuickFix.Fields;
 
 namespace Base.OrderGenerator.Tests;
 
-// OrderGenerator já logado num acceptor de teste que aceita tudo, para as ordens poderem sair.
+// OrderGenerator already logged on to a test acceptor that accepts everything, so orders can go out.
 public sealed class LoggedOnOrderGenerator : IAsyncLifetime
 {
     public FixTestAcceptor FixAcceptor { get; } = new(OrderGeneratorTestHost.FindFreeTcpPort());
@@ -124,7 +124,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     [Fact]
     public async Task Body_that_is_not_json_gets_400_with_the_four_required_fields()
     {
-        var notJsonHttpResponse = await PostOrderJson("isto não é json");
+        var notJsonHttpResponse = await PostOrderJson("this is not json");
 
         var invalidOrderProblem = await ReadProblemDetailsAsync(notJsonHttpResponse, HttpStatusCode.BadRequest);
         Assert.Equal("A ordem tem campos inválidos.", invalidOrderProblem.GetProperty("detail").GetString());
@@ -150,9 +150,9 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     [Theory]
     [InlineData("buy", '1')]
     [InlineData("sell", '2')]
-    public async Task Compra_e_venda_saem_como_NewOrderSingle_e_voltam_aceitas(string orderSideJson, char orderSideFixCode)
+    public async Task Buy_and_sell_go_out_as_NewOrderSingle_and_come_back_accepted(string orderSideJson, char orderSideFixCode)
     {
-        // TransactTime vai em UTC com milissegundos; a janela aceita esse arredondamento.
+        // TransactTime goes in UTC with milliseconds; the window accepts that rounding.
         var orderSentNotBeforeUtc = DateTime.UtcNow.AddMilliseconds(-1);
         var orderHttpResponse = await PostOrderJson($$"""{"symbol":"VALE3","side":"{{orderSideJson}}","quantity":250,"price":61.37}""");
         var orderSentNotAfterUtc = DateTime.UtcNow;
@@ -189,7 +189,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     [InlineData("1", "0.01")]
     [InlineData("99999", "999.99")]
     [InlineData("\"1\"", "\"0.01\"")]
-    public async Task Bordas_aceitas_de_quantidade_e_preco_saem_pelo_FIX(string orderQuantityJson, string orderPriceJson)
+    public async Task Accepted_quantity_and_price_edges_go_out_by_fix(string orderQuantityJson, string orderPriceJson)
     {
         var orderHttpResponse = await PostOrderJson($$"""{"symbol":"VIIA4","side":"sell","quantity":{{orderQuantityJson}},"price":{{orderPriceJson}}}""");
 
@@ -209,7 +209,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     }
 
     [Fact]
-    public async Task Ordem_rejeitada_devolve_o_texto_da_tag_58()
+    public async Task Rejected_order_returns_the_tag_58_text()
     {
         const string rejectionText = "Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.";
         _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder => _loggedOnOrderGenerator.FixAcceptor.BuildRejectedExecutionReport(receivedOrder, rejectionText);
@@ -230,7 +230,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     }
 
     [Fact]
-    public async Task Ordem_rejeitada_sem_tag_58_devolve_a_mensagem_padrao()
+    public async Task Rejected_order_without_tag_58_returns_the_default_message()
     {
         _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder =>
             _loggedOnOrderGenerator.FixAcceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0);
@@ -245,9 +245,9 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     }
 
     [Fact]
-    public async Task ExecutionReport_com_ExecType_fora_do_contrato_responde_500()
+    public async Task ExecutionReport_with_ExecType_outside_the_contract_answers_500()
     {
-        // 150=2 (Fill) não está no contrato v1, que só prevê 0 (New) e 8 (Rejected).
+        // 150=2 (Fill) is not in contract v1, which only has 0 (New) and 8 (Rejected).
         _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder =>
             _loggedOnOrderGenerator.FixAcceptor.BuildExecutionReport(receivedOrder, ExecType.FILL, OrdStatus.FILLED, 0);
 
@@ -266,23 +266,23 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     }
 
     [Fact]
-    public async Task Relatorio_de_outro_ClOrdID_nao_responde_pela_ordem()
+    public async Task Report_with_another_ClOrdID_does_not_answer_for_the_order()
     {
         _loggedOnOrderGenerator.FixAcceptor.StrayExecutionReport = receivedOrder =>
-            _loggedOnOrderGenerator.FixAcceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0, clOrdId: "nao-e-desta-ordem");
+            _loggedOnOrderGenerator.FixAcceptor.BuildExecutionReport(receivedOrder, ExecType.REJECTED, OrdStatus.REJECTED, 0, clOrdId: "not-this-order");
 
         var orderResponse = await ReadOrderDataAsync(await PostOrderJson("""{"symbol":"VIIA4","side":"buy","quantity":5,"price":3.21}"""));
 
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
         AssertAnswersItsOwnExecutionReport(orderResponse);
-        var strayOrderId = _loggedOnOrderGenerator.FixAcceptor.SentExecutionReports["nao-e-desta-ordem"].GetString(Tags.OrderID);
+        var strayOrderId = _loggedOnOrderGenerator.FixAcceptor.SentExecutionReports["not-this-order"].GetString(Tags.OrderID);
         Assert.NotEqual(strayOrderId, orderResponse.GetProperty("orderId").GetString());
     }
 
     [Fact]
-    public async Task Ordens_simultaneas_recebem_cada_uma_a_sua_resposta()
+    public async Task Simultaneous_orders_each_get_their_own_answer()
     {
-        // A de PETR4 é respondida depois da de VALE3: as respostas chegam fora da ordem de envio.
+        // The PETR4 one is answered after the VALE3 one: the answers arrive out of sending order.
         const string rejectionText = "Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.";
         _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder => receivedOrder.GetString(Tags.Symbol) == "VALE3"
             ? _loggedOnOrderGenerator.FixAcceptor.BuildRejectedExecutionReport(receivedOrder, rejectionText)
@@ -306,7 +306,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     }
 
     [Fact]
-    public async Task Resposta_que_chega_depois_dos_5_segundos_e_descartada()
+    public async Task Answer_that_arrives_after_5_seconds_is_dropped()
     {
         _loggedOnOrderGenerator.FixAcceptor.ExecutionReportDelay = receivedOrder => TimeSpan.FromSeconds(6);
 
@@ -323,7 +323,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         Assert.Equal(0, _loggedOnOrderGenerator.OrderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
 
-    // A sessão FIX entrega em ordem: se uma ordem inválida tivesse saído, ela chegaria antes da sentinela.
+    // The FIX session delivers in order: if an invalid order had gone out, it would arrive before the sentinel.
     private async Task AssertOnlySentinelReachedAcceptor()
     {
         var sentinelResponse = await ReadOrderDataAsync(await PostOrderJson(SentinelOrderJson));
@@ -385,14 +385,14 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         responseProblemDetails.GetProperty("errors").EnumerateArray().Select(problemErrorMessage => problemErrorMessage.GetString()!).ToList();
 }
 
-// CA-19: sem a outra ponta, ou com ela muda, a API responde em português dentro do prazo e não segura nada.
+// CA-19: without the other end, or with it silent, the API answers in Portuguese within the deadline and holds nothing.
 public sealed class OrderCommunicationTests
 {
     private const string ValidOrderJson = """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.50}""";
     private const string OrderCommunicationMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
 
     [Fact]
-    public async Task Sem_sessao_FIX_responde_503_na_hora()
+    public async Task Without_a_fix_session_answers_503_right_away()
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort());
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -402,14 +402,14 @@ public sealed class OrderCommunicationTests
         apiResponseClock.Stop();
 
         await AssertOrderCommunicationError(orderHttpResponse, "fix-session-not-logged-on");
-        Assert.True(apiResponseClock.Elapsed < TimeSpan.FromSeconds(1), $"levou {apiResponseClock.Elapsed}");
+        Assert.True(apiResponseClock.Elapsed < TimeSpan.FromSeconds(1), $"took {apiResponseClock.Elapsed}");
         Assert.Equal(0, orderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
 
     [Fact]
-    public void Acceptor_de_teste_escuta_so_no_loopback()
+    public void Test_acceptor_listens_only_on_loopback()
     {
-        // Escutando em todas as redes, o Windows pede ao dono para liberar o testhost no firewall.
+        // Listening on every network, Windows asks the owner to allow the testhost through the firewall.
         using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
         fixTestAcceptor.StartFixTestAcceptor();
 
@@ -421,7 +421,7 @@ public sealed class OrderCommunicationTests
     }
 
     [Fact]
-    public async Task Acceptor_mudo_responde_503_em_5_segundos_e_descarta_a_espera()
+    public async Task Silent_acceptor_answers_503_in_5_seconds_and_drops_the_wait()
     {
         using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
         fixTestAcceptor.StartFixTestAcceptor();
@@ -440,7 +440,7 @@ public sealed class OrderCommunicationTests
     }
 
     [Fact]
-    public async Task Quando_o_acceptor_volta_o_initiator_reloga_e_so_a_ordem_nova_passa()
+    public async Task When_the_acceptor_comes_back_the_initiator_logs_on_again_and_only_the_new_order_goes_through()
     {
         using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(fixTestAcceptor.AcceptorPort);
@@ -454,7 +454,7 @@ public sealed class OrderCommunicationTests
 
         var orderResponse = await OrderApiTests.ReadOrderDataAsync(await PostValidOrder(orderGeneratorClient));
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
-        // D-34: a ordem recusada sem sessão não ficou na store para sair depois do logon.
+        // D-34: the order refused without a session did not stay in the store to go out after the logon.
         var receivedOrder = Assert.Single(fixTestAcceptor.ReceivedOrders);
         Assert.Equal(orderResponse.GetProperty("clOrdId").GetString(), receivedOrder.GetString(Tags.ClOrdID));
     }

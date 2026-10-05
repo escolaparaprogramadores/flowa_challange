@@ -1,13 +1,13 @@
 name: Deploy dev
 
-# A cada merge em develop que mude mais que texto: o CI roda no mesmo commit e, só com ele verde, a
-# imagem de cada serviço que mudou vai para o ECR e o terraform apply roda na conta do flowa (D-41).
-# O repositório é público, então nada da conta aparece no log: role, bucket e registro vêm de secrets,
-# e a saída do Terraform fica num arquivo do runner, com só o resumo no log.
+# On each merge to develop that changes more than text: the CI runs on the same commit and, only with it green,
+# the image of each changed service goes to ECR and terraform apply runs in the flowa account (D-41).
+# The repository is public, so nothing of the account shows in the log: role, bucket and registry come from
+# secrets, and the Terraform output stays in a file on the runner, with only the summary in the log.
 on:
   push:
     branches: [develop]
-    # Merge só de texto não refaz imagem nem troca task (CA-O22).
+    # A text-only merge neither rebuilds an image nor replaces a task (CA-O22).
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -22,17 +22,17 @@ jobs:
 
   deploy:
     needs: [ci]
-    # O disparo manual também só publica o que está em develop.
+    # The manual trigger also only publishes what is in develop.
     if: github.ref == 'refs/heads/develop'
     permissions:
       id-token: write
       contents: read
-    # Um apply por vez, e o que está rodando nunca é cancelado. Se chegarem dois merges durante um
-    # apply, só o mais novo fica na fila (o GitHub descarta o pendente mais antigo); ele já contém o outro.
+    # One apply at a time, and the running one is never cancelled. If two merges arrive during an
+    # apply, only the newest stays queued (GitHub drops the older pending one); it already contains the other.
     concurrency:
       group: deploy-dev
       cancel-in-progress: false
-    # ARM64 nativo: as imagens rodam em Fargate ARM64 e o build não precisa de emulação.
+    # Native ARM64: the images run on Fargate ARM64 and the build needs no emulation.
     runs-on: ubuntu-24.04-arm
     environment: dev
     timeout-minutes: 45
@@ -43,128 +43,128 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A tag em uso de cada serviço é um commit antigo de develop, e a escolha da tag compara com ele.
+          # The tag in use of each service is an old develop commit, and the tag choice compares against it.
           fetch-depth: 0
 
-      # O CI de dois merges roda em paralelo, e sem isto o deploy do mais velho poderia terminar por cima
-      # do mais novo. Se develop já tem código depois deste commit, o run daquele merge publica tudo.
-      - name: Conferir se este commit ainda é o mais novo de develop
-        id: ponta
+      # The CI of two merges runs in parallel, and without this the deploy of the older one could finish on top
+      # of the newer one. If develop already has code after this commit, the run of that merge publishes it all.
+      - name: Check that this commit is still the newest of develop
+        id: develop_tip
         run: |
           git fetch --quiet origin develop
-          ponta_de_develop=$(git rev-parse FETCH_HEAD)
-          if [ "$ponta_de_develop" != "$GITHUB_SHA" ] &&
-             git diff --name-only "$GITHUB_SHA" "$ponta_de_develop" | grep -qvE '\.md$|^docs/'; then
-            echo "develop já tem código mais novo ($ponta_de_develop); o run daquele merge publica"
-            echo "publicar=false" >> "$GITHUB_OUTPUT"
+          develop_tip_commit=$(git rev-parse FETCH_HEAD)
+          if [ "$develop_tip_commit" != "$GITHUB_SHA" ] &&
+             git diff --name-only "$GITHUB_SHA" "$develop_tip_commit" | grep -qvE '\.md$|^docs/'; then
+            echo "develop already has newer code ($develop_tip_commit); the run of that merge publishes"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
           else
-            echo "publicar=true" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Conferir se há infra
+      - name: Check that there is infra
         id: infra
-        if: steps.ponta.outputs.publicar == 'true'
+        if: steps.develop_tip.outputs.publish == 'true'
         run: |
           if [ -d infra ]; then
-            echo "existe=true" >> "$GITHUB_OUTPUT"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "nada a aplicar: infra/ não existe"
-            echo "existe=false" >> "$GITHUB_OUTPUT"
+            echo "nothing to apply: infra/ does not exist"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Credencial AWS por OIDC
-        if: steps.infra.outputs.existe == 'true'
+      - name: AWS credentials through OIDC
+        if: steps.infra.outputs.exists == 'true'
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
           mask-aws-account-id: true
 
-      - name: Login no ECR
-        if: steps.infra.outputs.existe == 'true'
+      - name: ECR login
+        if: steps.infra.outputs.exists == 'true'
         uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
-      # CA-O24: um serviço só ganha imagem nova quando muda o que o Dockerfile dele copia. A comparação é
-      # com a tag em uso (o commit da imagem que roda hoje), não com o push anterior: assim um deploy que
-      # falhou não deixa mudança para trás. A imagem não vai para o log, porque o endereço tem a conta.
-      - name: Escolher a tag de cada serviço
+      # CA-O24: a service only gets a new image when what its Dockerfile copies changes. The comparison is
+      # with the tag in use (the commit of the image running today), not with the previous push: this way a
+      # failed deploy leaves no change behind. The image does not go to the log, because its address has the account.
+      - name: Choose the tag of each service
         id: tags
-        if: steps.infra.outputs.existe == 'true'
+        if: steps.infra.outputs.exists == 'true'
         run: |
-          entradas_da_imagem_do_servico() {
-            dockerfile_do_servico=$1
-            echo "$dockerfile_do_servico"
+          service_image_inputs() {
+            service_dockerfile=$1
+            echo "$service_dockerfile"
             echo .dockerignore
-            # Origens de cada COPY/ADD que lê do repositório (não de outro estágio), sem as opções --x.
+            # Sources of each COPY/ADD that reads from the repository (not from another stage), without the --x options.
             awk 'toupper($1) == "COPY" || toupper($1) == "ADD" {
-                   # Forma JSON, linha quebrada com "\" ou heredoc: sem ler as origens com certeza, vale o
-                   # repositório inteiro, e qualquer mudança refaz a imagem.
+                   # JSON form, line broken with "\" or heredoc: without reading the sources for sure, the whole
+                   # repository counts, and any change rebuilds the image.
                    if ($0 ~ /\[|\\[[:space:]]*$|<</) { print "."; next }
-                   copia_de_outro_estagio = 0; quantidade_de_argumentos = 0
+                   copies_from_other_stage = 0; copy_argument_count = 0
                    for (i = 2; i <= NF; i++) {
-                     if ($i ~ /^--from=/) copia_de_outro_estagio = 1
-                     else if ($i !~ /^--/) argumentos_da_copia[++quantidade_de_argumentos] = $i
+                     if ($i ~ /^--from=/) copies_from_other_stage = 1
+                     else if ($i !~ /^--/) copy_arguments[++copy_argument_count] = $i
                    }
-                   if (!copia_de_outro_estagio)
-                     for (i = 1; i < quantidade_de_argumentos; i++) print argumentos_da_copia[i]
-                 }' "$dockerfile_do_servico" | sed -E 's#^\./##; s#/$##'
+                   if (!copies_from_other_stage)
+                     for (i = 1; i < copy_argument_count; i++) print copy_arguments[i]
+                 }' "$service_dockerfile" | sed -E 's#^\./##; s#/$##'
           }
 
-          esconder_conta_do_erro_da_aws() {
-            sed -E 's/arn:aws[^ "]*/<arn oculto>/g; s/[0-9]{12}/<conta>/g' "$1" >&2
+          hide_account_in_aws_error() {
+            sed -E 's/arn:aws[^ "]*/<hidden arn>/g; s/[0-9]{12}/<account>/g' "$1" >&2
           }
 
-          tag_da_imagem_em_uso_no_servico() {
-            nome_do_servico_no_ecs=$1
-            nome_do_container=$2
-            erro_da_leitura_do_ecs="$RUNNER_TEMP/ecs-$nome_do_container.log"
-            if ! definicao_da_task_em_uso=$(aws ecs describe-services --cluster flowa-challenge \
-                 --services "$nome_do_servico_no_ecs" --query 'services[?status==`ACTIVE`].taskDefinition | [0]' \
-                 --output text 2> "$erro_da_leitura_do_ecs"); then
-              # Sem cluster ainda (primeiro deploy) é o mesmo que serviço sem task: imagem nova.
-              grep -q ClusterNotFoundException "$erro_da_leitura_do_ecs" && return 0
-              esconder_conta_do_erro_da_aws "$erro_da_leitura_do_ecs"
+          service_image_tag_in_use() {
+            ecs_service_name=$1
+            container_name=$2
+            ecs_read_error_file="$RUNNER_TEMP/ecs-$container_name.log"
+            if ! task_definition_in_use=$(aws ecs describe-services --cluster flowa-challenge \
+                 --services "$ecs_service_name" --query 'services[?status==`ACTIVE`].taskDefinition | [0]' \
+                 --output text 2> "$ecs_read_error_file"); then
+              # No cluster yet (first deploy) is the same as a service without a task: new image.
+              grep -q ClusterNotFoundException "$ecs_read_error_file" && return 0
+              hide_account_in_aws_error "$ecs_read_error_file"
               return 1
             fi
-            if [ -z "$definicao_da_task_em_uso" ] || [ "$definicao_da_task_em_uso" = "None" ]; then
+            if [ -z "$task_definition_in_use" ] || [ "$task_definition_in_use" = "None" ]; then
               return 0
             fi
-            if ! imagem_em_uso=$(aws ecs describe-task-definition --task-definition "$definicao_da_task_em_uso" \
-                 --query "taskDefinition.containerDefinitions[?name=='$nome_do_container'].image | [0]" \
-                 --output text 2> "$erro_da_leitura_do_ecs"); then
-              esconder_conta_do_erro_da_aws "$erro_da_leitura_do_ecs"
+            if ! image_in_use=$(aws ecs describe-task-definition --task-definition "$task_definition_in_use" \
+                 --query "taskDefinition.containerDefinitions[?name=='$container_name'].image | [0]" \
+                 --output text 2> "$ecs_read_error_file"); then
+              hide_account_in_aws_error "$ecs_read_error_file"
               return 1
             fi
-            echo "${imagem_em_uso##*:}"
+            echo "${image_in_use##*:}"
           }
 
-          for servico_container_e_pasta in flowa-challenge-order-generator:generator:app-base-order-generator-webapi-ecs \
+          for service_container_and_folder in flowa-challenge-order-generator:generator:app-base-order-generator-webapi-ecs \
                                            flowa-challenge-order-accumulator:accumulator:app-base-order-accumulator-webapi-ecs; do
-            IFS=: read -r nome_do_servico_no_ecs nome_do_container pasta_do_servico <<< "$servico_container_e_pasta"
-            tag_em_uso=$(tag_da_imagem_em_uso_no_servico "$nome_do_servico_no_ecs" "$nome_do_container")
-            mapfile -t entradas_da_imagem < <(entradas_da_imagem_do_servico "src/$pasta_do_servico/Dockerfile")
-            if [[ "$tag_em_uso" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$tag_em_uso^{commit}" 2> /dev/null &&
-               git diff --quiet "$tag_em_uso" "$GITHUB_SHA" -- "${entradas_da_imagem[@]}"; then
-              echo "$pasta_do_servico: nada mudou no que a imagem copia desde $tag_em_uso; a task fica como está"
-              echo "${nome_do_container}_tag=$tag_em_uso" >> "$GITHUB_OUTPUT"
-              echo "${nome_do_container}_construir=false" >> "$GITHUB_OUTPUT"
+            IFS=: read -r ecs_service_name container_name service_folder <<< "$service_container_and_folder"
+            tag_in_use=$(service_image_tag_in_use "$ecs_service_name" "$container_name")
+            mapfile -t image_inputs < <(service_image_inputs "src/$service_folder/Dockerfile")
+            if [[ "$tag_in_use" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$tag_in_use^{commit}" 2> /dev/null &&
+               git diff --quiet "$tag_in_use" "$GITHUB_SHA" -- "${image_inputs[@]}"; then
+              echo "$service_folder: nothing changed in what the image copies since $tag_in_use; the task stays as it is"
+              echo "${container_name}_tag=$tag_in_use" >> "$GITHUB_OUTPUT"
+              echo "${container_name}_build=false" >> "$GITHUB_OUTPUT"
             else
-              echo "$pasta_do_servico: imagem nova com a tag $GITHUB_SHA"
-              echo "${nome_do_container}_tag=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-              echo "${nome_do_container}_construir=true" >> "$GITHUB_OUTPUT"
+              echo "$service_folder: new image with the tag $GITHUB_SHA"
+              echo "${container_name}_tag=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+              echo "${container_name}_build=true" >> "$GITHUB_OUTPUT"
             fi
           done
 
-      # Sem o wrapper: ele repetiria a saída inteira do Terraform no log.
+      # Without the wrapper: it would repeat the whole Terraform output in the log.
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        if: steps.infra.outputs.existe == 'true'
+        if: steps.infra.outputs.exists == 'true'
         with:
           terraform_version: 1.16.4
           terraform_wrapper: false
 
-      # Roda o Terraform com a saída num arquivo. Se falhar, o log mostra só as linhas de erro.
-      - name: Preparar o Terraform sem eco no log
-        if: steps.infra.outputs.existe == 'true'
+      # Runs Terraform with the output in a file. If it fails, the log shows only the error lines.
+      - name: Prepare Terraform without echo in the log
+        if: steps.infra.outputs.exists == 'true'
         run: |
           cat > "$RUNNER_TEMP/terraform-quieto.sh" <<'FIM'
           terraform_quieto() {
@@ -180,8 +180,8 @@ jobs:
           }
           FIM
 
-      - name: terraform init e repositórios ECR
-        if: steps.infra.outputs.existe == 'true'
+      - name: terraform init and ECR repositories
+        if: steps.infra.outputs.exists == 'true'
         working-directory: infra
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
@@ -194,87 +194,87 @@ jobs:
             -backend-config="use_lockfile=true"
           echo "terraform init ok"
 
-          # O ECR precisa existir antes do push das imagens.
-          mapfile -t alvos_terraform_dos_repositorios_ecr < <(grep -hoE '^resource "aws_ecr_repository" "[A-Za-z0-9_-]+"' ./*.tf |
+          # The ECR has to exist before the images are pushed.
+          mapfile -t ecr_repository_targets < <(grep -hoE '^resource "aws_ecr_repository" "[A-Za-z0-9_-]+"' ./*.tf |
             awk -F'"' '{ print "-target=aws_ecr_repository." $4 }')
-          if [ "${#alvos_terraform_dos_repositorios_ecr[@]}" -eq 0 ]; then
-            echo "nenhum resource \"aws_ecr_repository\" em infra/*.tf" >&2
+          if [ "${#ecr_repository_targets[@]}" -eq 0 ]; then
+            echo "no resource \"aws_ecr_repository\" in infra/*.tf" >&2
             exit 1
           fi
-          terraform_quieto apply -auto-approve "${alvos_terraform_dos_repositorios_ecr[@]}"
-          printf '%s\n' "${alvos_terraform_dos_repositorios_ecr[@]}" | sed 's/^-target=/ECR: /'
+          terraform_quieto apply -auto-approve "${ecr_repository_targets[@]}"
+          printf '%s\n' "${ecr_repository_targets[@]}" | sed 's/^-target=/ECR: /'
           grep -E '^Apply complete!' "$TERRAFORM_LOG"
 
-      - name: Imagens ARM64 no ECR
-        if: steps.infra.outputs.existe == 'true'
+      - name: ARM64 images in ECR
+        if: steps.infra.outputs.exists == 'true'
         env:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-          CONSTRUIR_IMAGEM_DO_GENERATOR: ${{ steps.tags.outputs.generator_construir }}
-          CONSTRUIR_IMAGEM_DO_ACCUMULATOR: ${{ steps.tags.outputs.accumulator_construir }}
+          BUILD_GENERATOR_IMAGE: ${{ steps.tags.outputs.generator_build }}
+          BUILD_ACCUMULATOR_IMAGE: ${{ steps.tags.outputs.accumulator_build }}
         run: |
-          for servico_repositorio_e_decisao in \
-              "app-base-order-generator-webapi-ecs:flowa-challenge-order-generator:$CONSTRUIR_IMAGEM_DO_GENERATOR" \
-              "app-base-order-accumulator-webapi-ecs:flowa-challenge-order-accumulator:$CONSTRUIR_IMAGEM_DO_ACCUMULATOR"; do
-            IFS=: read -r servico_flowa repositorio_ecr construir_imagem_do_servico <<< "$servico_repositorio_e_decisao"
-            if [ "$construir_imagem_do_servico" != "true" ]; then
-              echo "$servico_flowa: sem imagem nova; continua a que já roda"
+          for service_repository_and_decision in \
+              "app-base-order-generator-webapi-ecs:flowa-challenge-order-generator:$BUILD_GENERATOR_IMAGE" \
+              "app-base-order-accumulator-webapi-ecs:flowa-challenge-order-accumulator:$BUILD_ACCUMULATOR_IMAGE"; do
+            IFS=: read -r service_folder ecr_repository build_service_image <<< "$service_repository_and_decision"
+            if [ "$build_service_image" != "true" ]; then
+              echo "$service_folder: no new image; the running one stays"
               continue
             fi
-            imagem_do_servico_no_ecr="$ECR_REGISTRY/$repositorio_ecr:$GITHUB_SHA"
-            # Rodar de novo no mesmo commit não refaz a imagem que já está lá.
-            if docker manifest inspect "$imagem_do_servico_no_ecr" > /dev/null 2>&1; then
-              echo "$servico_flowa: imagem deste commit já está no ECR"
+            service_image_in_ecr="$ECR_REGISTRY/$ecr_repository:$GITHUB_SHA"
+            # Running again on the same commit does not rebuild the image that is already there.
+            if docker manifest inspect "$service_image_in_ecr" > /dev/null 2>&1; then
+              echo "$service_folder: the image of this commit is already in ECR"
               continue
             fi
-            # Sem o SHA o app não sobe e o /version volta vazio.
+            # Without the SHA the app does not start and /version comes back empty.
             docker build --platform linux/arm64 --build-arg SOURCE_REVISION_ID="$GITHUB_SHA" \
-              -f "src/$servico_flowa/Dockerfile" -t "$imagem_do_servico_no_ecr" .
-            docker push --quiet "$imagem_do_servico_no_ecr" > /dev/null
-            echo "$servico_flowa: imagem enviada com a tag $GITHUB_SHA"
+              -f "src/$service_folder/Dockerfile" -t "$service_image_in_ecr" .
+            docker push --quiet "$service_image_in_ecr" > /dev/null
+            echo "$service_folder: image pushed with the tag $GITHUB_SHA"
           done
 
-      # Liga o agente do Datadog só quando o cofre já tem a chave: sem ela o agente não sobe e a task ficaria
-      # maior à toa. Lê só os estágios das versões; o valor a esteira nem pode ler.
-      - name: Conferir se o cofre do Datadog tem a chave
+      # Turns the Datadog agent on only when the vault already has the key: without it the agent does not start and
+      # the task would be bigger for nothing. Reads only the version stages; the pipeline cannot even read the value.
+      - name: Check that the Datadog vault has the key
         id: datadog
-        if: steps.infra.outputs.existe == 'true'
+        if: steps.infra.outputs.exists == 'true'
         env:
-          # Para tirar o agente das tasks, troque para "false".
-          AGENTE_DATADOG_DESEJADO: "true"
+          # To take the agent out of the tasks, change to "false".
+          DATADOG_AGENT_WANTED: "true"
         run: |
-          if [ "$AGENTE_DATADOG_DESEJADO" != "true" ]; then
-            echo "agente do Datadog desligado na esteira"
-            echo "ligado=false" >> "$GITHUB_OUTPUT"
+          if [ "$DATADOG_AGENT_WANTED" != "true" ]; then
+            echo "Datadog agent switched off in the pipeline"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Erro da AWS traz ARN e conta; por isso a saída dele não vai para o log.
-          if ! estagios_das_versoes=$(aws secretsmanager describe-secret --secret-id flowa-challenge/dev/datadog/api-key \
+          # An AWS error carries ARN and account; that is why its output does not go to the log.
+          if ! version_stages=$(aws secretsmanager describe-secret --secret-id flowa-challenge/dev/datadog/api-key \
                --query VersionIdsToStages --output json 2> /dev/null); then
-            echo "não deu para consultar o cofre do Datadog; o deploy para antes do plan" >&2
+            echo "could not query the Datadog vault; the deploy stops before the plan" >&2
             exit 1
           fi
-          if grep -q '"AWSCURRENT"' <<< "$estagios_das_versoes"; then
-            echo "cofre do Datadog com chave: o agente sobe nas duas tasks"
-            echo "ligado=true" >> "$GITHUB_OUTPUT"
+          if grep -q '"AWSCURRENT"' <<< "$version_stages"; then
+            echo "Datadog vault has the key: the agent starts in both tasks"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::O cofre do Datadog ainda não tem a chave; as tasks sobem sem o agente."
-            echo "ligado=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::The Datadog vault does not have the key yet; the tasks start without the agent."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: terraform plan e apply
-        if: steps.infra.outputs.existe == 'true'
+      - name: terraform plan and apply
+        if: steps.infra.outputs.exists == 'true'
         working-directory: infra
         env:
-          TAG_DA_IMAGEM_DO_GENERATOR: ${{ steps.tags.outputs.generator_tag }}
-          TAG_DA_IMAGEM_DO_ACCUMULATOR: ${{ steps.tags.outputs.accumulator_tag }}
-          AGENTE_DATADOG_LIGADO: ${{ steps.datadog.outputs.ligado }}
+          GENERATOR_IMAGE_TAG: ${{ steps.tags.outputs.generator_tag }}
+          ACCUMULATOR_IMAGE_TAG: ${{ steps.tags.outputs.accumulator_tag }}
+          AGENTE_DATADOG_LIGADO: ${{ steps.datadog.outputs.enabled }}
         run: |
           source "$RUNNER_TEMP/terraform-quieto.sh"
           terraform_quieto plan -out=tfplan \
-            -var "generator_image_tag=$TAG_DA_IMAGEM_DO_GENERATOR" \
-            -var "accumulator_image_tag=$TAG_DA_IMAGEM_DO_ACCUMULATOR" \
+            -var "generator_image_tag=$GENERATOR_IMAGE_TAG" \
+            -var "accumulator_image_tag=$ACCUMULATOR_IMAGE_TAG" \
             -var "datadog_ligado=$AGENTE_DATADOG_LIGADO"
-          grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan sem linha de resumo"
+          grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan without a summary line"
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
           # Plan guard: only the two task definitions may be destroyed or replaced (every image deploy replaces
@@ -306,26 +306,3 @@ jobs:
 
           terraform_quieto apply tfplan
           grep -E '^Apply complete!' "$TERRAFORM_LOG"
-
-      # Read-only proof that the log collector also writes to CloudWatch (CA-41): counts, in each app log group,
-      # the lines of the order used as evidence in the last 24 h. It never fails the deploy.
-      - name: App logs in CloudWatch
-        if: steps.infra.outputs.existe == 'true' && steps.datadog.outputs.ligado == 'true'
-        continue-on-error: true
-        env:
-          EVIDENCE_ORDER_CLORDID: 6ac35ed0000000000d3ba64b5a3b4c38
-        run: |
-          search_start_ms=$(( ($(date +%s) - 86400) * 1000 ))
-          for app_log_group in flowa-challenge-order-generator flowa-challenge-order-accumulator; do
-            # AWS errors carry account ARNs; only the error code reaches this public log.
-            aws_error_file="$RUNNER_TEMP/cloudwatch-$app_log_group.err"
-            if ! evidence_order_lines=$(aws logs filter-log-events --log-group-name "$app_log_group" \
-                 --log-stream-name-prefix app/ --start-time "$search_start_ms" \
-                 --filter-pattern "\"$EVIDENCE_ORDER_CLORDID\"" --query 'events[].message' --output json 2> "$aws_error_file"); then
-              aws_error_code=$(grep -oE '\([A-Za-z]+(Exception|Error)\)' "$aws_error_file" | head -n 1 | tr -d '()')
-              echo "$app_log_group: could not read CloudWatch (${aws_error_code:-unknown error})"
-              continue
-            fi
-            echo "$app_log_group: $(jq length <<< "$evidence_order_lines") line(s) of order $EVIDENCE_ORDER_CLORDID"
-            jq -r '.[] | .[0:300]' <<< "$evidence_order_lines"
-          done

@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 
 namespace Base.OrderAccumulator.Tests;
 
-// CA-12: o paralelismo é na camada de dados. Cada ordem abre a própria conexão e transação.
+// CA-12: the parallelism is in the data layer. Each order opens its own connection and transaction.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper concurrencyTestOutput)
 {
@@ -19,8 +19,8 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
           AND query LIKE '%UPDATE exposures%'
         """;
 
-    // Quantidades de 5.000 a 99.999 a 20,00: cerca de 1 milhão por ordem, perto de 2× o limite
-    // no total, então parte tem de ser rejeitada. Rodadas ímpares compram, pares vendem.
+    // Quantities from 5,000 to 99,999 at 20.00: about 1 million per order, close to 2× the limit
+    // in total, so part of them must be rejected. Odd rounds buy, even rounds sell.
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -36,8 +36,8 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
             .Select(_ => TestOrders.NewIncomingOrder("PETR4", orderSide, orderQuantityGenerator.Next(5_000, 100_000), 20.00m))
             .ToList();
 
-        // Uma transação à parte segura a linha de PETR4. Assim as 200 transações das ordens chegam
-        // todas ao UPDATE condicional e ficam esperando juntas, dentro do PostgreSQL.
+        // A separate transaction holds the PETR4 row. That way the 200 order transactions all reach
+        // the conditional UPDATE and wait together, inside PostgreSQL.
         await using var exposureRowHolderConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
         await using var exposureRowHolderTransaction = await exposureRowHolderConnection.BeginTransactionAsync();
         await exposureRowHolderConnection.ExecuteAsync(
@@ -55,11 +55,11 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
         var acceptedAnswers = orderAnswers.Where(orderAnswer => orderAnswer.Accepted).ToList();
         var rejectedAnswers = orderAnswers.Where(orderAnswer => !orderAnswer.Accepted).ToList();
         concurrencyTestOutput.WriteLine(
-            $"rodada {concurrencyRound}: {transactionsWaitingTogether} transações esperando a linha ao mesmo tempo, " +
-            $"{acceptedAnswers.Count} aceitas, {rejectedAnswers.Count} rejeitadas, exposição final {finalExposure}");
+            $"round {concurrencyRound}: {transactionsWaitingTogether} transactions waiting for the row at the same time, " +
+            $"{acceptedAnswers.Count} accepted, {rejectedAnswers.Count} rejected, final exposure {finalExposure}");
 
         Assert.Equal(SimultaneousOrders, transactionsWaitingTogether);
-        Assert.True(Math.Abs(finalExposure) <= ExposureLimitPolicy.PerSymbol, $"exposição {finalExposure} passou do limite");
+        Assert.True(Math.Abs(finalExposure) <= ExposureLimitPolicy.PerSymbol, $"exposure {finalExposure} went over the limit");
         Assert.Equal(acceptedAnswers.Sum(TestOrders.ExposureDeltaOf), finalExposure);
         Assert.Equal(finalExposure, await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync("PETR4"));
         Assert.Equal(SimultaneousOrders, await orderAccumulatorDatabase.CountStoredOrdersAsync());
@@ -67,13 +67,13 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
         Assert.All(rejectedAnswers, rejectedAnswer =>
             Assert.Equal(ExposureLimitPolicy.BuildExposureLimitRejectionText("PETR4"), rejectedAnswer.RejectReason));
 
-        // A exposição só anda num sentido nesta rodada; então toda rejeitada era maior do que a
-        // folga que sobrou no fim. Isso mostra que as aceitas encostaram no limite.
+        // The exposure only moves in one direction in this round; so every rejected order was larger than the
+        // room left at the end. This shows the accepted ones reached the limit.
         Assert.All(rejectedAnswers, rejectedAnswer =>
             Assert.True(Math.Abs(TestOrders.ExposureDeltaOf(rejectedAnswer)) > ExposureLimitPolicy.CalculateRemainingExposureCapacity(finalExposure)));
     }
 
-    // Regressão do teste instável: com 30 s (padrão do Npgsql) uma rodada lenta estourava a leitura.
+    // Regression of the flaky test: with 30 s (the Npgsql default) a slow round timed out the read.
     [Fact]
     public async Task Order_database_connections_of_the_tests_wait_120_seconds_per_command()
     {
@@ -82,7 +82,7 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
         Assert.Equal(120, orderDatabaseConnection.CommandTimeout);
     }
 
-    // Espera até todas as transações estarem paradas no lock da linha, ou 30 s.
+    // Waits until all transactions are stopped on the row lock, or 30 s.
     private async Task<long> WaitForTransactionsWaitingOnExposureRowAsync(int expectedWaitingTransactions)
     {
         await using var lockWaitMonitorConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();

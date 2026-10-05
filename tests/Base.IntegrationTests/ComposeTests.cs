@@ -10,7 +10,7 @@ namespace Base.IntegrationTests;
 public sealed class ComposeTests(ComposeFixture composeUnderTest)
 {
     [Fact]
-    public async Task Os_dois_apps_rodam_em_containers_separados_com_os_papeis_fix_do_contrato()
+    public async Task Both_apps_run_in_separate_containers_with_the_fix_roles_of_the_contract()
     {
         var orderGeneratorContainer = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
         var orderAccumulatorContainer = await composeUnderTest.InspectServiceContainerAsync("orderaccumulator");
@@ -34,24 +34,24 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     [Fact]
-    public async Task So_a_porta_da_pagina_fica_aberta_no_host_e_os_apps_nao_rodam_como_root()
+    public async Task Only_the_page_port_is_open_on_the_host_and_the_apps_do_not_run_as_root()
     {
         var orderGeneratorContainer = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
         var orderAccumulatorContainer = await composeUnderTest.InspectServiceContainerAsync("orderaccumulator");
         var postgresContainer = await composeUnderTest.InspectServiceContainerAsync("postgres");
 
-        // O acceptor FIX só confere SenderCompID/TargetCompID: a 9876 não pode sair da rede do compose.
+        // The FIX acceptor only checks SenderCompID/TargetCompID: port 9876 must not leave the compose network.
         Assert.Equal(new[] { $"8080/tcp->127.0.0.1:{ComposeFixture.OrderGeneratorHostPort}" }, orderGeneratorContainer.PublishedPortBindings);
         Assert.Empty(orderAccumulatorContainer.PublishedPortBindings);
         Assert.Empty(postgresContainer.PublishedPortBindings);
 
-        // 1654 é o usuário "app" que a imagem aspnet do .NET já traz (APP_UID).
+        // 1654 is the "app" user that the .NET aspnet image already ships (APP_UID).
         Assert.Equal("1654", await composeUnderTest.ReadContainerProcessUserIdAsync("ordergenerator"));
         Assert.Equal("1654", await composeUnderTest.ReadContainerProcessUserIdAsync("orderaccumulator"));
     }
 
     [Fact]
-    public async Task OrderAccumulator_so_sobe_depois_do_postgres_ficar_saudavel()
+    public async Task OrderAccumulator_only_starts_after_postgres_is_healthy()
     {
         using var resolvedComposeConfig = await composeUnderTest.ReadResolvedComposeConfigAsync();
         var composeServices = resolvedComposeConfig.RootElement.GetProperty("services");
@@ -65,7 +65,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     [Fact]
-    public async Task Ordem_aceita_sai_como_35_D_e_volta_como_35_8_com_o_mesmo_ClOrdID()
+    public async Task Accepted_order_goes_out_as_35_D_and_comes_back_as_35_8_with_the_same_ClOrdID()
     {
         var (acceptedOrder, acceptedOrderMessage) = await PostOrderReadingTheMessageAsync("PETR4", "buy", 100, 10.50m);
 
@@ -86,11 +86,11 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(acceptedOrder.GetProperty("orderId").GetString(), executionReport.ReadFixTagValue(37));
     }
 
-    // CA-O4 da onda 3: o tracer do Datadog vem nas duas imagens, com a amostragem padrão em 1.0.
+    // CA-O4 of wave 3: the Datadog tracer comes in both images, with the default sampling at 1.0.
     [Theory]
     [InlineData("ordergenerator")]
     [InlineData("orderaccumulator")]
-    public async Task A_imagem_carrega_o_tracer_do_Datadog_com_amostragem_padrao_1(string serviceName)
+    public async Task Image_loads_the_Datadog_tracer_with_default_sampling_1(string serviceName)
     {
         Assert.Equal("1", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "CORECLR_ENABLE_PROFILING"));
         Assert.Equal("{846F5F1C-F9AE-4B07-969E-05C26BC060D8}", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "CORECLR_PROFILER"));
@@ -160,9 +160,9 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     [Fact]
-    public async Task Ordem_que_passa_do_limite_volta_rejeitada_com_150_8_e_o_texto_do_contrato()
+    public async Task Order_that_passes_the_limit_comes_back_rejected_with_150_8_and_the_contract_text()
     {
-        // Cada venda vale 99.998.000,01; a segunda passaria de 100 milhões no mesmo símbolo.
+        // Each sale is worth 99,998,000.01; the second would pass 100 million on the same symbol.
         var firstVIIA4Sale = await PostOrderAsync("VIIA4", "sell", 99999, 999.99m);
         Assert.Equal("accepted", firstVIIA4Sale.GetProperty("status").GetString());
 
@@ -226,7 +226,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     [Fact]
-    public async Task Pagina_e_exposicao_respondem_pelo_OrderGenerator()
+    public async Task Page_and_exposures_answer_through_the_OrderGenerator()
     {
         using var pageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/");
         Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
@@ -246,13 +246,13 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     [Fact]
-    public async Task Depois_de_recriar_o_OrderAccumulator_o_OrderGenerator_reloga_sozinho_e_aceita_a_proxima_ordem()
+    public async Task After_the_OrderAccumulator_is_recreated_the_OrderGenerator_logs_on_again_by_itself_and_accepts_the_next_order()
     {
         var orderGeneratorContainerBeforeRecreate = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
         var orderAccumulatorContainerBeforeRecreate = await composeUnderTest.InspectServiceContainerAsync("orderaccumulator");
         var logonsBeforeRecreate = await composeUnderTest.CountFixLogonsFromAcceptorAsync();
 
-        // Só este teste usa VALE3: a exposição dele parte de zero no compose de teste.
+        // Only this test uses VALE3: its exposure starts from zero in the test compose.
         var orderBeforeRecreate = await PostOrderAsync("VALE3", "buy", 1, 1.00m);
         Assert.Equal("accepted", orderBeforeRecreate.GetProperty("status").GetString());
         Assert.Equal(1.00m, await ReadSymbolExposureAsync("VALE3"));
@@ -271,7 +271,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(orderGeneratorContainerBeforeRecreate.ContainerId, orderGeneratorContainerAfterRecreate.ContainerId);
         Assert.Equal(orderGeneratorContainerBeforeRecreate.ContainerStartedAt, orderGeneratorContainerAfterRecreate.ContainerStartedAt);
 
-        // O OrderAccumulator novo não guarda nada em memória: lê do banco a exposição de antes.
+        // The new OrderAccumulator keeps nothing in memory: it reads the previous exposure from the database.
         Assert.Equal(1.00m, await ReadSymbolExposureAsync("VALE3"));
 
         var orderAfterRelogon = await PostOrderAsync("VALE3", "buy", 10, 50.00m);
@@ -283,7 +283,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     [Fact]
-    public async Task Os_dados_do_postgres_ficam_num_volume_nomeado()
+    public async Task Postgres_data_lives_in_a_named_volume()
     {
         var postgresContainer = await composeUnderTest.InspectServiceContainerAsync("postgres");
 
@@ -444,7 +444,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
                 return;
             await Task.Delay(500);
         }
-        throw new TimeoutException("a página de ordens não voltou a responder 200 em 1 minuto depois de religar o Postgres");
+        throw new TimeoutException("the orders page did not answer 200 again within 1 minute after the Postgres came back");
     }
 
     private async Task<decimal> ReadSymbolExposureAsync(string symbol)
@@ -506,7 +506,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         (await ReadServiceJsonLogLinesAsync(serviceName)).Where(serviceLogLine => serviceLogLine.TraceId == clOrdId).ToList();
 }
 
-// Roda sem Docker: o limite é constante do OrderAccumulator e não pode vazar para configuração (CA-21).
+// Runs without Docker: the limit is a constant of the OrderAccumulator and must not leak into configuration (CA-21).
 public sealed class ExposureLimitOutsideConfigTests
 {
     private static readonly Regex ExposureLimitPattern = new(@"100[.,_ ]?000[.,_ ]?000|\b1(\.0+)?e\+?0*8\b", RegexOptions.IgnoreCase);
@@ -522,7 +522,7 @@ public sealed class ExposureLimitOutsideConfigTests
     [InlineData("1E+08")]
     [InlineData("1.0e8")]
     [InlineData("Exposure__Limit: \"1.0E8\"")]
-    public void A_guarda_acha_o_limite_em_cada_grafia(string limitSpelling) =>
+    public void Guard_finds_the_limit_in_every_spelling(string limitSpelling) =>
         Assert.Matches(ExposureLimitPattern, limitSpelling);
 
     [Theory]
@@ -530,11 +530,11 @@ public sealed class ExposureLimitOutsideConfigTests
     [InlineData("10000000")]
     [InlineData("1.5e8")]
     [InlineData("Port=5432")]
-    public void A_guarda_nao_confunde_outros_numeros_com_o_limite(string numberThatIsNotTheLimit) =>
+    public void Guard_does_not_mistake_other_numbers_for_the_limit(string numberThatIsNotTheLimit) =>
         Assert.DoesNotMatch(ExposureLimitPattern, numberThatIsNotTheLimit);
 
     [Fact]
-    public void Limite_de_exposicao_nao_aparece_no_compose_nos_Dockerfiles_nem_em_appsettings()
+    public void Exposure_limit_does_not_appear_in_the_compose_the_Dockerfiles_or_appsettings()
     {
         var repoRoot = RepoPaths.FindRepoRoot();
         var packagingFiles = new[] { "docker-compose.yml", "src/app-base-order-generator-webapi-ecs/Dockerfile", "src/app-base-order-accumulator-webapi-ecs/Dockerfile" }
@@ -544,7 +544,7 @@ public sealed class ExposureLimitOutsideConfigTests
             .Where(appSettingsPath => !appSettingsPath.Split(Path.DirectorySeparatorChar).Any(pathSegment => pathSegment is "bin" or "obj"))
             .ToList();
 
-        Assert.All(packagingFiles, packagingPath => Assert.True(File.Exists(packagingPath), $"{packagingPath} não existe"));
+        Assert.All(packagingFiles, packagingPath => Assert.True(File.Exists(packagingPath), $"{packagingPath} does not exist"));
         Assert.Contains(appSettingsFiles, appSettingsPath => appSettingsPath.Contains("app-base-order-accumulator-webapi-ecs"));
 
         var configFilesWithLimit = packagingFiles.Concat(appSettingsFiles)
@@ -555,11 +555,11 @@ public sealed class ExposureLimitOutsideConfigTests
     }
 }
 
-// Roda sem Docker. O .git fica no contexto de propósito: o build lê o commit dele.
+// Runs without Docker. The .git stays in the context on purpose: the build reads its commit.
 public sealed class DockerBuildContextTests
 {
     [Fact]
-    public void O_dockerignore_tira_so_saidas_de_build_e_arquivos_locais()
+    public void Dockerignore_removes_only_build_outputs_and_local_files()
     {
         var dockerignorePatterns = File.ReadAllLines(Path.Combine(RepoPaths.FindRepoRoot(), ".dockerignore"))
             .Select(dockerignoreLine => dockerignoreLine.Trim())
@@ -579,8 +579,8 @@ public sealed class DockerBuildContextTests
     }
 }
 
-// Achado do aceite: um clone de um commit novo, subido com o mesmo nome de projeto, reaproveitava
-// a imagem do commit anterior e o /version mentia. O compose agora reconstrói sempre no up.
+// Acceptance finding: a clone of a new commit, started with the same project name, reused
+// the image of the previous commit and /version lied. The compose now always rebuilds on up.
 [Collection(ComposeCollection.CollectionName)]
 [Trait("Category", "Integration")]
 public sealed class CleanCloneImageCommitTests
@@ -590,12 +590,12 @@ public sealed class CleanCloneImageCommitTests
     private static readonly TimeSpan CloneComposeUpTimeout = TimeSpan.FromMinutes(15);
 
     [Fact]
-    public async Task Docker_compose_up_de_um_clone_serve_o_commit_atual_mesmo_com_a_imagem_do_commit_anterior()
+    public async Task Docker_compose_up_of_a_clone_serves_the_current_commit_even_with_the_image_of_the_previous_commit()
     {
         var repoRoot = RepoPaths.FindRepoRoot();
         var cloneDirectory = Path.Combine(Path.GetTempPath(), $"flowa-it-commit-{Guid.NewGuid():N}");
         var cloneComposeFile = Path.Combine(cloneDirectory, "docker-compose.yml");
-        // Sem SOURCE_REVISION_ID: o clone tem .git de verdade, como o do avaliador.
+        // Without SOURCE_REVISION_ID: the clone has a real .git, like the evaluator's.
         var cloneEnvironmentVariables = new Dictionary<string, string?>
         {
             ["FLOWA_HTTP_PORT"] = CloneOrderGeneratorHostPort.ToString(), ["SOURCE_REVISION_ID"] = null,
@@ -607,11 +607,11 @@ public sealed class CleanCloneImageCommitTests
         Task<string> RunCloneComposeCommandAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
             CaptureCloneExternalCommandOutputAsync(commandTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
 
-        // O GET /version sai de dentro de cada container, pelo /dev/tcp do bash: a imagem aspnet não tem
-        // curl e a 8081 do OrderAccumulator nem sai da rede do compose.
+        // The GET /version leaves from inside each container, through the /dev/tcp of bash: the aspnet image has no
+        // curl and port 8081 of the OrderAccumulator does not even leave the compose network.
         async Task<string> ReadCloneServiceCommitAsync(string serviceName, int containerHttpPort)
         {
-            var lastVersionFailure = "nenhuma resposta";
+            var lastVersionFailure = "no answer";
             var versionDeadline = DateTime.UtcNow.AddMinutes(2);
             while (DateTime.UtcNow < versionDeadline)
             {
@@ -633,7 +633,7 @@ public sealed class CleanCloneImageCommitTests
                 }
                 await Task.Delay(500);
             }
-            throw new TimeoutException($"o /version de {serviceName} não respondeu em 2 minutos; última falha: {lastVersionFailure}");
+            throw new TimeoutException($"the /version of {serviceName} did not answer within 2 minutes; last failure: {lastVersionFailure}");
         }
 
         var repoHeadCommit = (await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
@@ -648,7 +648,7 @@ public sealed class CleanCloneImageCommitTests
             Assert.Equal(repoHeadCommit, await ReadCloneServiceCommitAsync("orderaccumulator", 8081));
             await RunCloneComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v");
 
-            await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "commit novo do teste");
+            await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "new test commit");
             var newCloneCommit = (await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "rev-parse", "HEAD")).Trim();
             Assert.NotEqual(repoHeadCommit, newCloneCommit);
 
@@ -663,7 +663,7 @@ public sealed class CleanCloneImageCommitTests
         }
         finally
         {
-            // Todo passo da limpeza roda; com o teste já reprovado, falha de limpeza só vai para o log.
+            // Every cleanup step runs; with the test already failed, a cleanup failure only goes to the log.
             Func<Task>[] cloneCleanupSteps =
             [
                 async () => { if (File.Exists(cloneComposeFile)) await RunCloneComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v", "--rmi", "local"); },
@@ -675,13 +675,13 @@ public sealed class CleanCloneImageCommitTests
                 try { await cloneCleanupStep(); }
                 catch (Exception cloneCleanupFailure) { cloneCleanupFailures.Add(cloneCleanupFailure); }
             }
-            if (cloneCleanupFailures.Count > 0 && !cloneTestFailed) throw new AggregateException("a limpeza do clone falhou", cloneCleanupFailures);
+            if (cloneCleanupFailures.Count > 0 && !cloneTestFailed) throw new AggregateException("the clone cleanup failed", cloneCleanupFailures);
             foreach (var cloneCleanupFailure in cloneCleanupFailures)
-                Console.Error.WriteLine($"limpeza do clone falhou depois da reprovação: {cloneCleanupFailure.Message}");
+                Console.Error.WriteLine($"clone cleanup failed after the test failure: {cloneCleanupFailure.Message}");
         }
     }
 
-    // Os objetos do git ficam só leitura no Windows; sem limpar o atributo, o Delete falha.
+    // Git objects are read-only on Windows; without clearing the attribute, Delete fails.
     private static void DeleteCloneDirectory(string cloneDirectory)
     {
         if (!Directory.Exists(cloneDirectory)) return;

@@ -5,15 +5,15 @@ using Base.OrderAccumulator.Domain.Orders;
 
 namespace Base.OrderAccumulator.Application.Exposures;
 
-// A exposição de cada símbolo, mantida no processo para o gauge não consultar o banco a cada envio.
-// Vale porque o OrderAccumulator roda numa task só (infra/servicos.tf, desired_count = 1).
+// The exposure of each symbol, kept in the process so the gauge does not query the database on every send.
+// This holds because the OrderAccumulator runs as a single task (infra/servicos.tf, desired_count = 1).
 public sealed class SymbolExposureMemoryService
 {
     private readonly ConcurrentDictionary<string, decimal> exposureBySymbol = new();
 
-    // Ordem e "Deletar tudo" não se intercalam: senão uma ordem gravada antes do apagar somaria na memória
-    // depois do zero, e o gauge mostraria um valor que o banco não tem. Ordens entram juntas; o apagar fecha
-    // a porta para ordens novas, espera as que estão dentro saírem e entra sozinho.
+    // An order and "Delete all" never interleave: otherwise an order stored before the delete would add to memory
+    // after the zero, and the gauge would show a value the database does not have. Orders go in together; the delete
+    // closes the door to new orders, waits for the ones inside to leave and goes in alone.
     private readonly SemaphoreSlim deleteAllOrdersDoor = new(1, 1);
     private readonly SemaphoreSlim noOrderInProgress = new(1, 1);
     private readonly SemaphoreSlim ordersInProgressCountLock = new(1, 1);
@@ -42,7 +42,7 @@ public sealed class SymbolExposureMemoryService
         }
     }
 
-    // A memória só zera se o banco confirmou o apagar; falha no banco deixa as duas como estavam.
+    // Memory is zeroed only if the database confirmed the delete; a database failure leaves both as they were.
     public async Task DeleteAllOrdersAndZeroExposuresAsync(Func<Task> deleteAllStoredOrdersAndZeroExposures, CancellationToken cancellationToken)
     {
         await deleteAllOrdersDoor.WaitAsync(cancellationToken);
@@ -72,7 +72,7 @@ public sealed class SymbolExposureMemoryService
             exposureBySymbol[storedSymbolExposure.Symbol] = storedSymbolExposure.Exposure;
     }
 
-    // Só ordem aceita chega aqui, então símbolo, lado e quantidade já passaram pela validação.
+    // Only an accepted order gets here, so symbol, side and quantity already passed validation.
     public void ApplyAcceptedOrder(DecideIncomingOrderOutput acceptedOrder)
     {
         var acceptedOrderSide = acceptedOrder.Side == OrderSideCodes.BuyOrderSideFixCode ? OrderSide.Buy : OrderSide.Sell;

@@ -11,7 +11,7 @@ public sealed class DecideIncomingOrderUseCase(
     IOrderRepository orderRepository,
     OrderDecisionDomainService orderDecisionDomainService,
     SymbolExposureMemoryService symbolExposureMemory,
-    IOrderMetrics orderMetrics)
+    IOrderMetricsPort orderMetrics)
 {
     public async Task<DecideIncomingOrderOutput> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
     {
@@ -62,7 +62,7 @@ public sealed class DecideIncomingOrderUseCase(
         }
 
         var orderStoredInParallel = await orderRepository.FindOrderByClOrdIdAsync(incomingOrder.ClOrdId, cancellationToken)
-            ?? throw new InvalidOperationException($"A ordem {incomingOrder.ClOrdId} colidiu na chave, mas não foi encontrada.");
+            ?? throw new InvalidOperationException($"The order {incomingOrder.ClOrdId} collided on the key, but was not found.");
         return DecideIncomingOrderOutput.FromAnsweredOrder(orderStoredInParallel, isRepeat: true);
     }
 }
