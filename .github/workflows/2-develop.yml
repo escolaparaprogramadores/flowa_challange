@@ -277,17 +277,29 @@ jobs:
           grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan sem linha de resumo"
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
-          # Plan guard: only the task definitions may be destroyed or replaced (every image deploy replaces
-          # them); anything else stops the run here, before apply. The plan JSON stays on the runner.
+          # Plan guard: only the two task definitions may be destroyed or replaced (every image deploy replaces
+          # them), and only they and the log collector's task roles may be created; anything else stops the run
+          # here, before apply. The plan JSON stays on the runner.
           terraform show -json tfplan > "$RUNNER_TEMP/plano-do-deploy.json"
           jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
             | "plano: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/plano-do-deploy.json"
-          recursos_destruidos_fora_das_task_definitions=$(jq -r '.resource_changes[]
-            | select(.change.actions | index("delete")) | select(.type != "aws_ecs_task_definition") | .address' \
-            "$RUNNER_TEMP/plano-do-deploy.json")
-          if [ -n "$recursos_destruidos_fora_das_task_definitions" ]; then
-            echo "o plan destrói ou troca recurso além das task definitions; o apply não roda:" >&2
-            echo "$recursos_destruidos_fora_das_task_definitions" >&2
+          task_definitions_que_podem_ser_trocadas='["aws_ecs_task_definition.tarefa_do_order_generator",
+            "aws_ecs_task_definition.tarefa_do_order_accumulator"]'
+          recursos_que_podem_ser_criados='["aws_ecs_task_definition.tarefa_do_order_generator",
+            "aws_ecs_task_definition.tarefa_do_order_accumulator",
+            "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"generator\"]",
+            "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"accumulator\"]",
+            "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"generator\"]",
+            "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"accumulator\"]"]'
+          mudancas_fora_do_permitido=$(jq -r \
+            --argjson trocaveis "$task_definitions_que_podem_ser_trocadas" --argjson criaveis "$recursos_que_podem_ser_criados" \
+            '.resource_changes[]
+            | select(((.change.actions | index("delete")) and (.address | IN($trocaveis[]) | not))
+              or ((.change.actions | index("create")) and (.address | IN($criaveis[]) | not)))
+            | "\(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/plano-do-deploy.json")
+          if [ -n "$mudancas_fora_do_permitido" ]; then
+            echo "o plan destrói, troca ou cria recurso fora do permitido; o apply não roda:" >&2
+            echo "$mudancas_fora_do_permitido" >&2
             exit 1
           fi
 
