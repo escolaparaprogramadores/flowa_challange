@@ -1,6 +1,29 @@
-# Flowa — envio de ordens com FIX 4.4
+<div align="center">
 
-Duas aplicações em C# que conversam por FIX: o OrderGenerator manda ordens de compra e venda montadas
+<a href="#readme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
+    <img src=".github/assets/logo-light.svg" alt="Base investimentos" width="449">
+  </picture>
+</a>
+
+<img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?style=for-the-badge&logo=dotnet&logoColor=white">
+<img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black">
+<img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=for-the-badge&logo=postgresql&logoColor=white">
+<img alt="FIX 4.4" src="https://img.shields.io/badge/FIX-4.4-0F172A?style=for-the-badge">
+
+<p>
+  <a href="#como-rodar-com-docker"><b>Como rodar</b></a> ·
+  <a href="#decisões"><b>Decisões</b></a> ·
+  <a href="#na-nuvem-aws"><b>Na nuvem</b></a> ·
+  <a href="#observabilidade"><b>Observabilidade</b></a>
+</p>
+
+</div>
+
+# Base investimentos
+
+Envio de ordens com FIX 4.4. Duas aplicações em C# que conversam por FIX: o OrderGenerator manda ordens de compra e venda montadas
 numa tela, e o OrderAccumulator aceita ou rejeita cada uma conforme o limite de exposição por ativo.
 
 Está no ar em https://h2asgc2sce.execute-api.us-east-1.amazonaws.com (veja [Na nuvem](#na-nuvem-aws)).
@@ -118,9 +141,18 @@ a concorrência do jeito acima. As tabelas são criadas na subida, com `IF NOT E
 vezes, a segunda não mexe na exposição: o OrderAccumulator devolve o mesmo `ExecutionReport` da
 primeira vez, com o mesmo resultado e o mesmo motivo.
 
-**Uma regra de campo só.** Símbolo, lado, quantidade e preço são validados pelo mesmo código
-(`src/Flowa.Shared`) nas duas pontas: o OrderGenerator recusa antes de mandar, e o OrderAccumulator
-confere de novo o que chega pelo FIX.
+**Ordem aceita entra inteira na exposição.** O enunciado fala em somar a "quantidade executada". Aqui
+nenhuma ordem é executada: o OrderAccumulator só aceita ou rejeita. A ordem aceita volta com
+`ExecType = New` (150=0), `CumQty` 0 e `LeavesQty` igual à quantidade, e mesmo assim a quantidade
+inteira entra na exposição no momento do aceite. Se a exposição esperasse uma execução, ela ficaria
+sempre em zero e o limite nunca barraria nada.
+
+**A regra de campo mora só no OrderAccumulator.** Símbolo, lado, quantidade e preço são validados pelo
+OrderAccumulator, no que chega pelo FIX. Campo inválido volta como ordem rejeitada, com o motivo em
+português, igual a uma ordem rejeitada pelo limite. O que nem cabe numa ordem FIX (campo faltando, tipo
+errado, lado desconhecido) o OrderGenerator responde com erro 400, sem mandar nada. A tela mantém um
+aviso local que aparece antes do envio, só para avisar cedo: ele não é a proteção, e o OrderAccumulator
+valida mesmo que a tela seja burlada.
 
 ## Limitações conhecidas
 
