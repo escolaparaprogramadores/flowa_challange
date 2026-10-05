@@ -124,7 +124,7 @@ function oppositeSideOf(side) {
   return side === 'buy' ? 'sell' : 'buy';
 }
 
-// Returns the order result the API put in data, or null fields when the answer is not 200.
+// The order status comes in data; the rejection reason (tag 58) is the envelope message.
 function postOrder(order) {
   const orderResponse = http.post(
     `${API_URL}/api/orders`,
@@ -135,7 +135,7 @@ function postOrder(order) {
   orderLatency.add(orderResponse.timings.duration);
   check(orderResponse, { 'order answered with 200': (answeredOrder) => answeredOrder.status === 200 });
   return orderResponse.status === 200
-    ? { status: orderResponse.json('data.status'), message: orderResponse.json('data.message') }
+    ? { status: orderResponse.json('data.status'), message: orderResponse.json('message') }
     : { status: null, message: null };
 }
 
