@@ -3,13 +3,13 @@ import { ShieldIcon } from './Icons';
 import {
   MAX_QUANTITY_EXCLUSIVE,
   ORDER_TICKET_SYMBOLS,
-  formatBrazilianReais,
   parseTypedWholeQuantity,
   validateOrderPrice,
   validateOrderQuantity,
   type OrderSide,
   type OrderTicketSymbol,
 } from '../lib/order-validation/orderValidation';
+import { formatBrazilianReais } from '../lib/number-format/brazilianNumberFormat';
 import type { OrderToSend } from '../services/ordersService';
 
 type OrderTicketProps = {

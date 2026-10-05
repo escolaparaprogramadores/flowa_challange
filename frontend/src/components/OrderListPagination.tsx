@@ -1,6 +1,6 @@
 import '../styles/pagination.css';
 import { countOrderListPages, listVisiblePages, ORDERS_PER_PAGE, PAGINATION_ELLIPSIS } from '../lib/pagination/visiblePages';
-import { formatOrderQuantity } from '../lib/order-validation/orderValidation';
+import { formatBrazilianWholeNumber } from '../lib/number-format/brazilianNumberFormat';
 
 type OrderListPaginationProps = {
   currentPage: number;
@@ -23,11 +23,11 @@ export function OrderListPagination({ currentPage, totalOrders, ordersOnPage, pa
     <div className="pagination" role="group" aria-label="Páginas da lista de ordens" aria-busy={isLoadingRequestedPage}>
       <p className="pagination-summary numeric" data-testid="resumo-da-paginacao">
         {isLoadingRequestedPage ? (
-          <>Carregando a página {formatOrderQuantity(pageBeingLoaded)}…</>
+          <>Carregando a página {formatBrazilianWholeNumber(pageBeingLoaded)}…</>
         ) : (
           <>
-            Mostrando {formatOrderQuantity(firstOrderOnPage)}–{formatOrderQuantity(lastOrderOnPage)} de{' '}
-            {formatOrderQuantity(totalOrders)} ordens
+            Mostrando {formatBrazilianWholeNumber(firstOrderOnPage)}–{formatBrazilianWholeNumber(lastOrderOnPage)} de{' '}
+            {formatBrazilianWholeNumber(totalOrders)} ordens
           </>
         )}
       </p>

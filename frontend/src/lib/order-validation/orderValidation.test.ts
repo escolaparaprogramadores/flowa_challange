@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBrazilianReais, formatOrderQuantity, parseTypedWholeQuantity, validateOrderPrice, validateOrderQuantity } from './orderValidation';
+import { parseTypedWholeQuantity, validateOrderPrice, validateOrderQuantity } from './orderValidation';
 
 describe('validateOrderQuantity', () => {
   it.each([
@@ -47,16 +47,6 @@ describe('validateOrderPrice', () => {
     ['abc', 'O preço deve ser um número.'],
   ])('refuses %s', (typedPrice, expectedMessage) => {
     expect(validateOrderPrice(typedPrice)).toEqual({ errorMessage: expectedMessage });
-  });
-});
-
-describe('formatting for the screen', () => {
-  it('formats reais with decimal comma and thousands dot', () => {
-    expect(formatBrazilianReais(10_000)).toBe('R$ 10.000,00');
-  });
-
-  it('formats quantity with thousands dot', () => {
-    expect(formatOrderQuantity(99_999)).toBe('99.999');
   });
 });
 

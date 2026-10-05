@@ -70,14 +70,3 @@ export function validateOrderPrice(typedPrice: string): PriceValidation {
   if (priceInCents >= MAX_PRICE_EXCLUSIVE_IN_CENTS) return { errorMessage: 'O preço deve ser menor que 1.000,00.' };
   return { acceptedPriceInCents: priceInCents };
 }
-
-const brazilianReaisFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const orderQuantityFormatter = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
-
-export function formatBrazilianReais(amountInReais: number): string {
-  return brazilianReaisFormatter.format(amountInReais);
-}
-
-export function formatOrderQuantity(shareQuantity: number): string {
-  return orderQuantityFormatter.format(shareQuantity);
-}

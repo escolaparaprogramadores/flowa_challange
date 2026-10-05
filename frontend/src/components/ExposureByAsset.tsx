@@ -1,7 +1,7 @@
 import { RisingChartIcon } from './Icons';
 import type { ExposuresState } from '../hooks/useOrdersAndExposures';
 import { calculateLimitUsage, EXPOSURE_LIMIT_PER_ASSET_IN_REAIS } from '../lib/limit-usage/limitUsage';
-import { formatBrazilianReais } from '../lib/order-validation/orderValidation';
+import { formatBrazilianReais } from '../lib/number-format/brazilianNumberFormat';
 import type { SymbolExposure } from '../services/ordersService';
 
 // The section keeps the "panel" class because the grid tests check the cards through it; the panel

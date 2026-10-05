@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { CREATE_ORDER_ROUTE } from '../src/services/ordersService';
 
 // Page shell breakpoints (CA-7 and CA-26): one column up to 860 px and two from 861 px.
 // The boundary is measured on both sides; 375, 1440 and 1920 are the round's proof widths.
@@ -247,4 +248,32 @@ test('RNF-02: the theme fonts Sora and Manrope load and numbers use tabular figu
   await expect(page.getByRole('heading', { name: 'Boleta de ordens' })).toHaveCSS('font-family', /^Sora/);
   await expect(page.locator('body')).toHaveCSS('font-family', /^Manrope/);
   await expect(page.getByTestId('total-estimado')).toHaveCSS('font-variant-numeric', 'tabular-nums');
+});
+
+test('RF-08: at 375 px, while "Enviando…" shows, "Deletar tudo" stays inside the Compra/Venda card and the page does not scroll sideways', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.goto('/');
+  let releaseHeldOrderCreation!: () => void;
+  const heldOrderCreationReleased = new Promise<void>((releaseHeldRequest) => { releaseHeldOrderCreation = releaseHeldRequest; });
+  await page.route('**' + CREATE_ORDER_ROUTE, async (heldOrderCreationRoute) => {
+    await heldOrderCreationReleased;
+    await heldOrderCreationRoute.continue();
+  });
+  await page.getByLabel(/^Quantidade de/).fill('1');
+  await page.getByLabel('Preço por ação (R$)').fill('10,00');
+  await page.getByRole('button', { name: 'Enviar ordem de compra' }).click();
+
+  const orderListCard = page.locator('section.order-list');
+  await expect(orderListCard.getByTestId('selo-enviando')).toBeVisible();
+  const deleteAllButton = orderListCard.getByRole('button', { name: 'Deletar tudo' });
+  await expect(deleteAllButton).toBeVisible();
+  const pageWidths = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+  expect(pageWidths.scrollWidth).toBe(pageWidths.clientWidth);
+  const orderListCardBox = (await orderListCard.boundingBox())!;
+  const deleteAllButtonBox = (await deleteAllButton.boundingBox())!;
+  expect(deleteAllButtonBox.x).toBeGreaterThanOrEqual(orderListCardBox.x);
+  expect(deleteAllButtonBox.x + deleteAllButtonBox.width).toBeLessThanOrEqual(orderListCardBox.x + orderListCardBox.width);
+
+  releaseHeldOrderCreation();
+  await expect(orderListCard.getByTestId('selo-enviando')).toHaveCount(0);
 });

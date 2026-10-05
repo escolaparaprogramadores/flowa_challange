@@ -9,7 +9,7 @@
 }
 
 .order-list { grid-area: order-list; container-type: inline-size; }
-.order-list-header { display: flex; align-items: center; gap: var(--space-3); min-height: var(--height-tab); }
+.order-list-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); min-height: var(--height-tab); }
 .order-list-header .card-title { margin-right: auto; }
 .order-list-notice { margin: 0; font-size: var(--font-size-body-small); line-height: 1.6; color: var(--color-text-muted); }
 .order-list-notice-error { color: var(--color-danger-text); font-weight: 700; }
