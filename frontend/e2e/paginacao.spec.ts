@@ -63,7 +63,7 @@ function cartaoCompraVenda(paginaDaBoleta: Page) {
 }
 
 function paginacaoDaLista(paginaDaBoleta: Page) {
-  return cartaoCompraVenda(paginaDaBoleta).getByRole('navigation', { name: NOME_DA_PAGINACAO });
+  return cartaoCompraVenda(paginaDaBoleta).getByRole('group', { name: NOME_DA_PAGINACAO });
 }
 
 function botaoDaPagina(paginaDaBoleta: Page, numeroDaPagina: number) {
@@ -152,6 +152,11 @@ test.beforeEach(async ({ page }) => {
   await apagarTodasAsOrdensNoServidor(page);
 });
 
+// As specs seguintes contam com o banco sem as dezenas de ordens criadas aqui.
+test.afterEach(async ({ page }) => {
+  await apagarTodasAsOrdensNoServidor(page);
+});
+
 test('ASSUMI-01: com 10 ordens a lista mostra as 10 e não aparece paginação', async ({ page }) => {
   await criarOrdensPelaApi(page, 10);
   await abrirTelaEEsperarPrimeiraPagina(page);
@@ -164,6 +169,8 @@ test('CA-13: com 23 ordens a paginação vai à página 2, à 3 e volta à 1 mos
   await abrirTelaEEsperarPrimeiraPagina(page);
 
   await expect(paginacaoDaLista(page)).toBeVisible();
+  // A paginação é um grupo do cartão, não um menu: a regra "sem menu" da página continua valendo.
+  await expect(page.getByRole('navigation')).toHaveCount(0);
   await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 1–10 de 23 ordens');
   await conferirFileiraDaPaginacao(page, ['‹', '1', '2', '3', '›']);
   await conferirPaginaAtual(page, 1);

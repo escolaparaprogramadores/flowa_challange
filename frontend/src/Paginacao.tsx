@@ -18,7 +18,7 @@ export function Paginacao({ paginaAtual, totalDeOrdens, quantidadeDeOrdensNaPagi
   const itensDaPaginacao = listarPaginasVisiveis(paginaAtual, totalDePaginas);
 
   return (
-    <nav className="paginacao" aria-label="Páginas da lista de ordens">
+    <div className="paginacao" role="group" aria-label="Páginas da lista de ordens">
       <p className="paginacao-resumo num" data-testid="resumo-da-paginacao">
         Mostrando {formatarQuantidade(primeiraOrdemDaPagina)}–{formatarQuantidade(ultimaOrdemDaPagina)} de{' '}
         {formatarQuantidade(totalDeOrdens)} ordens
@@ -66,6 +66,6 @@ export function Paginacao({ paginaAtual, totalDeOrdens, quantidadeDeOrdensNaPagi
           </button>
         </li>
       </ul>
-    </nav>
+    </div>
   );
 }
