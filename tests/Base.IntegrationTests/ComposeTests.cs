@@ -262,6 +262,9 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.NotEqual(orderAccumulatorContainerBeforeRecreate.ContainerId, orderAccumulatorContainerAfterRecreate.ContainerId);
 
         await composeUnderTest.WaitForNewFixLogonAsync(logonsBeforeRecreate);
+        // The recreate is destructive for the tests that run after this one: they only start once the new container
+        // logged the logon and answers HTTP. The accepted order at the end proves the FIX session is up when it ends.
+        await composeUnderTest.WaitForRecreatedOrderAccumulatorReadyAsync();
 
         var orderGeneratorContainerAfterRecreate = await composeUnderTest.InspectServiceContainerAsync("ordergenerator");
         Assert.Equal(orderGeneratorContainerBeforeRecreate.ContainerId, orderGeneratorContainerAfterRecreate.ContainerId);

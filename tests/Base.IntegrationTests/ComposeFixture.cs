@@ -127,6 +127,50 @@ public sealed class ComposeFixture : IAsyncLifetime
         Assert.Fail($"o OrderGenerator não recebeu logon novo do OrderAccumulator em {AppStartTimeout}");
     }
 
+    // The OrderAccumulator has no healthcheck, so `up --force-recreate --wait` only waits for the new container to run.
+    // Ready means the new container logged the OrderGenerator logon and its HTTP answers through the OrderGenerator.
+    // The bound is the same as the first start of the compose (AppStartTimeout). Nothing is retried once ready: a
+    // container that restarted fails here, with the logs of both services, instead of breaking the next test.
+    public async Task WaitForRecreatedOrderAccumulatorReadyAsync()
+    {
+        var orderAccumulatorReadyDeadline = DateTime.UtcNow + AppStartTimeout;
+        while (DateTime.UtcNow < orderAccumulatorReadyDeadline)
+        {
+            if (await IsOrderGeneratorLogonLoggedByOrderAccumulatorAsync() && await IsOrderAccumulatorAnsweringThroughOrderGeneratorAsync())
+            {
+                var orderAccumulatorRestartCount = await ReadOrderAccumulatorRestartCountAsync();
+                if (orderAccumulatorRestartCount != 0)
+                    Assert.Fail(await DescribeOrderAccumulatorStateAsync($"o OrderAccumulator recriado reiniciou {orderAccumulatorRestartCount} vez(es)"));
+                return;
+            }
+            await Task.Delay(500);
+        }
+        Assert.Fail(await DescribeOrderAccumulatorStateAsync($"o OrderAccumulator recriado não ficou pronto em {AppStartTimeout}"));
+    }
+
+    private async Task<bool> IsOrderGeneratorLogonLoggedByOrderAccumulatorAsync() =>
+        FixLog.ParseFixMessages(await ReadServiceStdoutAsync("orderaccumulator"))
+            .Any(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERGENERATOR");
+
+    private async Task<bool> IsOrderAccumulatorAnsweringThroughOrderGeneratorAsync()
+    {
+        using var exposuresResponse = await OrderGeneratorHttp.GetAsync("/api/exposures");
+        return exposuresResponse.StatusCode == System.Net.HttpStatusCode.OK;
+    }
+
+    private async Task<int> ReadOrderAccumulatorRestartCountAsync()
+    {
+        var orderAccumulatorContainerId = (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "ps", "-q", "orderaccumulator")).Trim();
+        return int.Parse((await CaptureComposeTestCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "inspect", "-f", "{{.RestartCount}}", orderAccumulatorContainerId)).Trim());
+    }
+
+    private async Task<string> DescribeOrderAccumulatorStateAsync(string readinessFailure)
+    {
+        var orderAccumulatorLogTail = await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "logs", "--no-color", "--tail", "40", "orderaccumulator");
+        var orderGeneratorLogTail = await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "logs", "--no-color", "--tail", "40", "ordergenerator");
+        return $"{readinessFailure} (RestartCount {await ReadOrderAccumulatorRestartCountAsync()}).\n--- orderaccumulator ---\n{orderAccumulatorLogTail}\n--- ordergenerator ---\n{orderGeneratorLogTail}";
+    }
+
     public Task<string> RunComposeCommandAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
         CaptureComposeTestCommandOutputAsync("docker", commandTimeout,
             ["compose", "-p", ComposeProjectName, "-f", Path.Combine(RepoRoot, "docker-compose.yml"), .. composeArguments]);
