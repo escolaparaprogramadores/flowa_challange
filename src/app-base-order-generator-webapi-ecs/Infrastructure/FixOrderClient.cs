@@ -57,8 +57,8 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
 
             // No answer in 5 s is an expected outcome, not an error: it becomes a status here and the 503 at the edge.
             using var executionReportDeadline = new CancellationTokenSource();
-            var firstToFinish = await Task.WhenAny(executionReportWaiter.Task, Task.Delay(ExecutionReportTimeout, executionReportDeadline.Token));
-            if (firstToFinish != executionReportWaiter.Task)
+            var executionReportOrDeadlineFinishedFirst = await Task.WhenAny(executionReportWaiter.Task, Task.Delay(ExecutionReportTimeout, executionReportDeadline.Token));
+            if (executionReportOrDeadlineFinishedFirst != executionReportWaiter.Task)
                 return new SentOrderResult(SentOrderStatus.ExecutionReportTimeout, clOrdId);
 
             await executionReportDeadline.CancelAsync();

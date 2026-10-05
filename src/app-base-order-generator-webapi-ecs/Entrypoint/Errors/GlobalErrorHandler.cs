@@ -31,15 +31,8 @@ public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsServ
                 httpErrorLogger.LogWarning("Expected error in request.", httpErrorLogContext);
         }
 
-        if (exception is OrderFailureException orderFailure)
-        {
-            errorProblemDetails.Extensions["traceId"] = orderFailure.ClOrdId;
-            OrderTraceLogScope.WriteUnderOrderTrace(orderFailure.ClOrdId, WriteHttpErrorLog);
-        }
-        else
-        {
-            WriteHttpErrorLog();
-        }
+        errorProblemDetails.Extensions["traceId"] = HttpErrorTraceScope.WriteUnderHttpErrorTrace(
+            httpContext, (exception as OrderFailureException)?.ClOrdId, WriteHttpErrorLog);
 
         httpContext.Response.StatusCode = errorProblemDetails.Status!.Value;
         await problemDetailsService.WriteAsync(new ProblemDetailsContext

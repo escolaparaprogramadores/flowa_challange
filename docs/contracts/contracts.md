@@ -51,7 +51,7 @@ quem pede `text/html`:
 | `status` | O mesmo número do status HTTP. |
 | `detail` | Mensagem em português desta ocorrência. Nunca leva exceção, SQL, host ou stack trace. |
 | `instance` | Caminho pedido. |
-| `traceId` | 32 caracteres hexadecimais, o mesmo da linha de log do erro. Num erro de `POST /api/orders` depois de a ordem ter `ClOrdID` (503 e 500 da tabela da ordem), é o próprio `ClOrdID`, com ou sem o tracer do Datadog ligado. Nos outros erros, é o trace id da requisição no ASP.NET. |
+| `traceId` | 32 caracteres hexadecimais: o trace da requisição no Datadog, o mesmo da linha de log do erro. Num erro de `POST /api/orders` depois de a ordem ter `ClOrdID` (503 e 500 da tabela da ordem), é o próprio `ClOrdID`. |
 | `success` | Sempre `false`. |
 | `statusResultado` | Nome do resultado: `InvalidInput` (400), `NotFound` (404), `ServiceUnavailable` (503), `InternalError` (500). |
 | `errors` | Lista de mensagens em português (no 400 de formato, uma por campo). |

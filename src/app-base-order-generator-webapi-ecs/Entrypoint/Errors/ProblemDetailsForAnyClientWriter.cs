@@ -23,12 +23,13 @@ public sealed class ProblemDetailsForAnyClientWriter(
         // error DataMessage, the 404 of ASP.NET), so every HTTP error has exactly one log. A technical failure always
         // arrives as an exception, so what arrives here without one is expected: Warning.
         if (problemDetailsContext.Exception is null)
-            httpErrorLogger.LogWarning("Expected error in request.", new
-            {
-                ErrorCode = responseProblemDetails.Type,
-                Method = httpContext.Request.Method,
-                Route = ApiProblemDetails.ReadRouteTemplate(httpContext)
-            });
+            responseProblemDetails.Extensions["traceId"] = HttpErrorTraceScope.WriteUnderHttpErrorTrace(httpContext, null, () =>
+                httpErrorLogger.LogWarning("Expected error in request.", new
+                {
+                    ErrorCode = responseProblemDetails.Type,
+                    Method = httpContext.Request.Method,
+                    Route = ApiProblemDetails.ReadRouteTemplate(httpContext)
+                }));
 
         return new ValueTask(httpContext.Response.WriteAsJsonAsync(
             responseProblemDetails, responseProblemDetails.GetType(), jsonOptions.Value.SerializerOptions, "application/problem+json"));

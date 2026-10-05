@@ -16,10 +16,13 @@ public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsServ
             : ApiProblemDetails.BuildErrorProblemDetails(ResultStatus.InternalError, null, UnexpectedErrorMessage, []);
 
         var httpErrorLogContext = new { ErrorCode = errorProblemDetails.Type, Method = httpContext.Request.Method, Route = ApiProblemDetails.ReadRouteTemplate(httpContext) };
-        if (errorProblemDetails.Status == StatusCodes.Status500InternalServerError)
-            httpErrorLogger.LogError(exception, "Unexpected application error.", httpErrorLogContext);
-        else
-            httpErrorLogger.LogWarning("Expected error in request.", httpErrorLogContext);
+        errorProblemDetails.Extensions["traceId"] = HttpErrorTraceScope.WriteUnderHttpErrorTrace(httpContext, () =>
+        {
+            if (errorProblemDetails.Status == StatusCodes.Status500InternalServerError)
+                httpErrorLogger.LogError(exception, "Unexpected application error.", httpErrorLogContext);
+            else
+                httpErrorLogger.LogWarning("Expected error in request.", httpErrorLogContext);
+        });
 
         httpContext.Response.StatusCode = errorProblemDetails.Status!.Value;
         await problemDetailsService.WriteAsync(new ProblemDetailsContext

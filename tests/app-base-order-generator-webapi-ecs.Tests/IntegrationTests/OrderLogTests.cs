@@ -56,7 +56,7 @@ public sealed class OrderLogTests
     }
 
     // CA-6, CA-11 and CA-13: the 503 of an order that has a ClOrdID leaves one Warning, written by the GlobalErrorHandler
-    // in the request span (the parent of the order span), and both the log and the answer carry the ClOrdID as trace id.
+    // under the ClOrdID (HttpErrorTraceScope), and both the log and the answer carry the ClOrdID as trace id.
     [Fact]
     public async Task Order_without_a_logged_on_fix_session_logs_one_warning_and_answers_the_clordid_as_trace_id()
     {

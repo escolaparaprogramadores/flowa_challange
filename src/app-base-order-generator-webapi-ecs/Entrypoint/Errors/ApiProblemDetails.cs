@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Base.OrderGenerator.Commons;
 using Base.OrderGenerator.Entrypoint.Http;
 using Microsoft.AspNetCore.Diagnostics;
@@ -45,7 +44,8 @@ public static class ApiProblemDetails
     }
 
     // Runs on every problem+json, also the ones ASP.NET writes itself (404 of a route, 405, malformed JSON): that is
-    // what gives all of them the URN type, the pt-BR text, the traceId and the DataMessage compatibility fields.
+    // what gives all of them the URN type, the pt-BR text and the DataMessage compatibility fields.
+    // The traceId comes from the place that writes the log line of the error (HttpErrorTraceScope).
     public static void CompleteProblemDetails(ProblemDetailsContext problemDetailsContext)
     {
         var responseProblemDetails = problemDetailsContext.ProblemDetails;
@@ -66,10 +66,6 @@ public static class ApiProblemDetails
 
         responseProblemDetails.Status = httpStatusCode;
         responseProblemDetails.Instance ??= httpContext.Request.Path;
-        // The 32 hex trace id of the request, the same one its log line carries. A failed order already set its ClOrdID here.
-        responseProblemDetails.Extensions.TryAdd("traceId", Activity.Current is { IdFormat: ActivityIdFormat.W3C } requestActivity
-            ? requestActivity.TraceId.ToString()
-            : httpContext.TraceIdentifier);
         responseProblemDetails.Extensions["success"] = false;
         responseProblemDetails.Extensions.TryAdd("statusResultado", resultStatus.ToString());
         responseProblemDetails.Extensions.TryAdd("errors", Array.Empty<string>());

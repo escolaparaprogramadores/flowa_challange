@@ -324,6 +324,48 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(unansweredOrderTraceId, unansweredOrderErrorLine.ReadLogField("dd_trace_id"));
     }
 
+    // RF-04/CA-5 with the real Datadog tracer, for errors that are not of an order: the traceId of the answer is the
+    // trace the Datadog sees, the same TraceId and dd_trace_id of the one log line of the error. The ASP.NET request
+    // Activity has another id, which the support would not find in the APM.
+    [Theory]
+    [InlineData("/api/nada", HttpStatusCode.NotFound, "urn:base-investimentos:problem:not-found")]
+    [InlineData("/api/orders?page=0", HttpStatusCode.BadRequest, "urn:base-investimentos:problem:invalid-page")]
+    public async Task Api_error_answers_and_logs_the_trace_id_of_the_real_tracer(string apiPath, HttpStatusCode expectedHttpStatus, string expectedProblemType)
+    {
+        using var apiErrorResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync(apiPath);
+        Assert.Equal(expectedHttpStatus, apiErrorResponse.StatusCode);
+        Assert.Equal("application/problem+json", apiErrorResponse.Content.Headers.ContentType?.MediaType);
+        var apiErrorProblem = await apiErrorResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(expectedProblemType, apiErrorProblem.GetProperty("type").GetString());
+        var apiErrorTraceId = apiErrorProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", apiErrorTraceId);
+
+        var apiErrorLine = Assert.Single(await ReadServiceJsonLogLinesAsync("ordergenerator"),
+            serviceLogLine => serviceLogLine.LogLevel is "Warning" or "Error" && serviceLogLine.TraceId == apiErrorTraceId);
+        Assert.Equal(("Warning", "Expected error in request.", expectedProblemType),
+            (apiErrorLine.LogLevel, apiErrorLine.Message, apiErrorLine.ReadLogField("ErrorCode")));
+        Assert.Equal(apiErrorTraceId, apiErrorLine.ReadLogField("dd_trace_id"));
+    }
+
+    // The same for the OrderAccumulator, whose port is not open on the host: the 400 of the page it answers to the
+    // OrderGenerator leaves its own Warning, with TraceId equal to the dd_trace_id.
+    [Fact]
+    public async Task OrderAccumulator_error_logs_the_trace_id_of_the_real_tracer()
+    {
+        using var invalidPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=0");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidPageResponse.StatusCode);
+
+        var invalidPageLines = (await ReadServiceJsonLogLinesAsync("orderaccumulator"))
+            .Where(serviceLogLine => serviceLogLine.LogLevel == "Warning" && serviceLogLine.ReadLogField("ErrorCode") == "urn:base-investimentos:problem:invalid-page")
+            .ToList();
+        Assert.NotEmpty(invalidPageLines);
+        Assert.All(invalidPageLines, invalidPageLine =>
+        {
+            Assert.Matches("^[0-9a-f]{32}$", invalidPageLine.TraceId);
+            Assert.Equal(invalidPageLine.TraceId, invalidPageLine.ReadLogField("dd_trace_id"));
+        });
+    }
+
     private async Task<decimal> ReadSymbolExposureAsync(string symbol)
     {
         var exposuresBody = ReadSuccessData(await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures"));
