@@ -277,5 +277,19 @@ jobs:
           grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan sem linha de resumo"
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
+          # Plan guard: only the task definitions may be destroyed or replaced (every image deploy replaces
+          # them); anything else stops the run here, before apply. The plan JSON stays on the runner.
+          terraform show -json tfplan > "$RUNNER_TEMP/plano-do-deploy.json"
+          jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
+            | "plano: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/plano-do-deploy.json"
+          recursos_destruidos_fora_das_task_definitions=$(jq -r '.resource_changes[]
+            | select(.change.actions | index("delete")) | select(.type != "aws_ecs_task_definition") | .address' \
+            "$RUNNER_TEMP/plano-do-deploy.json")
+          if [ -n "$recursos_destruidos_fora_das_task_definitions" ]; then
+            echo "o plan destrói ou troca recurso além das task definitions; o apply não roda:" >&2
+            echo "$recursos_destruidos_fora_das_task_definitions" >&2
+            exit 1
+          fi
+
           terraform_quieto apply tfplan
           grep -E '^Apply complete!' "$TERRAFORM_LOG"
