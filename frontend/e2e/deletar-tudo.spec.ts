@@ -61,26 +61,26 @@ function ehChamadaDaApi(requisicaoDaTela: Request, metodoHttp: string, rotaDaApi
   return requisicaoDaTela.method() === metodoHttp && new URL(requisicaoDaTela.url()).pathname === rotaDaApi;
 }
 
-function cartaoCompraVenda(paginaDaBoleta: Page) {
+function localizarCartaoCompraVenda(paginaDaBoleta: Page) {
   return paginaDaBoleta.getByRole('region', { name: 'Compra/Venda' });
 }
 
-function botaoDeletarTudoDoCabecalho(paginaDaBoleta: Page) {
-  return cartaoCompraVenda(paginaDaBoleta).getByRole('button', { name: 'Deletar tudo' });
+function localizarBotaoDeletarTudoDoCabecalho(paginaDaBoleta: Page) {
+  return localizarCartaoCompraVenda(paginaDaBoleta).getByRole('button', { name: 'Deletar tudo' });
 }
 
-function janelaDeConfirmacao(paginaDaBoleta: Page) {
+function localizarJanelaDeConfirmacao(paginaDaBoleta: Page) {
   return paginaDaBoleta.getByRole('dialog', { name: 'Deletar todos os dados?' });
 }
 
-function linhasDaLista(paginaDaBoleta: Page) {
-  return cartaoCompraVenda(paginaDaBoleta).getByTestId('linha-da-ordem');
+function localizarLinhasDaListaDeOrdens(paginaDaBoleta: Page) {
+  return localizarCartaoCompraVenda(paginaDaBoleta).getByTestId('linha-da-ordem');
 }
 
 async function abrirTelaComAsOrdensDoTeste(paginaDaBoleta: Page) {
   await criarOrdensDeCompraPelaApi(paginaDaBoleta);
   await paginaDaBoleta.goto('/');
-  await expect(linhasDaLista(paginaDaBoleta)).toHaveCount(ORDENS_DE_COMPRA_DO_TESTE.length);
+  await expect(localizarLinhasDaListaDeOrdens(paginaDaBoleta)).toHaveCount(ORDENS_DE_COMPRA_DO_TESTE.length);
   await expect(paginaDaBoleta.getByTestId('exposicao-PETR4').getByTestId('exposicao-atual')).toHaveText('R$ 1.000,00');
 }
 
@@ -96,8 +96,8 @@ async function lerExposicoesNaTela(paginaDaBoleta: Page) {
 }
 
 async function conferirTelaZerada(paginaDaBoleta: Page) {
-  await expect(cartaoCompraVenda(paginaDaBoleta).getByTestId('lista-de-ordens-vazia')).toHaveText(TEXTO_DA_LISTA_VAZIA);
-  await expect(linhasDaLista(paginaDaBoleta)).toHaveCount(0);
+  await expect(localizarCartaoCompraVenda(paginaDaBoleta).getByTestId('lista-de-ordens-vazia')).toHaveText(TEXTO_DA_LISTA_VAZIA);
+  await expect(localizarLinhasDaListaDeOrdens(paginaDaBoleta)).toHaveCount(0);
   await expect(paginaDaBoleta.getByRole('group', { name: 'Páginas da lista de ordens' })).toHaveCount(0);
   for (const simboloDaExposicao of SIMBOLOS_DA_EXPOSICAO) {
     const cartaoDoAtivo = paginaDaBoleta.getByTestId('exposicao-' + simboloDaExposicao);
@@ -128,16 +128,19 @@ test.afterEach(async ({ page }) => {
 
 test('CA-17: o botão vermelho com lixeira fica à direita no cabeçalho de Compra/Venda, com 38 px e borda coral translúcida', async ({ page }) => {
   await page.goto('/');
-  const botaoDoCabecalho = botaoDeletarTudoDoCabecalho(page);
+  const botaoDoCabecalho = localizarBotaoDeletarTudoDoCabecalho(page);
   await expect(botaoDoCabecalho).toHaveCount(1);
   await expect(botaoDoCabecalho).toHaveText('Deletar tudo');
   await expect(botaoDoCabecalho.locator('svg')).toHaveCount(1);
   await conferirMedidaEmPxDeCss(botaoDoCabecalho, 'height', 38);
   await expect(botaoDoCabecalho).toHaveCSS('color', COR_CORAL);
   await expect(botaoDoCabecalho).toHaveCSS('border-top-color', COR_DA_BORDA_CORAL_TRANSLUCIDA);
-  const caixaDoTitulo = (await cartaoCompraVenda(page).getByRole('heading', { name: 'Compra/Venda' }).boundingBox())!;
+  await expect(botaoDoCabecalho).toHaveCSS('background-color', 'rgba(255, 138, 122, 0.12)');
+  await botaoDoCabecalho.hover();
+  await expect(botaoDoCabecalho).toHaveCSS('background-color', 'rgba(255, 138, 122, 0.2)');
+  const caixaDoTitulo = (await localizarCartaoCompraVenda(page).getByRole('heading', { name: 'Compra/Venda' }).boundingBox())!;
   const caixaDoBotao = (await botaoDoCabecalho.boundingBox())!;
-  const caixaDoCartao = (await cartaoCompraVenda(page).boundingBox())!;
+  const caixaDoCartao = (await localizarCartaoCompraVenda(page).boundingBox())!;
   expect(caixaDoBotao.x).toBeGreaterThan(caixaDoTitulo.x + caixaDoTitulo.width);
   // À direita: o botão termina a menos de 40 px de CSS da borda direita do cartão (a página está em 90%).
   expect((caixaDoCartao.x + caixaDoCartao.width - (caixaDoBotao.x + caixaDoBotao.width)) / 0.9).toBeLessThan(40);
@@ -146,8 +149,8 @@ test('CA-17: o botão vermelho com lixeira fica à direita no cabeçalho de Comp
 test('CA-17: clicar abre a janela por cima, com fundo escurecido e borrado, ícone de alerta, título, texto e os dois botões da maquete', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await abrirTelaComAsOrdensDoTeste(page);
-  await botaoDeletarTudoDoCabecalho(page).click();
-  const janela = janelaDeConfirmacao(page);
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  const janela = localizarJanelaDeConfirmacao(page);
   await expect(janela).toBeVisible();
   await expect(janela.getByRole('heading', { name: 'Deletar todos os dados?' })).toHaveCSS('font-family', /^Sora/);
   await conferirMedidaEmPxDeCss(janela.getByRole('heading', { name: 'Deletar todos os dados?' }), 'font-size', 20);
@@ -189,16 +192,16 @@ for (const caminhoParaFechar of ['botão Cancelar', 'tecla Esc', 'clique fora da
     page.on('request', (requisicaoDaTela) => {
       if (ehChamadaDaApi(requisicaoDaTela, 'DELETE', ROTA_DAS_ORDENS)) chamadasDeApagar.push(requisicaoDaTela.url());
     });
-    await botaoDeletarTudoDoCabecalho(page).click();
-    await expect(janelaDeConfirmacao(page)).toBeVisible();
+    await localizarBotaoDeletarTudoDoCabecalho(page).click();
+    await expect(localizarJanelaDeConfirmacao(page)).toBeVisible();
 
-    if (caminhoParaFechar === 'botão Cancelar') await janelaDeConfirmacao(page).getByRole('button', { name: 'Cancelar' }).click();
+    if (caminhoParaFechar === 'botão Cancelar') await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Cancelar' }).click();
     if (caminhoParaFechar === 'tecla Esc') await page.keyboard.press('Escape');
     if (caminhoParaFechar === 'clique fora da janela') await page.mouse.click(8, 8);
 
-    await expect(janelaDeConfirmacao(page)).toHaveCount(0);
-    await expect(botaoDeletarTudoDoCabecalho(page)).toBeFocused();
-    await expect(linhasDaLista(page)).toHaveCount(ORDENS_DE_COMPRA_DO_TESTE.length);
+    await expect(localizarJanelaDeConfirmacao(page)).toHaveCount(0);
+    await expect(localizarBotaoDeletarTudoDoCabecalho(page)).toBeFocused();
+    await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(ORDENS_DE_COMPRA_DO_TESTE.length);
     expect(await lerExposicoesNaTela(page)).toEqual(exposicoesAntes);
     expect(await contarOrdensNoServidor(page)).toBe(ORDENS_DE_COMPRA_DO_TESTE.length);
     expect(chamadasDeApagar).toEqual([]);
@@ -216,13 +219,13 @@ test('CA-19 e CA-41: Deletar tudo na janela apaga o banco, relê só a página 1
       chamadasDepoisDoApagar.push(`${requisicaoDaTela.method()} ${enderecoDaChamada.pathname}${enderecoDaChamada.search}`);
     }
   });
-  await botaoDeletarTudoDoCabecalho(page).click();
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
   const respostaDoApagar = page.waitForResponse((respostaHttp) => ehChamadaDaApi(respostaHttp.request(), 'DELETE', ROTA_DAS_ORDENS));
-  await janelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
+  await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
   expect((await respostaDoApagar).status()).toBe(204);
   apagarJaRespondeu = true;
 
-  await expect(janelaDeConfirmacao(page)).toHaveCount(0);
+  await expect(localizarJanelaDeConfirmacao(page)).toHaveCount(0);
   await conferirTelaZerada(page);
   expect(chamadasDepoisDoApagar.sort()).toEqual(['GET /api/exposures', 'GET /api/orders?page=1']);
   expect(await lerMarcaDaPagina(page)).toBe('mesma-pagina');
@@ -240,19 +243,19 @@ test('CA-45: com 503 sem apagar no servidor, a tela relê lista e exposição an
     if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
     await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
   });
-  const liberarReleituraDaLista = await segurarReleituraDaListaDepoisDoApagar(page);
+  const controleDaReleituraDaLista = await segurarReleituraDaListaDepoisDoApagar(page);
 
-  await botaoDeletarTudoDoCabecalho(page).click();
-  await janelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
-  await liberarReleituraDaLista.releituraChegou;
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
+  await controleDaReleituraDaLista.releituraChegou;
   // Enquanto a releitura não volta, o erro ainda não aparece.
-  await expect(janelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
-  liberarReleituraDaLista.liberar();
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
+  controleDaReleituraDaLista.liberarReleituraDaLista();
 
-  await expect(janelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
-  await expect(janelaDeConfirmacao(page)).toBeVisible();
-  expect(liberarReleituraDaLista.exposicaoRelidaDepoisDoApagar()).toBe(true);
-  await expect(linhasDaLista(page)).toHaveCount(ORDENS_DE_COMPRA_DO_TESTE.length);
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
+  await expect(localizarJanelaDeConfirmacao(page)).toBeVisible();
+  expect(controleDaReleituraDaLista.exposicaoRelidaDepoisDoApagar()).toBe(true);
+  await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(ORDENS_DE_COMPRA_DO_TESTE.length);
   expect(await lerExposicoesNaTela(page)).toEqual(exposicoesAntes);
   expect(await contarOrdensNoServidor(page)).toBe(ORDENS_DE_COMPRA_DO_TESTE.length);
 });
@@ -266,12 +269,44 @@ test('CA-45: com 503 depois de o servidor apagar (prazo do OrderGenerator), a re
     await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
   });
 
-  await botaoDeletarTudoDoCabecalho(page).click();
-  await janelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
 
-  await expect(janelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
   await conferirTelaZerada(page);
   expect(await contarOrdensNoServidor(page)).toBe(0);
+});
+
+test('ASSUMI-04: com a tela na página 2, o 503 no apagar relê a própria página 2 e a exposição antes do erro', async ({ page }) => {
+  for (let posicaoDaOrdem = 0; posicaoDaOrdem < 13; posicaoDaOrdem++) {
+    const respostaDaCriacao = await page.request.post(ROTA_DE_CRIACAO_DE_ORDEM, { data: { symbol: 'PETR4', side: 'buy', quantity: 1, price: 1 } });
+    expect(respostaDaCriacao.status()).toBe(200);
+  }
+  await page.goto('/');
+  await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(10);
+  await page.getByRole('group', { name: 'Páginas da lista de ordens' }).getByRole('button', { name: 'Página 2', exact: true }).click();
+  await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(3);
+  await page.route((enderecoDaChamada) => enderecoDaChamada.pathname === ROTA_DAS_ORDENS, async (rotaInterceptada) => {
+    if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
+    await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
+  });
+  const leiturasDepoisDoApagar: string[] = [];
+  let apagarJaSaiu = false;
+  page.on('request', (requisicaoDaTela) => {
+    if (ehChamadaDaApi(requisicaoDaTela, 'DELETE', ROTA_DAS_ORDENS)) apagarJaSaiu = true;
+    else if (apagarJaSaiu && new URL(requisicaoDaTela.url()).pathname.startsWith('/api/')) {
+      const enderecoDaChamada = new URL(requisicaoDaTela.url());
+      leiturasDepoisDoApagar.push(`${requisicaoDaTela.method()} ${enderecoDaChamada.pathname}${enderecoDaChamada.search}`);
+    }
+  });
+
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
+
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
+  expect(leiturasDepoisDoApagar.sort()).toEqual(['GET /api/exposures', 'GET /api/orders?page=2']);
+  await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(3);
+  await expect(page.getByRole('group', { name: 'Páginas da lista de ordens' }).getByRole('button', { name: 'Página 2', exact: true })).toHaveAttribute('aria-current', 'page');
 });
 
 test('RF-08: enquanto o apagar está no servidor, os dois botões da janela ficam desligados e só sai um DELETE', async ({ page }) => {
@@ -286,11 +321,14 @@ test('RF-08: enquanto o apagar está no servidor, os dois botões da janela fica
     await rotaInterceptada.continue();
   });
 
-  await botaoDeletarTudoDoCabecalho(page).click();
-  const janela = janelaDeConfirmacao(page);
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  const janela = localizarJanelaDeConfirmacao(page);
   await janela.getByRole('button', { name: 'Deletar tudo' }).click();
   await expect(janela.getByRole('button', { name: 'Apagando…' })).toBeDisabled();
   await expect(janela.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
+  await expect(janela.getByRole('button', { name: 'Apagando…' })).toHaveCSS('opacity', '0.7');
+  // Dois Esc seguidos: no Chrome o segundo já não passa pelo "cancel" do <dialog>.
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.mouse.click(8, 8);
   await expect(janela).toBeVisible();
@@ -308,15 +346,15 @@ test('ASSUMI-05: abrir a janela de novo depois de um erro começa sem a mensagem
     if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
     await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
   });
-  await botaoDeletarTudoDoCabecalho(page).click();
-  await janelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
-  await expect(janelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
-  await janelaDeConfirmacao(page).getByRole('button', { name: 'Cancelar' }).click();
-  await expect(janelaDeConfirmacao(page)).toHaveCount(0);
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
+  await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Cancelar' }).click();
+  await expect(localizarJanelaDeConfirmacao(page)).toHaveCount(0);
 
-  await botaoDeletarTudoDoCabecalho(page).click();
-  await expect(janelaDeConfirmacao(page)).toBeVisible();
-  await expect(janelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  await expect(localizarJanelaDeConfirmacao(page)).toBeVisible();
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
 });
 
 // Segura a primeira leitura da lista que sai depois do DELETE, para o teste olhar a janela antes de ela voltar.
@@ -337,5 +375,5 @@ async function segurarReleituraDaListaDepoisDoApagar(paginaDaBoleta: Page) {
     await releituraLiberada;
     await rotaInterceptada.fallback();
   });
-  return { releituraChegou, liberar: () => liberarReleitura(), exposicaoRelidaDepoisDoApagar: () => exposicaoRelida };
+  return { releituraChegou, liberarReleituraDaLista: () => liberarReleitura(), exposicaoRelidaDepoisDoApagar: () => exposicaoRelida };
 }
