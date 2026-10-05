@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type MouseEvent, type SyntheticEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type SyntheticEvent } from 'react';
 import { IconeAlerta, IconeLixeira } from './Icones';
 
 type PropsDaConfirmacaoDeletarTudo = {
@@ -26,10 +26,15 @@ export function ConfirmacaoDeletarTudo({ aoConfirmarDeletarTudo }: PropsDaConfir
   }
 
   // O Chrome só deixa cancelar o "cancel" do <dialog> uma vez sem novo clique: o segundo Esc fecharia a janela.
-  // Barrar a tecla antes do navegador segura a janela aberta até o apagar responder.
-  function aoApertarTeclaNaJanela(eventoDeTeclaNaJanela: KeyboardEvent<HTMLDialogElement>) {
-    if (estaApagandoTudo && eventoDeTeclaNaJanela.key === 'Escape') eventoDeTeclaNaJanela.preventDefault();
-  }
+  // Com os botões desligados o foco sai da janela, então a tecla é barrada no documento inteiro.
+  useEffect(() => {
+    if (!estaApagandoTudo) return;
+    function barrarEscEnquantoApaga(eventoDeTecla: KeyboardEvent) {
+      if (eventoDeTecla.key === 'Escape') eventoDeTecla.preventDefault();
+    }
+    document.addEventListener('keydown', barrarEscEnquantoApaga, true);
+    return () => document.removeEventListener('keydown', barrarEscEnquantoApaga, true);
+  }, [estaApagandoTudo]);
 
   // O clique no fundo escurecido chega com o próprio <dialog> como alvo; o clique no conteúdo, não.
   function aoClicarNoFundoDaJanela(eventoDeCliqueNaJanela: MouseEvent<HTMLDialogElement>) {
@@ -61,7 +66,6 @@ export function ConfirmacaoDeletarTudo({ aoConfirmarDeletarTudo }: PropsDaConfir
         aria-labelledby="titulo-confirmacao-deletar"
         aria-describedby="texto-confirmacao-deletar"
         onCancel={aoApertarEscNaJanela}
-        onKeyDown={aoApertarTeclaNaJanela}
         onClick={aoClicarNoFundoDaJanela}
       >
         <div className="janela-confirmacao-conteudo">
