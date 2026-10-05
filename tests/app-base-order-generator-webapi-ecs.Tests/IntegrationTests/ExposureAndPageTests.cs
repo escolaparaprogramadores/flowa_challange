@@ -2,6 +2,7 @@ using Base.OrderGenerator.Commons;
 using Base.OrderGenerator.Infrastructure;
 using System.Diagnostics;
 using System.Net;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -112,24 +113,34 @@ public sealed class ExposureProxyTests
     [InlineData("text/html")]
     public async Task Unexpected_error_becomes_500_problem_without_internal_detail(string acceptedMediaType)
     {
-        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(orderGeneratorWebHostBuilder =>
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        string unexpectedErrorBody;
+        JsonElement unexpectedErrorProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(orderGeneratorWebHostBuilder =>
             orderGeneratorWebHostBuilder.ConfigureTestServices(testServices => testServices
                 .AddHttpClient<IOrderAccumulatorHttpClient, OrderAccumulatorHttpClient>(OrderAccumulatorHttpClient.OrderAccumulatorHttpClientName)
-                .ConfigurePrimaryHttpMessageHandler(() => new ExplodingAccumulatorHandler())));
-        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
-        var exposuresRequest = new HttpRequestMessage(HttpMethod.Get, "/api/exposures");
-        exposuresRequest.Headers.Accept.ParseAdd(acceptedMediaType);
+                .ConfigurePrimaryHttpMessageHandler(() => new ExplodingAccumulatorHandler()))))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            var exposuresRequest = new HttpRequestMessage(HttpMethod.Get, "/api/exposures");
+            exposuresRequest.Headers.Accept.ParseAdd(acceptedMediaType);
 
-        var unexpectedErrorHttpResponse = await orderGeneratorClient.SendAsync(exposuresRequest);
-        var unexpectedErrorBody = await unexpectedErrorHttpResponse.Content.ReadAsStringAsync();
+            var unexpectedErrorHttpResponse = await orderGeneratorClient.SendAsync(exposuresRequest);
+            unexpectedErrorBody = await unexpectedErrorHttpResponse.Content.ReadAsStringAsync();
+            unexpectedErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(unexpectedErrorHttpResponse, HttpStatusCode.InternalServerError);
+        }
 
-        var unexpectedErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(unexpectedErrorHttpResponse, HttpStatusCode.InternalServerError);
         Assert.Equal("urn:base-investimentos:problem:internal-error", unexpectedErrorProblem.GetProperty("type").GetString());
         Assert.Equal("Erro interno", unexpectedErrorProblem.GetProperty("title").GetString());
         Assert.Equal("Aconteceu um erro inesperado. Informe o traceId ao suporte.", unexpectedErrorProblem.GetProperty("detail").GetString());
         Assert.Equal("InternalError", unexpectedErrorProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unexpectedErrorProblem.GetProperty("errors").EnumerateArray());
         Assert.DoesNotContain(ExplodingAccumulatorHandler.InternalErrorDetail, unexpectedErrorBody);
         Assert.DoesNotContain("   at ", unexpectedErrorBody);
+        // CA-6: one Error line with the whole exception, only in the log.
+        var unexpectedErrorLine = OrderLogTests.AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Error", "Unexpected application error.",
+            "urn:base-investimentos:problem:internal-error", "GET", "/api/exposures", unexpectedErrorProblem.GetProperty("traceId").GetString());
+        Assert.StartsWith($"System.InvalidOperationException: {ExplodingAccumulatorHandler.InternalErrorDetail}", unexpectedErrorLine.Exception);
     }
 
     private sealed class ExplodingAccumulatorHandler : HttpMessageHandler
@@ -147,6 +158,7 @@ public sealed class ExposureProxyTests
         Assert.Equal("Serviço indisponível", unavailableProblem.GetProperty("title").GetString());
         Assert.Equal(OrderAccumulatorUnavailableMessage, unavailableProblem.GetProperty("detail").GetString());
         Assert.Equal("ServiceUnavailable", unavailableProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unavailableProblem.GetProperty("errors").EnumerateArray());
     }
 
     private static async Task<FakeAccumulatorServer> StartFakeAccumulator(RequestDelegate exposuresHandler)
@@ -239,20 +251,28 @@ public sealed class OrderGeneratorPageTests : IDisposable
     [InlineData("/api/orders/123", "application/json")]
     public async Task Unknown_api_path_answers_404_problem_and_not_the_index(string apiPath, string acceptedMediaType)
     {
-        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), orderGeneratorWebRoot: _temporaryWebRoot);
-        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
-        var unknownApiRequest = new HttpRequestMessage(HttpMethod.Get, apiPath);
-        unknownApiRequest.Headers.Accept.ParseAdd(acceptedMediaType);
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        string unknownApiBody;
+        JsonElement notFoundProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), orderGeneratorWebRoot: _temporaryWebRoot))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            var unknownApiRequest = new HttpRequestMessage(HttpMethod.Get, apiPath);
+            unknownApiRequest.Headers.Accept.ParseAdd(acceptedMediaType);
 
-        var unknownApiResponse = await orderGeneratorClient.SendAsync(unknownApiRequest);
+            var unknownApiResponse = await orderGeneratorClient.SendAsync(unknownApiRequest);
+            unknownApiBody = await unknownApiResponse.Content.ReadAsStringAsync();
+            notFoundProblem = await OrderApiTests.ReadProblemDetailsAsync(unknownApiResponse, HttpStatusCode.NotFound);
+        }
 
-        Assert.DoesNotContain("boleta-de-teste", await unknownApiResponse.Content.ReadAsStringAsync());
-        var notFoundProblem = await OrderApiTests.ReadProblemDetailsAsync(unknownApiResponse, HttpStatusCode.NotFound);
+        Assert.DoesNotContain("boleta-de-teste", unknownApiBody);
         Assert.Equal("urn:base-investimentos:problem:not-found", notFoundProblem.GetProperty("type").GetString());
         Assert.Equal("Não encontrado", notFoundProblem.GetProperty("title").GetString());
         Assert.Equal("Não encontrado", notFoundProblem.GetProperty("detail").GetString());
         Assert.Equal("NotFound", notFoundProblem.GetProperty("statusResultado").GetString());
         Assert.Empty(notFoundProblem.GetProperty("errors").EnumerateArray());
+        OrderLogTests.AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:not-found", "GET", "/api/{**unknownApiPath}", notFoundProblem.GetProperty("traceId").GetString());
     }
 
     [Fact]

@@ -66,10 +66,10 @@ public static class ApiProblemDetails
 
         responseProblemDetails.Status = httpStatusCode;
         responseProblemDetails.Instance ??= httpContext.Request.Path;
-        // The 32 hex trace id of the request, the same one the log lines carry; for an order it is its ClOrdID (decision 21).
-        responseProblemDetails.Extensions["traceId"] = Activity.Current is { IdFormat: ActivityIdFormat.W3C } requestActivity
+        // The 32 hex trace id of the request, the same one its log line carries. A failed order already set its ClOrdID here.
+        responseProblemDetails.Extensions.TryAdd("traceId", Activity.Current is { IdFormat: ActivityIdFormat.W3C } requestActivity
             ? requestActivity.TraceId.ToString()
-            : httpContext.TraceIdentifier;
+            : httpContext.TraceIdentifier);
         responseProblemDetails.Extensions["success"] = false;
         responseProblemDetails.Extensions.TryAdd("statusResultado", resultStatus.ToString());
         responseProblemDetails.Extensions.TryAdd("errors", Array.Empty<string>());

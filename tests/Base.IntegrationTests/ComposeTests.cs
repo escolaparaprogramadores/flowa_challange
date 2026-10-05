@@ -290,6 +290,40 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(new[] { $"volume:{ComposeFixture.ComposeProjectName}_pgdata->/var/lib/postgresql/data" }, postgresContainer.VolumeMounts);
     }
 
+    // RF-10/CA-11 with the real Datadog tracer of the image, not a test listener: with the OrderAccumulator paused the
+    // order goes out by FIX and gets no ExecutionReport. The 503 answers the ClOrdID (tag 11 of the NewOrderSingle the
+    // OrderGenerator sent) as traceId, and the one log line of the error carries that same id, in its TraceId and in
+    // the dd_trace_id the tracer injects.
+    [Fact]
+    public async Task Order_without_answer_in_5_seconds_answers_and_logs_its_clordid_as_trace_id_with_the_real_tracer()
+    {
+        JsonElement unansweredOrderProblem;
+        await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "pause", "orderaccumulator");
+        try
+        {
+            using var unansweredOrderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync(
+                "/api/orders", new { symbol = "PETR4", side = "buy", quantity = 1, price = 0.01m });
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, unansweredOrderResponse.StatusCode);
+            Assert.Equal("application/problem+json", unansweredOrderResponse.Content.Headers.ContentType?.MediaType);
+            unansweredOrderProblem = await unansweredOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
+        }
+        finally
+        {
+            await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "unpause", "orderaccumulator");
+        }
+
+        const string expectedProblemType = "urn:base-investimentos:problem:execution-report-timeout";
+        Assert.Equal(expectedProblemType, unansweredOrderProblem.GetProperty("type").GetString());
+        var unansweredOrderTraceId = unansweredOrderProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", unansweredOrderTraceId);
+        await FindSingleFixMessageAsync("ordergenerator", "D", unansweredOrderTraceId, senderCompId: "ORDERGENERATOR");
+        var unansweredOrderErrorLine = Assert.Single(await ReadServiceJsonLogLinesAsync("ordergenerator"),
+            serviceLogLine => serviceLogLine.LogLevel is "Warning" or "Error" && serviceLogLine.ReadLogField("ErrorCode") == expectedProblemType);
+        Assert.Equal(("Warning", "Expected error in request."), (unansweredOrderErrorLine.LogLevel, unansweredOrderErrorLine.Message));
+        Assert.Equal(unansweredOrderTraceId, unansweredOrderErrorLine.TraceId);
+        Assert.Equal(unansweredOrderTraceId, unansweredOrderErrorLine.ReadLogField("dd_trace_id"));
+    }
+
     private async Task<decimal> ReadSymbolExposureAsync(string symbol)
     {
         var exposuresBody = ReadSuccessData(await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures"));

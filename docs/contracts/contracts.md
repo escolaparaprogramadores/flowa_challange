@@ -51,7 +51,7 @@ quem pede `text/html`:
 | `status` | O mesmo número do status HTTP. |
 | `detail` | Mensagem em português desta ocorrência. Nunca leva exceção, SQL, host ou stack trace. |
 | `instance` | Caminho pedido. |
-| `traceId` | 32 caracteres hexadecimais: o trace id da requisição, o mesmo da linha de log do erro. Numa ordem que já tem `ClOrdID`, é o próprio `ClOrdID`. |
+| `traceId` | 32 caracteres hexadecimais, o mesmo da linha de log do erro. Num erro de `POST /api/orders` depois de a ordem ter `ClOrdID` (503 e 500 da tabela da ordem), é o próprio `ClOrdID`, com ou sem o tracer do Datadog ligado. Nos outros erros, é o trace id da requisição no ASP.NET. |
 | `success` | Sempre `false`. |
 | `statusResultado` | Nome do resultado: `InvalidInput` (400), `NotFound` (404), `ServiceUnavailable` (503), `InternalError` (500). |
 | `errors` | Lista de mensagens em português (no 400 de formato, uma por campo). |
@@ -99,7 +99,8 @@ Respostas:
 | Ordem que não cabe no FIX (nada é enviado por FIX) | 400 | problem `invalid-order`, `detail: "A ordem tem campos inválidos."`, `errors: ["Informe o preço."]` |
 | Sem sessão FIX | 503 | problem `fix-session-not-logged-on`, `detail: "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes."`, `traceId` = `ClOrdID` |
 | Sem resposta em 5 s | 503 | problem `execution-report-timeout`, mesmo `detail`, `traceId` = `ClOrdID` |
-| `ExecutionReport` fora do contrato ou erro inesperado | 500 | problem `internal-error` (sem stack trace) |
+| `ExecutionReport` fora do contrato | 500 | problem `internal-error` (sem stack trace), `traceId` = `ClOrdID` |
+| Erro inesperado antes de a ordem sair | 500 | problem `internal-error` (sem stack trace) |
 
 - O `400` só sai quando a ordem não cabe no FIX: campo faltando (`"Informe o símbolo."`,
   `"Informe o lado da ordem."`, `"Informe a quantidade."`, `"Informe o preço."`), lado diferente de

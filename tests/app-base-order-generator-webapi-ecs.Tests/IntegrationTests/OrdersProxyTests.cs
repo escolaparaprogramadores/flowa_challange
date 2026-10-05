@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -62,13 +63,21 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("abc")]
     public async Task InvalidOrdersPage_ReturnsTheAccumulator400AsTheSameProblem(string invalidOrdersPage)
     {
+        // The fake OrderAccumulator starts before the capture: its own console log is plain text, not the JSON of the app.
         await using var fakeAccumulator = await StartFakeOrdersAccumulator(WriteInvalidPageProblem);
-        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
-        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        JsonElement invalidPageProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            invalidPageProblem = await OrderApiTests.ReadProblemDetailsAsync(
+                await orderGeneratorClient.GetAsync($"/api/orders?page={invalidOrdersPage}"), HttpStatusCode.BadRequest);
+        }
 
-        var invalidPageResponse = await orderGeneratorClient.GetAsync($"/api/orders?page={invalidOrdersPage}");
-
-        var invalidPageProblem = await OrderApiTests.ReadProblemDetailsAsync(invalidPageResponse, HttpStatusCode.BadRequest);
+        // CA-6: the OrderGenerator logs its own 400 once, with its own trace id (not the one of the OrderAccumulator).
+        OrderLogTests.AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:invalid-page", "GET", "/api/orders", invalidPageProblem.GetProperty("traceId").GetString());
+        Assert.NotEqual(AccumulatorTraceId, invalidPageProblem.GetProperty("traceId").GetString());
         Assert.Equal("urn:base-investimentos:problem:invalid-page", invalidPageProblem.GetProperty("type").GetString());
         Assert.Equal("Dados inválidos", invalidPageProblem.GetProperty("title").GetString());
         Assert.Equal("Página inválida.", invalidPageProblem.GetProperty("detail").GetString());
@@ -323,6 +332,7 @@ public sealed class OrdersProxyTests : IDisposable
         Assert.Equal("Serviço indisponível", unavailableProblem.GetProperty("title").GetString());
         Assert.Equal(OrderAccumulatorUnavailableMessage, unavailableProblem.GetProperty("detail").GetString());
         Assert.Equal("ServiceUnavailable", unavailableProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unavailableProblem.GetProperty("errors").EnumerateArray());
     }
 
     private static async Task<FakeOrdersAccumulator> StartFakeOrdersAccumulator(RequestDelegate accumulatorOrdersHandler)

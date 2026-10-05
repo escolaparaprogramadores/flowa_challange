@@ -37,6 +37,23 @@ public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture order
     }
 
     [Fact]
+    public async Task Invalid_page_answers_400_problem_with_one_warning()
+    {
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        JsonElement invalidPageProblem;
+        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        {
+            invalidPageProblem = await HttpContractAssertions.ReadProblemDetailsAsync(
+                await orderAccumulatorTestApp.CreateClient().GetAsync("/api/orders?page=0"), HttpStatusCode.BadRequest);
+        }
+
+        HttpContractAssertions.AssertInvalidPageProblem(invalidPageProblem);
+        var invalidPageLine = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.", invalidPageProblem);
+        Assert.Equal(("GET", "/api/orders"), (invalidPageLine.ReadLogField("Method"), invalidPageLine.ReadLogField("Route")));
+        Assert.Null(invalidPageLine.Exception);
+    }
+
+    [Fact]
     public async Task Method_the_route_does_not_have_answers_405_problem_with_one_warning()
     {
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
@@ -51,6 +68,7 @@ public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture order
         Assert.Equal("Método não permitido", methodNotAllowedProblem.GetProperty("title").GetString());
         Assert.Equal("Método não permitido", methodNotAllowedProblem.GetProperty("detail").GetString());
         Assert.Equal("InvalidInput", methodNotAllowedProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(methodNotAllowedProblem.GetProperty("errors").EnumerateArray());
         var methodNotAllowedLine = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.", methodNotAllowedProblem);
         Assert.Equal("POST", methodNotAllowedLine.ReadLogField("Method"));
         Assert.Null(methodNotAllowedLine.Exception);
@@ -75,6 +93,7 @@ public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture order
         Assert.Equal("Erro interno", unexpectedErrorProblem.GetProperty("title").GetString());
         Assert.Equal("Aconteceu um erro inesperado. Informe o traceId ao suporte.", unexpectedErrorProblem.GetProperty("detail").GetString());
         Assert.Equal("InternalError", unexpectedErrorProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unexpectedErrorProblem.GetProperty("errors").EnumerateArray());
         Assert.DoesNotContain(DatabaseFailureDetail, await unexpectedErrorResponse.Content.ReadAsStringAsync());
         var unexpectedErrorLine = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Error", "Unexpected application error.", unexpectedErrorProblem);
         Assert.Equal("/api/orders", unexpectedErrorLine.ReadLogField("Route"));

@@ -65,10 +65,11 @@ public static class OrderGeneratorApiEndpoints
         return (await listOrdersUseCase.ListOrdersAsync(requestedPageNumber, requestAborted)).ConvertToHttpResponse();
     }
 
+    // The contract answers the deletion with 204 and no body: there is no body to put in the envelope (ASSUMI-5).
     private static async Task<IResult> DeleteAllOrdersAsync(DeleteAllOrdersUseCase deleteAllOrdersUseCase, CancellationToken requestAborted)
     {
-        await deleteAllOrdersUseCase.DeleteAllOrdersAsync(requestAborted);
-        return Results.NoContent();
+        var ordersDeletionMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(requestAborted);
+        return ordersDeletionMessage.Success ? Results.NoContent() : ordersDeletionMessage.ConvertToHttpResponse();
     }
 
     private static OrderResponse ConvertToOrderResponse(SentOrderResult sentOrderResult, OrderToSend sentOrder) => new(

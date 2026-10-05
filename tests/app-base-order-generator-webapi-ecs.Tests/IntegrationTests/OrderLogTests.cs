@@ -117,9 +117,13 @@ public sealed class OrderLogTests
 
         var answeredClOrdId = Assert.Single(fixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
         Assert.Equal(answeredClOrdId, unexpectedErrorProblem.GetProperty("traceId").GetString());
+        Assert.Equal("urn:base-investimentos:problem:internal-error", unexpectedErrorProblem.GetProperty("type").GetString());
+        Assert.Equal("Erro interno", unexpectedErrorProblem.GetProperty("title").GetString());
+        Assert.Equal("InternalError", unexpectedErrorProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unexpectedErrorProblem.GetProperty("errors").EnumerateArray());
         var unexpectedAnswerError = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Error", "Unexpected application error.",
             "urn:base-investimentos:problem:internal-error", "POST", "/api/orders", answeredClOrdId);
-        Assert.StartsWith("System.InvalidOperationException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
+        Assert.StartsWith("Base.OrderGenerator.Commons.UnexpectedExecutionReportException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
     }
 
     // Route is the route template, not the path the caller typed: the path can vary (case), the template cannot.
@@ -146,12 +150,36 @@ public sealed class OrderLogTests
             unavailableProblem.GetProperty("traceId").GetString());
     }
 
-    // CA-6: the 404 of an unknown API path and the 400 of format have their one Warning too, without any exception.
+    // RF-10 without anybody listening to the order trace (decision 21: the ClOrdID is then a random GUID): the answer
+    // and the log line still carry that ClOrdID, the one the OrderAccumulator received in tag 11.
+    [Fact]
+    public async Task Order_without_execution_report_and_without_tracer_answers_and_logs_the_clordid_as_trace_id()
+    {
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        using var silentFixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        silentFixTestAcceptor.StartFixTestAcceptor();
+        JsonElement communicationErrorProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(silentFixTestAcceptor.AcceptorPort))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            await silentFixTestAcceptor.WaitForFixSessionLogonAsync();
+            communicationErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await PostOrder(orderGeneratorClient, ValidOrderJson), HttpStatusCode.ServiceUnavailable);
+        }
+
+        var unansweredClOrdId = Assert.Single(silentFixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
+        Assert.Equal(unansweredClOrdId, communicationErrorProblem.GetProperty("traceId").GetString());
+        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:execution-report-timeout", "POST", "/api/orders", unansweredClOrdId);
+    }
+
+    // CA-6: the 404 of an unknown API path (also for a caller that asks for HTML) and the 400 of format have their
+    // one Warning too, without any exception.
     [Theory]
-    [InlineData("GET", "/api/nada", "", "urn:base-investimentos:problem:not-found", "/api/{**unknownApiPath}", HttpStatusCode.NotFound)]
-    [InlineData("POST", "/api/orders", """{"symbol":"PETR4","side":"buy","quantity":100}""", "urn:base-investimentos:problem:invalid-order", "/api/orders", HttpStatusCode.BadRequest)]
+    [InlineData("GET", "/api/nada", "", "application/json", "urn:base-investimentos:problem:not-found", "/api/{**unknownApiPath}", HttpStatusCode.NotFound)]
+    [InlineData("GET", "/api/nada", "", "text/html", "urn:base-investimentos:problem:not-found", "/api/{**unknownApiPath}", HttpStatusCode.NotFound)]
+    [InlineData("POST", "/api/orders", """{"symbol":"PETR4","side":"buy","quantity":100}""", "application/json", "urn:base-investimentos:problem:invalid-order", "/api/orders", HttpStatusCode.BadRequest)]
     public async Task Client_error_logs_one_warning_with_the_trace_id_of_the_answer(string httpMethod, string apiPath, string requestJson,
-        string expectedErrorCode, string expectedRouteTemplate, HttpStatusCode expectedHttpStatus)
+        string acceptedMediaType, string expectedErrorCode, string expectedRouteTemplate, HttpStatusCode expectedHttpStatus)
     {
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         JsonElement clientErrorProblem;
@@ -162,6 +190,7 @@ public sealed class OrderLogTests
             {
                 Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
             };
+            clientErrorRequest.Headers.Accept.ParseAdd(acceptedMediaType);
             clientErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await orderGeneratorClient.SendAsync(clientErrorRequest), expectedHttpStatus);
         }
 
@@ -171,7 +200,7 @@ public sealed class OrderLogTests
 
     // Exactly one Warning or Error line for the failed call, from the GlobalErrorHandler, with the problem type as
     // ErrorCode, the method and the route template; an expected error carries no exception, an unexpected one does.
-    private static JsonLogLine AssertSingleHttpErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture, string expectedLogLevel, string expectedMessage,
+    internal static JsonLogLine AssertSingleHttpErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture, string expectedLogLevel, string expectedMessage,
         string expectedErrorCode, string expectedHttpMethod, string expectedRouteTemplate, string? expectedTraceId)
     {
         var httpErrorLine = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
@@ -188,7 +217,7 @@ public sealed class OrderLogTests
 
     // Exactly one log per error counts every Warning or Error line the app wrote, whatever class wrote it. The test
     // host has no wwwroot, so the static files middleware warns about that at startup; that line is not about the call.
-    private static JsonLogLine AssertSingleWarningOrErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture) =>
+    internal static JsonLogLine AssertSingleWarningOrErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture) =>
         Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine =>
             jsonLogLine.LogLevel is "Warning" or "Error" && jsonLogLine.Category != "Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware");
 

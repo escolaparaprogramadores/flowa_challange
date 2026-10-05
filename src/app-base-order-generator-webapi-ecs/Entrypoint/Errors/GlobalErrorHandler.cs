@@ -15,16 +15,31 @@ public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsServ
         var errorProblemDetails = exception switch
         {
             BadHttpRequestException => ApiProblemDetails.BuildErrorProblemDetails(ResultStatus.InvalidInput, null, InvalidRequestMessage, []),
+            OrderNotAnsweredException orderNotAnswered => ApiProblemDetails.BuildErrorProblemDetails(
+                ResultStatus.ServiceUnavailable, orderNotAnswered.ErrorCode, OrderAccumulatorMessages.OrderAccumulatorUnavailableMessage, []),
             _ when IsOrderAccumulatorUnavailable(exception) => ApiProblemDetails.BuildErrorProblemDetails(
                 ResultStatus.ServiceUnavailable, OrderAccumulatorUnavailableErrorCode, OrderAccumulatorMessages.OrderAccumulatorUnavailableMessage, []),
             _ => ApiProblemDetails.BuildErrorProblemDetails(ResultStatus.InternalError, null, UnexpectedErrorMessage, [])
         };
 
         var httpErrorLogContext = new { ErrorCode = errorProblemDetails.Type, Method = httpContext.Request.Method, Route = ApiProblemDetails.ReadRouteTemplate(httpContext) };
-        if (errorProblemDetails.Status == StatusCodes.Status500InternalServerError)
-            httpErrorLogger.LogError(exception, "Unexpected application error.", httpErrorLogContext);
+        void WriteHttpErrorLog()
+        {
+            if (errorProblemDetails.Status == StatusCodes.Status500InternalServerError)
+                httpErrorLogger.LogError(exception, "Unexpected application error.", httpErrorLogContext);
+            else
+                httpErrorLogger.LogWarning("Expected error in request.", httpErrorLogContext);
+        }
+
+        if (exception is OrderFailureException orderFailure)
+        {
+            errorProblemDetails.Extensions["traceId"] = orderFailure.ClOrdId;
+            OrderTraceLogScope.WriteUnderOrderTrace(orderFailure.ClOrdId, WriteHttpErrorLog);
+        }
         else
-            httpErrorLogger.LogWarning("Expected error in request.", httpErrorLogContext);
+        {
+            WriteHttpErrorLog();
+        }
 
         httpContext.Response.StatusCode = errorProblemDetails.Status!.Value;
         await problemDetailsService.WriteAsync(new ProblemDetailsContext
@@ -37,7 +52,7 @@ public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsServ
         return true;
     }
 
-    // The OrderAccumulator refused the connection, answered outside 2xx, or the 5 s of the HttpClient ran out.
+    // The OrderAccumulator refused the connection, answered outside the contract, or the 5 s of the HttpClient ran out.
     private static bool IsOrderAccumulatorUnavailable(Exception exception) =>
         exception is HttpRequestException or TaskCanceledException { InnerException: TimeoutException };
 }

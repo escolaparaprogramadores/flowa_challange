@@ -255,7 +255,12 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
 
         var unexpectedErrorProblem = await ReadProblemDetailsAsync(orderHttpResponse, HttpStatusCode.InternalServerError);
         Assert.Equal("urn:base-investimentos:problem:internal-error", unexpectedErrorProblem.GetProperty("type").GetString());
+        Assert.Equal("Erro interno", unexpectedErrorProblem.GetProperty("title").GetString());
         Assert.Equal("Aconteceu um erro inesperado. Informe o traceId ao suporte.", unexpectedErrorProblem.GetProperty("detail").GetString());
+        Assert.Equal("InternalError", unexpectedErrorProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unexpectedErrorProblem.GetProperty("errors").EnumerateArray());
+        // CA-11: the order already had its ClOrdID, so the answer carries it.
+        Assert.Equal(Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders).GetString(Tags.ClOrdID), unexpectedErrorProblem.GetProperty("traceId").GetString());
         // The technical text of the failure stays in the log.
         Assert.DoesNotContain("ExecutionReport", await orderHttpResponse.Content.ReadAsStringAsync());
     }
