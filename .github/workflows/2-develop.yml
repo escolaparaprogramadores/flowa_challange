@@ -278,23 +278,24 @@ jobs:
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
           # Plan guard: only the two task definitions may be destroyed or replaced (every image deploy replaces
-          # them), and only they and the log collector's task roles may be created; anything else stops the run
-          # here, before apply. The plan JSON stays on the runner.
+          # them); only they and the log collector's task roles may be created, and those roles may only be
+          # removed when Datadog is switched off. Anything else stops the run here, before apply. The plan JSON
+          # stays on the runner. New resources in infra/ must be added to these lists.
           terraform show -json tfplan > "$RUNNER_TEMP/plano-do-deploy.json"
           jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
             | "plano: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/plano-do-deploy.json"
           task_definitions_que_podem_ser_trocadas='["aws_ecs_task_definition.tarefa_do_order_generator",
             "aws_ecs_task_definition.tarefa_do_order_accumulator"]'
-          recursos_que_podem_ser_criados='["aws_ecs_task_definition.tarefa_do_order_generator",
-            "aws_ecs_task_definition.tarefa_do_order_accumulator",
-            "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"generator\"]",
+          roles_do_coletor_de_logs='["aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"generator\"]",
             "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"accumulator\"]",
             "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"generator\"]",
             "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"accumulator\"]"]'
-          mudancas_fora_do_permitido=$(jq -r \
-            --argjson trocaveis "$task_definitions_que_podem_ser_trocadas" --argjson criaveis "$recursos_que_podem_ser_criados" \
-            '.resource_changes[]
-            | select(((.change.actions | index("delete")) and (.address | IN($trocaveis[]) | not))
+          mudancas_fora_do_permitido=$(jq -r --arg datadog_ligado "$AGENTE_DATADOG_LIGADO" \
+            --argjson trocaveis "$task_definitions_que_podem_ser_trocadas" --argjson do_coletor "$roles_do_coletor_de_logs" \
+            '($trocaveis + (if $datadog_ligado == "true" then [] else $do_coletor end)) as $apagaveis
+            | ($trocaveis + $do_coletor) as $criaveis
+            | .resource_changes[]
+            | select(((.change.actions | index("delete")) and (.address | IN($apagaveis[]) | not))
               or ((.change.actions | index("create")) and (.address | IN($criaveis[]) | not)))
             | "\(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/plano-do-deploy.json")
           if [ -n "$mudancas_fora_do_permitido" ]; then
