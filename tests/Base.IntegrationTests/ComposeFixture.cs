@@ -61,6 +61,14 @@ public sealed class ComposeFixture : IAsyncLifetime
     public Task<string> ReadServiceLogAsync(string serviceName) =>
         RunComposeCommandAsync(TimeSpan.FromSeconds(30), "logs", "--no-color", "--no-log-prefix", serviceName);
 
+    // Only what the app writes to stdout (the log lines); docker logs sends the container stderr to its own stderr,
+    // where the native runtime writes notices such as a missing libgssapi.
+    public async Task<string> ReadServiceStdoutAsync(string serviceName)
+    {
+        var containerId = (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "ps", "-q", serviceName)).Trim();
+        return await CaptureComposeTestCommandOutputAsync("docker", TimeSpan.FromSeconds(30), "logs", containerId);
+    }
+
     public async Task<ServiceContainerState> InspectServiceContainerAsync(string serviceName)
     {
         var containerId = (await RunComposeCommandAsync(TimeSpan.FromSeconds(30), "ps", "-q", serviceName)).Trim();

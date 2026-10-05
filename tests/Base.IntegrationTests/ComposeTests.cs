@@ -114,7 +114,8 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(2, generatorOrderLines.Count);
         var sentNewOrderSingle = Assert.Single(generatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
         Assert.Contains("|35=D|", sentNewOrderSingle.ReadLogField("FixMessage"));
-        Assert.Matches($@"\|5100=00-{clOrdId}-[0-9a-f]{{16}}-01\|", sentNewOrderSingle.ReadLogField("FixMessage"));
+        // The trace flags are the Datadog tracer's (it decides the sampling), so only the trace id is fixed here.
+        Assert.Matches($@"\|5100=00-{clOrdId}-[0-9a-f]{{16}}-[0-9a-f]{{2}}\|", sentNewOrderSingle.ReadLogField("FixMessage"));
         var receivedExecutionReport = Assert.Single(generatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message received.");
         Assert.Contains("|35=8|", receivedExecutionReport.ReadLogField("FixMessage"));
 
@@ -290,7 +291,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     private async Task<IReadOnlyList<ComposeJsonLogLine>> ReadServiceJsonLogLinesAsync(string serviceName) =>
-        (await composeUnderTest.ReadServiceLogAsync(serviceName))
+        (await composeUnderTest.ReadServiceStdoutAsync(serviceName))
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(ComposeJsonLogLine.ParseContainerLogLine)
             .ToList();
