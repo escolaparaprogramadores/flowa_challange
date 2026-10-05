@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Base.OrderAccumulator.Tests;
 
-// CA-5 and CA-6 on the OrderAccumulator (backend-problem-details.md, "Teste obrigatório do contrato"): each HTTP error
+// CA-5 and CA-6 on the OrderAccumulator (backend-problem-details.md, mandatory contract test section): each HTTP error
 // is a problem+json for any caller, with exactly one log line from the GlobalErrorHandler carrying the same trace id.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase)

@@ -9,16 +9,16 @@ using Testcontainers.PostgreSql;
 
 namespace Base.OrderAccumulator.Tests;
 
-// Um PostgreSQL de verdade, em container, compartilhado pelos testes de banco.
+// A real PostgreSQL, in a container, shared by the database tests.
 public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
 {
-    // max_connections acima do padrão (100) para o teste de concorrência abrir 200 conexões de uma vez.
+    // max_connections above the default (100) so the concurrency test can open 200 connections at once.
     private readonly PostgreSqlContainer orderAccumulatorPostgresContainer = new PostgreSqlBuilder("postgres:17")
         .WithCommand("-c", "max_connections=300")
         .Build();
 
-    // Com a máquina carregada, uma rodada de 200 ordens já passou dos 30 s padrão do Npgsql
-    // esperando a linha de exposição. O teste dá mais folga; o código de produção não muda.
+    // With the machine under load, a round of 200 orders already went past the Npgsql default of 30 s
+    // waiting for the exposure row. The test gives more room; the production code does not change.
     public const int OrderDatabaseTestCommandTimeoutSeconds = 120;
 
     public string OrderDatabaseConnectionString { get; private set; } = null!;
@@ -48,7 +48,7 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
         await orderAccumulatorPostgresContainer.DisposeAsync();
     }
 
-    // Cada teste começa do zero: nenhuma ordem e os três símbolos zerados pela própria migração.
+    // Each test starts from zero: no order and the three symbols zeroed by the migration itself.
     public async Task ResetOrdersAndExposuresAsync()
     {
         await using (var orderDatabaseConnection = await OrderDatabaseDataSource.OpenConnectionAsync())
@@ -68,7 +68,7 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
             new { ClOrdId = clOrdId });
     }
 
-    // Soma, direto da tabela de ordens, preço × quantidade das aceitas (compra soma, venda subtrai).
+    // Sums, straight from the orders table, price × quantity of the accepted ones (a buy adds, a sell subtracts).
     public async Task<decimal> SumAcceptedOrdersExposureAsync(string symbol)
     {
         await using var orderDatabaseConnection = await OrderDatabaseDataSource.OpenConnectionAsync();

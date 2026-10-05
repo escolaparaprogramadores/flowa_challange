@@ -11,7 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Base.OrderAccumulator.Tests;
 
-// CA-18 (parte da F2), D-8, D-11 e o apoio ao D-13: o que fica gravado e o que volta numa repetição.
+// CA-18 (part of F2), D-8, D-11 and the support for D-13: what gets stored and what comes back on a repeat.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
@@ -159,7 +159,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var missingRowError = await Assert.ThrowsAsync<InvalidOperationException>(
             () => orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VIIA4", 1, 1.00m)));
 
-        Assert.Equal("O símbolo VIIA4 não tem linha de exposição. A migração do banco não foi aplicada.", missingRowError.Message);
+        Assert.Equal("The symbol VIIA4 has no exposure row. The database migration was not applied.", missingRowError.Message);
         Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }
 
@@ -172,7 +172,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var missingRowError = await Assert.ThrowsAsync<InvalidOperationException>(
             () => orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
 
-        Assert.Equal("O símbolo VALE3 não tem linha de exposição. A migração do banco não foi aplicada.", missingRowError.Message);
+        Assert.Equal("The symbol VALE3 has no exposure row. The database migration was not applied.", missingRowError.Message);
     }
 
     [Fact]

@@ -24,14 +24,14 @@ using Npgsql;
 var orderAccumulatorWebBuilder = WebApplication.CreateBuilder(args);
 orderAccumulatorWebBuilder.AddApplicationLogging();
 
-// O /version promete o sha completo; sem ele o app não sobe, para o erro aparecer no build e não no aceite.
+// /version promises the full sha; without it the app does not start, so the error shows up in the build and not in the acceptance.
 var buildCommitSha = ReadBuildCommitSha() is { Length: 40 } shaFromBuild
     ? shaFromBuild
     : throw new InvalidOperationException(
-        "O build não gravou o commit. Compile dentro do repositório git ou passe -p:SourceRevisionId=<sha completo>.");
+        "The build did not record the commit. Build inside the git repository or pass -p:SourceRevisionId=<full sha>.");
 
 var flowaConnectionString = orderAccumulatorWebBuilder.Configuration.GetConnectionString(OrderAccumulatorConfigurationKeys.OrderDatabaseConnectionStringName)
-    ?? throw new InvalidOperationException("Defina ConnectionStrings__Flowa com a conexão do PostgreSQL.");
+    ?? throw new InvalidOperationException("Set ConnectionStrings__Flowa to the PostgreSQL connection.");
 orderAccumulatorWebBuilder.Services.AddOrderAccumulatorPersistence(flowaConnectionString);
 orderAccumulatorWebBuilder.Services.AddOrderMetrics(orderAccumulatorWebBuilder.Configuration);
 orderAccumulatorWebBuilder.Services.AddSingleton<SymbolExposureMemoryService>();
@@ -43,7 +43,7 @@ orderAccumulatorWebBuilder.Services.AddScoped<ListOrdersUseCase>();
 orderAccumulatorWebBuilder.Services.AddScoped<GetExposuresUseCase>();
 orderAccumulatorWebBuilder.Services.AddHostedService<SymbolExposureGaugeWorker>();
 
-// Acceptor FIX 4.4: sobe junto com o app, depois da migração abaixo.
+// FIX 4.4 acceptor: starts together with the app, after the migration below.
 orderAccumulatorWebBuilder.Services.AddSingleton<FixSessionLogFactory>();
 orderAccumulatorWebBuilder.Services.AddSingleton<NewOrderSingleConsumer>();
 orderAccumulatorWebBuilder.Services.AddHostedService<FixAcceptorWorker>();
@@ -52,7 +52,7 @@ orderAccumulatorWebBuilder.Services.AddHostedService<FixAcceptorWorker>();
 orderAccumulatorWebBuilder.Services.ConfigureHttpJsonOptions(jsonOptions => jsonOptions.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 // The own writer comes before AddProblemDetails: it is the first in line and answers any caller.
 orderAccumulatorWebBuilder.Services.AddSingleton<IProblemDetailsWriter, ProblemDetailsForAnyClientWriter>();
-orderAccumulatorWebBuilder.Services.AddProblemDetails(problemDetailsOptions => problemDetailsOptions.CustomizeProblemDetails = ApiProblemDetails.CompleteProblemDetails);
+orderAccumulatorWebBuilder.Services.AddProblemDetails(problemDetailsOptions => problemDetailsOptions.CustomizeProblemDetails = ApiProblemDetailsExtensions.CompleteProblemDetails);
 orderAccumulatorWebBuilder.Services.AddExceptionHandler<GlobalErrorHandler>();
 
 var orderAccumulatorApp = orderAccumulatorWebBuilder.Build();
@@ -60,7 +60,7 @@ orderAccumulatorApp.UseExceptionHandler();
 // Any 404 under /api, a route that does not exist included, answers the problem+json too.
 orderAccumulatorApp.UseStatusCodePages();
 
-// As tabelas precisam existir antes de a primeira ordem chegar.
+// The tables must exist before the first order arrives.
 await orderAccumulatorApp.Services.GetRequiredService<NpgsqlDataSource>().ApplyOrderAccumulatorSchemaAsync();
 await orderAccumulatorApp.Services.LoadSymbolExposureMemoryAsync();
 
@@ -73,7 +73,7 @@ orderAccumulatorApp.MapGet("/api/exposures", async (GetExposuresUseCase getExpos
         symbolExposures.Select(symbolExposure => new SymbolExposureResponse(
             symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)).ToList())));
 
-// O teto de páginas limita o custo de um OFFSET grande no banco.
+// The page cap limits the cost of a large OFFSET in the database.
 const int MaxOrderListPageNumber = 1000;
 
 orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, ListOrdersUseCase listOrdersUseCase, CancellationToken cancellationToken) =>
@@ -98,7 +98,7 @@ orderAccumulatorApp.MapDelete("/api/orders", async (DeleteAllOrdersUseCase delet
 
 orderAccumulatorApp.Run();
 
-// O SDK grava o commit do build na versão informativa ("1.0.0+<sha>").
+// The SDK records the build commit in the informational version ("1.0.0+<sha>").
 static string? ReadBuildCommitSha()
 {
     var informationalVersion = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
@@ -106,7 +106,7 @@ static string? ReadBuildCommitSha()
     return commitSeparatorIndex >= 0 ? informationalVersion![(commitSeparatorIndex + 1)..] : null;
 }
 
-// Sem "page" vale a primeira página; o resto precisa ser um inteiro de 1 a 1000, sem sinal nem espaço.
+// Without "page" the first page applies; anything else must be an integer from 1 to 1000, with no sign or space.
 static bool TryReadOrderListPageNumber(StringValues pageQueryValues, out int orderListPageNumber)
 {
     orderListPageNumber = 1;
@@ -128,7 +128,7 @@ static ListedOrderResponse ToListedOrderResponse(OrderListItem storedOrder) => n
     storedOrder.OrderId,
     storedOrder.ClOrdId);
 
-// Lado fora de 1/2 só existe em ordem rejeitada que chegou direto pelo FIX; sai como null, igual ao símbolo.
+// A side outside 1/2 only exists in a rejected order that came straight through FIX; it goes out as null, like the symbol.
 static string? ToJsonOrderSideOfStoredOrder(string storedOrderSide) => storedOrderSide switch
 {
     [OrderSideCodes.BuyOrderSideFixCode] => "buy",

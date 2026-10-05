@@ -14,15 +14,15 @@ public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsServ
     {
         var errorProblemDetails = exception switch
         {
-            BadHttpRequestException => ApiProblemDetails.BuildErrorProblemDetails(ResultStatus.InvalidInput, null, InvalidRequestMessage, []),
-            OrderNotAnsweredException orderNotAnswered => ApiProblemDetails.BuildErrorProblemDetails(
+            BadHttpRequestException => ApiProblemDetailsExtensions.BuildErrorProblemDetails(ResultStatus.InvalidInput, null, InvalidRequestMessage, []),
+            OrderNotAnsweredException orderNotAnswered => ApiProblemDetailsExtensions.BuildErrorProblemDetails(
                 ResultStatus.ServiceUnavailable, orderNotAnswered.ErrorCode, OrderAccumulatorMessages.OrderAccumulatorUnavailableMessage, []),
-            _ when IsOrderAccumulatorUnavailable(exception) => ApiProblemDetails.BuildErrorProblemDetails(
+            _ when IsOrderAccumulatorUnavailable(exception) => ApiProblemDetailsExtensions.BuildErrorProblemDetails(
                 ResultStatus.ServiceUnavailable, OrderAccumulatorUnavailableErrorCode, OrderAccumulatorMessages.OrderAccumulatorUnavailableMessage, []),
-            _ => ApiProblemDetails.BuildErrorProblemDetails(ResultStatus.InternalError, null, UnexpectedErrorMessage, [])
+            _ => ApiProblemDetailsExtensions.BuildErrorProblemDetails(ResultStatus.InternalError, null, UnexpectedErrorMessage, [])
         };
 
-        var httpErrorLogContext = new { ErrorCode = errorProblemDetails.Type, Method = httpContext.Request.Method, Route = ApiProblemDetails.ReadRouteTemplate(httpContext) };
+        var httpErrorLogContext = new { ErrorCode = errorProblemDetails.Type, Method = httpContext.Request.Method, Route = ApiProblemDetailsExtensions.ReadRouteTemplate(httpContext) };
         void WriteHttpErrorLog()
         {
             if (errorProblemDetails.Status == StatusCodes.Status500InternalServerError)

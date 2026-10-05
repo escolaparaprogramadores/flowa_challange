@@ -32,7 +32,7 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
             await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
     }
 
-    // CA-6: 2 × 49.999.500,00 + 1.000,00 cai exatamente no limite, para cima e para baixo.
+    // CA-6: 2 × 49,999,500.00 + 1,000.00 lands exactly on the limit, upwards and downwards.
     [Theory]
     [InlineData(OrderSideCodes.BuyOrderSideFixCode, 1)]
     [InlineData(OrderSideCodes.SellOrderSideFixCode, -1)]
@@ -49,8 +49,8 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
         Assert.Equal(limitSign * ExposureLimitPolicy.PerSymbol, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
-    // CA-7: faltando 999,99 para o limite, uma ordem de 1.000,00 passa um centavo e é rejeitada;
-    // a seguinte, de 999,99, cabe a partir do saldo de antes.
+    // CA-7: with 999.99 left to the limit, an order of 1,000.00 goes one cent over and is rejected;
+    // the next one, of 999.99, fits from the balance before.
     [Theory]
     [InlineData(OrderSideCodes.BuyOrderSideFixCode, 1)]
     [InlineData(OrderSideCodes.SellOrderSideFixCode, -1)]
@@ -90,6 +90,6 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
     {
         var orderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(incomingOrder);
         Assert.True(orderDecision.Accepted,
-            $"ordem {incomingOrder.Symbol} {incomingOrder.Side} {incomingOrder.Quantity} x {incomingOrder.Price} foi rejeitada: {orderDecision.RejectReason}");
+            $"order {incomingOrder.Symbol} {incomingOrder.Side} {incomingOrder.Quantity} x {incomingOrder.Price} was rejected: {orderDecision.RejectReason}");
     }
 }

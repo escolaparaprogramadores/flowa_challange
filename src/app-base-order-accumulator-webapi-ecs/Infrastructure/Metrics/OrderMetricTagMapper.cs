@@ -2,8 +2,8 @@ using Base.OrderAccumulator.Domain.Orders;
 
 namespace Base.OrderAccumulator.Infrastructure.Metrics;
 
-// Etiquetas com valores fechados: cada valor novo vira uma série paga no Datadog.
-// Símbolo fora da lista conta numa série só, para o total não passar de 20 séries.
+// Tags with closed values: each new value becomes a paid series in Datadog.
+// A symbol outside the list counts in a single series, so the total does not exceed 20 series.
 public static class OrderMetricTagMapper
 {
     public const string InvalidTagValue = "invalido";

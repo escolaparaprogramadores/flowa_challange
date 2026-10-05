@@ -12,10 +12,10 @@ public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsServ
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
         var errorProblemDetails = exception is BadHttpRequestException
-            ? ApiProblemDetails.BuildErrorProblemDetails(ResultStatus.InvalidInput, null, InvalidRequestMessage, [])
-            : ApiProblemDetails.BuildErrorProblemDetails(ResultStatus.InternalError, null, UnexpectedErrorMessage, []);
+            ? ApiProblemDetailsExtensions.BuildErrorProblemDetails(ResultStatus.InvalidInput, null, InvalidRequestMessage, [])
+            : ApiProblemDetailsExtensions.BuildErrorProblemDetails(ResultStatus.InternalError, null, UnexpectedErrorMessage, []);
 
-        var httpErrorLogContext = new { ErrorCode = errorProblemDetails.Type, Method = httpContext.Request.Method, Route = ApiProblemDetails.ReadRouteTemplate(httpContext) };
+        var httpErrorLogContext = new { ErrorCode = errorProblemDetails.Type, Method = httpContext.Request.Method, Route = ApiProblemDetailsExtensions.ReadRouteTemplate(httpContext) };
         errorProblemDetails.Extensions["traceId"] = HttpErrorTraceScope.WriteUnderHttpErrorTrace(httpContext, () =>
         {
             if (errorProblemDetails.Status == StatusCodes.Status500InternalServerError)

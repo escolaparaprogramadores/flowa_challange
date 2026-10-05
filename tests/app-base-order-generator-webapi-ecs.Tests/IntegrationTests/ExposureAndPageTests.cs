@@ -13,7 +13,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace Base.OrderGenerator.Tests;
 
-// D-10: o OrderGenerator só repassa a exposição do OrderAccumulator.
+// D-10: the OrderGenerator only passes on the exposure of the OrderAccumulator.
 public sealed class ExposureProxyTests
 {
     private const string OrderAccumulatorUnavailableMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
@@ -46,7 +46,7 @@ public sealed class ExposureProxyTests
     }
 
     [Fact]
-    public async Task Accumulator_fora_do_ar_responde_503_em_portugues()
+    public async Task Accumulator_down_answers_503_in_portuguese()
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}");
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -56,11 +56,11 @@ public sealed class ExposureProxyTests
         apiResponseClock.Stop();
 
         await AssertExposureError(exposuresResponse);
-        Assert.True(apiResponseClock.Elapsed < TimeSpan.FromSeconds(5), $"levou {apiResponseClock.Elapsed}");
+        Assert.True(apiResponseClock.Elapsed < TimeSpan.FromSeconds(5), $"took {apiResponseClock.Elapsed}");
     }
 
     [Fact]
-    public async Task Accumulator_que_nao_responde_em_5_segundos_vira_503()
+    public async Task Accumulator_that_does_not_answer_in_5_seconds_becomes_503()
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async exposuresHttpContext =>
             await Task.Delay(TimeSpan.FromSeconds(8), exposuresHttpContext.RequestAborted));
@@ -94,7 +94,7 @@ public sealed class ExposureProxyTests
     }
 
     [Fact]
-    public async Task Accumulator_com_erro_500_vira_503()
+    public async Task Accumulator_with_error_500_becomes_503()
     {
         await using var fakeAccumulator = await StartFakeAccumulator(exposuresHttpContext =>
         {
@@ -145,7 +145,7 @@ public sealed class ExposureProxyTests
 
     private sealed class ExplodingAccumulatorHandler : HttpMessageHandler
     {
-        public const string InternalErrorDetail = "detalhe-interno-que-nao-pode-vazar";
+        public const string InternalErrorDetail = "internal-detail-that-must-not-leak";
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage accumulatorExposuresRequest, CancellationToken accumulatorRequestCancellation) =>
             throw new InvalidOperationException(InternalErrorDetail);
@@ -178,47 +178,47 @@ public sealed class ExposureProxyTests
     }
 }
 
-// Contrato §5: a página sai de wwwroot, com index.html como padrão; /api nunca cai nela.
+// Contract §5: the page comes from wwwroot, with index.html as the default; /api never falls into it.
 public sealed class OrderGeneratorPageTests : IDisposable
 {
-    private const string BoletaTestIndexHtml = "<!doctype html><title>boleta-de-teste</title>";
+    private const string OrderTicketTestIndexHtml = "<!doctype html><title>test-order-ticket</title>";
     private readonly string _temporaryWebRoot = Directory.CreateTempSubdirectory("flowa-wwwroot-").FullName;
 
-    public OrderGeneratorPageTests() => File.WriteAllText(Path.Combine(_temporaryWebRoot, "index.html"), BoletaTestIndexHtml);
+    public OrderGeneratorPageTests() => File.WriteAllText(Path.Combine(_temporaryWebRoot, "index.html"), OrderTicketTestIndexHtml);
 
     [Theory]
     [InlineData("/")]
-    [InlineData("/boleta")]
-    [InlineData("/painel/exposicao")]
-    public async Task Raiz_e_rotas_da_tela_devolvem_o_index_html(string pagePath)
+    [InlineData("/order-ticket")]
+    [InlineData("/dashboard/exposure")]
+    public async Task Root_and_screen_routes_return_the_index_html(string pagePath)
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), orderGeneratorWebRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
         var pageResponse = await orderGeneratorClient.GetAsync(pagePath);
 
-        // A página tem de sair só da raiz do teste, mesmo com o build da tela em src/app-base-order-generator-webapi-ecs/wwwroot.
-        // Em Development o provedor vira um composto com o wwwroot do projeto na frente; aqui ele é só a pasta do teste.
+        // The page has to come only from the test root, even with the screen build in src/app-base-order-generator-webapi-ecs/wwwroot.
+        // In Development the provider becomes a composite with the project wwwroot in front; here it is only the test folder.
         var orderGeneratorHostEnvironment = orderGeneratorFactory.Services.GetRequiredService<IWebHostEnvironment>();
         Assert.Equal(Environments.Production, orderGeneratorHostEnvironment.EnvironmentName);
         var webRootFileProvider = Assert.IsType<PhysicalFileProvider>(orderGeneratorHostEnvironment.WebRootFileProvider);
         Assert.Equal(Path.TrimEndingDirectorySeparator(_temporaryWebRoot), Path.TrimEndingDirectorySeparator(webRootFileProvider.Root));
         Assert.Equal(HttpStatusCode.OK, pageResponse.StatusCode);
         Assert.Equal("text/html", pageResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(BoletaTestIndexHtml, await pageResponse.Content.ReadAsStringAsync());
+        Assert.Equal(OrderTicketTestIndexHtml, await pageResponse.Content.ReadAsStringAsync());
     }
 
     [Fact]
-    public async Task Sem_trocar_a_raiz_a_pagina_sai_do_wwwroot_ao_lado_do_binario()
+    public async Task Without_changing_the_root_the_page_comes_from_the_wwwroot_next_to_the_binary()
     {
-        // É de lá que o build e o publish servem a página que a F5 gera em src/app-base-order-generator-webapi-ecs/wwwroot.
+        // That is where the build and the publish serve the page that F5 generates in src/app-base-order-generator-webapi-ecs/wwwroot.
         var binaryWebRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
         var binaryIndexHtml = Path.Combine(binaryWebRoot, "index.html");
         var indexCreatedByThisTest = !File.Exists(binaryIndexHtml);
         if (indexCreatedByThisTest)
         {
             Directory.CreateDirectory(binaryWebRoot);
-            File.WriteAllText(binaryIndexHtml, BoletaTestIndexHtml);
+            File.WriteAllText(binaryIndexHtml, OrderTicketTestIndexHtml);
         }
 
         try
@@ -246,8 +246,8 @@ public sealed class OrderGeneratorPageTests : IDisposable
 
     [Theory]
     [InlineData("/api", "application/json")]
-    [InlineData("/api/nao-existe", "application/json")]
-    [InlineData("/api/nada", "text/html")]
+    [InlineData("/api/does-not-exist", "application/json")]
+    [InlineData("/api/nothing", "text/html")]
     [InlineData("/api/orders/123", "application/json")]
     public async Task Unknown_api_path_answers_404_problem_and_not_the_index(string apiPath, string acceptedMediaType)
     {
@@ -265,7 +265,7 @@ public sealed class OrderGeneratorPageTests : IDisposable
             notFoundProblem = await OrderApiTests.ReadProblemDetailsAsync(unknownApiResponse, HttpStatusCode.NotFound);
         }
 
-        Assert.DoesNotContain("boleta-de-teste", unknownApiBody);
+        Assert.DoesNotContain("test-order-ticket", unknownApiBody);
         Assert.Equal("urn:base-investimentos:problem:not-found", notFoundProblem.GetProperty("type").GetString());
         Assert.Equal("Não encontrado", notFoundProblem.GetProperty("title").GetString());
         Assert.Equal("Não encontrado", notFoundProblem.GetProperty("detail").GetString());
@@ -276,7 +276,7 @@ public sealed class OrderGeneratorPageTests : IDisposable
     }
 
     [Fact]
-    public async Task Health_responde_Healthy_sem_sessao_FIX()
+    public async Task Health_answers_Healthy_without_a_fix_session()
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), orderGeneratorWebRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -288,7 +288,7 @@ public sealed class OrderGeneratorPageTests : IDisposable
     }
 
     [Fact]
-    public async Task Version_responde_o_commit_do_HEAD_do_repositorio()
+    public async Task Version_answers_the_commit_of_the_repository_head()
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), orderGeneratorWebRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -300,7 +300,7 @@ public sealed class OrderGeneratorPageTests : IDisposable
         Assert.Equal(ReadRepositoryGitHeadSha(), runningOrderGeneratorCommit);
     }
 
-    // Oráculo de fora do app: o git do repositório onde os testes foram compilados.
+    // Oracle from outside the app: the git of the repository where the tests were built.
     private static string ReadRepositoryGitHeadSha()
     {
         var gitRevParseProcess = Process.Start(new ProcessStartInfo("git", ["-C", AppContext.BaseDirectory, "rev-parse", "HEAD"])

@@ -21,13 +21,13 @@ using StatsdClient;
 
 namespace Base.OrderAccumulator.Tests;
 
-// As métricas saem por UDP de verdade para um ouvinte local, no lugar do agente do Datadog,
-// e o processamento usa o PostgreSQL real: aceita, rejeita e repetição vêm do banco.
+// The metrics go out over real UDP to a local listener, in place of the Datadog agent,
+// and the processing uses the real PostgreSQL: accepted, rejected and repeat come from the database.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
-    private const string SentinelMetricName = "flowa.teste.sentinela";
-    private static readonly string[] UnifiedServiceTags = ["env:dev", "service:order-accumulator", "version:sha-de-teste"];
+    private const string SentinelMetricName = "flowa.test.sentinel";
+    private static readonly string[] UnifiedServiceTags = ["env:dev", "service:order-accumulator", "version:test-sha"];
 
     private readonly DogStatsdUdpListener dogStatsdUdpListener = new();
     private DogStatsdService orderMetricsClient = null!;
@@ -135,7 +135,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Failed_processing_is_not_counted_and_the_same_exception_reaches_the_caller()
     {
-        var databaseFailure = new NpgsqlException("banco fora do ar");
+        var databaseFailure = new NpgsqlException("database down");
         var meteredRunnerWithFailingDatabase = new DecideIncomingOrderTestRunner(
             orderAccumulatorDatabase.OrderDatabaseDataSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
             wrapOrderRepository: _ => new OrderRepositoryFailingWith(databaseFailure));
@@ -199,7 +199,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task App_sends_order_metrics_to_the_agent_on_localhost_8125_with_the_dd_tags()
     {
-        // A versão única separa as métricas deste teste das de outro app de teste que use a mesma porta.
+        // The unique version separates the metrics of this test from those of another test app using the same port.
         var uniqueVersionTag = "sha-" + Guid.NewGuid().ToString("N");
         using var agentOnTheDatadogPort = new DogStatsdUdpListener(OrderMetricsExtensions.DatadogAgentDogStatsdPort);
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
@@ -226,7 +226,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
         var capturedAppLogs = new OrderAccumulatorCapturedLogs();
-        await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "sha-sem-agente", capturedAppLogs);
+        await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "sha-without-agent", capturedAppLogs);
         var appServices = orderAccumulatorApp.Services;
         var appOrderMetricsClient = (DogStatsdService)appServices.GetRequiredService<IDogStatsd>();
         var appOrderDecisionServices = appServices;
@@ -251,10 +251,10 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task App_counts_orders_through_the_datadog_adapter_and_loads_the_stored_exposure_at_startup()
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync("UPDATE exposures SET exposure = 4321.50 WHERE symbol = 'VALE3'");
-        await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "sha-de-teste", new OrderAccumulatorCapturedLogs());
+        await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "test-sha", new OrderAccumulatorCapturedLogs());
 
         var appServices = orderAccumulatorApp.Services;
-        Assert.IsType<DatadogOrderMetricsAdapter>(appServices.GetRequiredService<IOrderMetrics>());
+        Assert.IsType<DatadogOrderMetricsAdapter>(appServices.GetRequiredService<IOrderMetricsPort>());
         await using (var orderOperationScope = appServices.CreateAsyncScope())
             Assert.IsType<OrderRepository>(orderOperationScope.ServiceProvider.GetRequiredService<IOrderRepository>());
         Assert.Contains(appServices.GetServices<IHostedService>(), hostedService => hostedService is SymbolExposureGaugeWorker);
@@ -263,7 +263,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
             appServices.GetRequiredService<SymbolExposureMemoryService>().ReadCurrentSymbolExposures());
     }
 
-    // Banco próprio por teste de app: a exposição carregada na subida não depende dos outros testes.
+    // Own database per app test: the exposure loaded at startup does not depend on the other tests.
     private async Task<string> CreateStartupDatabaseAsync(string? sqlBeforeTheAppStarts = null)
     {
         var startupDatabaseName = "metricas_" + Guid.NewGuid().ToString("N");
@@ -300,7 +300,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         return orderAccumulatorApp;
     }
 
-    // O gauge sai num laço de envios; lê até chegarem os três símbolos e os ordena pela etiqueta.
+    // The gauge goes out in a send loop; reads until the three symbols arrive and sorts them by tag.
     private async Task<List<DogStatsdMetricLine>> ReadThreeExposureGaugesAsync()
     {
         using var gaugeWait = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -326,7 +326,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         symbolExposureMemory.LoadStoredExposures(await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
     }
 
-    // A ausência de métrica só se prova com um envio depois: tudo o que chegou antes da sentinela é o que foi enviado.
+    // The absence of a metric can only be proven with a send afterwards: everything that arrived before the sentinel is what was sent.
     private async Task<List<DogStatsdMetricLine>> SendSentinelAndReadOrderMetricsAsync()
     {
         orderMetricsClient.Flush();
@@ -345,7 +345,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
             {
                 ["DD_ENV"] = "dev",
                 ["DD_SERVICE"] = "order-accumulator",
-                ["DD_VERSION"] = "sha-de-teste"
+                ["DD_VERSION"] = "test-sha"
             })
             .Build();
 
@@ -360,7 +360,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) => Task.FromException(databaseFailure);
     }
 
-    // Relógio que só anda quando o teste manda: o PeriodicTimer do gauge pede o timer aqui.
+    // A clock that only moves when the test says so: the gauge PeriodicTimer asks for its timer here.
     private sealed class ManualGaugeClock : TimeProvider
     {
         private ManualGaugeTimer? gaugeTimer;
@@ -393,8 +393,8 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 }
 
-// Uma linha DogStatsD: "nome:valor|tipo|#etiqueta,etiqueta". As etiquetas viram conjunto ordenado
-// para a comparação não depender da ordem em que o cliente as escreve.
+// One DogStatsD line: "name:value|type|#tag,tag". The tags become a sorted set
+// so the comparison does not depend on the order in which the client writes them.
 public sealed record DogStatsdMetricLine(string MetricName, string MetricValue, string MetricType, IReadOnlySet<string> MetricTags)
 {
     public static DogStatsdMetricLine ParseDogStatsdLine(string dogStatsdLine)
@@ -418,7 +418,7 @@ public sealed record DogStatsdMetricLine(string MetricName, string MetricValue, 
     public override string ToString() => $"{MetricName}:{MetricValue}|{MetricType}|#{string.Join(',', MetricTags)}";
 }
 
-// Faz o papel do agente: escuta UDP em IPv4 e IPv6, porque "localhost" pode resolver para qualquer um.
+// Plays the agent: listens to UDP on IPv4 and IPv6, because "localhost" may resolve to either one.
 public sealed class DogStatsdUdpListener : IDisposable
 {
     private static readonly TimeSpan SentinelWaitLimit = TimeSpan.FromSeconds(15);

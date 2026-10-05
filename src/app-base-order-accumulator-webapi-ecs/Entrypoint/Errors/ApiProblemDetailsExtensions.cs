@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Base.OrderAccumulator.Entrypoint.Errors;
 
 // HTTP contract of the /api routes (backend-problem-details.md): success as DataMessage, error as problem+json.
-public static class ApiProblemDetails
+public static class ApiProblemDetailsExtensions
 {
     public const string ProblemTypePrefix = "urn:base-investimentos:problem:";
 

@@ -35,7 +35,7 @@ public sealed class ExposureRepository(PostgresUnitOfWork orderDatabaseUnitOfWor
             SymbolExistsSql, exposureMoveParameters, orderDatabaseUnitOfWork.CurrentTransaction, cancellationToken: cancellationToken));
         if (exposureRowsOfSymbol == 0)
             throw new InvalidOperationException(
-                $"O símbolo {orderSymbol} não tem linha de exposição. A migração do banco não foi aplicada.");
+                $"The symbol {orderSymbol} has no exposure row. The database migration was not applied.");
 
         return false;
     }

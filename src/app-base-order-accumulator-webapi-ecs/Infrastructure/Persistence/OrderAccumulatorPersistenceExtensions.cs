@@ -8,7 +8,7 @@ using Npgsql;
 
 namespace Base.OrderAccumulator.Infrastructure.Persistence;
 
-// Pontos de entrada para o Program.cs: registrar os serviços e criar as tabelas na subida.
+// Entry points for Program.cs: register the services and create the tables at startup.
 public static class OrderAccumulatorPersistenceExtensions
 {
     private const string SeedExposuresSql = """
@@ -30,11 +30,11 @@ public static class OrderAccumulatorPersistenceExtensions
         return orderAccumulatorServices;
     }
 
-    // Duas instâncias subindo juntas disputariam o CREATE TABLE IF NOT EXISTS, que não é seguro em paralelo
-    // no PostgreSQL; a trava faz uma esperar a outra terminar.
+    // Two instances starting together would race on CREATE TABLE IF NOT EXISTS, which is not safe in parallel
+    // in PostgreSQL; the lock makes one wait for the other to finish.
     private const string LockSchemaSql = "SELECT pg_advisory_xact_lock(hashtext('flowa-orderaccumulator-schema'))";
 
-    // Cria o que faltar e garante uma linha zerada por símbolo. Não mexe em exposição já gravada.
+    // Creates what is missing and ensures one zeroed row per symbol. Does not touch exposure already stored.
     public static async Task ApplyOrderAccumulatorSchemaAsync(this NpgsqlDataSource orderDatabaseDataSource, CancellationToken cancellationToken = default)
     {
         await using var orderDatabaseConnection = await orderDatabaseDataSource.OpenConnectionAsync(cancellationToken);
@@ -49,7 +49,7 @@ public static class OrderAccumulatorPersistenceExtensions
     private static string ReadOrderAccumulatorSchema()
     {
         using var schemaResourceStream = typeof(OrderAccumulatorPersistenceExtensions).Assembly.GetManifestResourceStream("Base.OrderAccumulator.Infrastructure.Persistence.Schema.sql")
-            ?? throw new InvalidOperationException("O script Schema.sql não foi embutido no assembly.");
+            ?? throw new InvalidOperationException("The Schema.sql script was not embedded in the assembly.");
         using var schemaReader = new StreamReader(schemaResourceStream);
         return schemaReader.ReadToEnd();
     }

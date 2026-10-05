@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace Base.OrderAccumulator.Tests;
 
-// CA-17 (parte da F3): o GET /api/exposures no formato do contrato, antes e depois de ordens pelo FIX.
+// CA-17 (part of F3): GET /api/exposures in the contract format, before and after orders through FIX.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
@@ -30,11 +30,11 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
-        await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("compra-petr4", "PETR4", '1', 100, 10.50m));
-        await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("venda-vale3", "VALE3", '2', 20, 25.00m));
+        await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("buy-petr4", "PETR4", '1', 100, 10.50m));
+        await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("sell-vale3", "VALE3", '2', 20, 25.00m));
         var exposuresAfterAccepted = ReadExposureEntries(await GetExposuresJsonAsync(orderAccumulatorTestApp));
 
-        var rejectedOrderExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("rejeitada-viia4", "VIIA4", '1', 100_000, 1.00m));
+        var rejectedOrderExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("rejected-viia4", "VIIA4", '1', 100_000, 1.00m));
         var exposuresAfterRejected = ReadExposureEntries(await GetExposuresJsonAsync(orderAccumulatorTestApp));
 
         Assert.Equal(
@@ -53,7 +53,7 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
         return exposuresDataMessage.GetProperty("data");
     }
 
-    // Lê pelos nomes do contrato (camelCase), não pelo tipo C#: um nome trocado aqui quebra o teste.
+    // Reads by the contract names (camelCase), not by the C# type: a name changed here breaks the test.
     private static List<(string Symbol, decimal Exposure, decimal Remaining)> ReadExposureEntries(JsonElement exposuresJson) =>
         exposuresJson.GetProperty("exposures").EnumerateArray()
             .Select(exposureEntry => (exposureEntry.GetProperty("symbol").GetString()!,

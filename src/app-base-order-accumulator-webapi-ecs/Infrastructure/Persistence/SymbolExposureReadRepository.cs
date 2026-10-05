@@ -25,7 +25,7 @@ public sealed class SymbolExposureReadRepository(NpgsqlDataSource orderDatabaseD
             .Select(allowedSymbol => new SymbolExposure(allowedSymbol, exposureBySymbol.TryGetValue(allowedSymbol, out var storedExposure)
                 ? storedExposure
                 : throw new InvalidOperationException(
-                    $"O símbolo {allowedSymbol} não tem linha de exposição. A migração do banco não foi aplicada.")))
+                    $"The symbol {allowedSymbol} has no exposure row. The database migration was not applied.")))
             .ToList();
     }
 

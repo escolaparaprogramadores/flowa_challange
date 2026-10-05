@@ -28,7 +28,7 @@ public sealed class ExposureLimitTests
     [Fact]
     public void Rejection_text_matches_the_contract_word_for_word()
     {
-        // Texto da tag 58 em docs/contracts/contracts.md, seção 2.
+        // Tag 58 text in docs/contracts/contracts.md, section 2.
         Assert.Equal(
             "Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.",
             ExposureLimitPolicy.BuildExposureLimitRejectionText("VALE3"));

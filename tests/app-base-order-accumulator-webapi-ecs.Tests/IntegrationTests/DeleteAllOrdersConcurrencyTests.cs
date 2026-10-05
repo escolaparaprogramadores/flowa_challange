@@ -10,7 +10,7 @@ using Xunit.Abstractions;
 
 namespace Base.OrderAccumulator.Tests;
 
-// CA-30 e CA-31: ordem e "Deletar tudo" não se intercalam, e no fim banco e memória dizem a mesma exposição.
+// CA-30 and CA-31: an order and "Delete all" never interleave, and in the end database and memory report the same exposure.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper concurrencyTestOutput)
 {
@@ -18,7 +18,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     private const int StoredOrdersCountBeforeFiringTheDeletes = 30;
     private const int SimultaneousDeletesPerRound = 5;
 
-    // Tempo para um passo que não deveria acontecer ter acontecido, se a porta estivesse aberta.
+    // Time for a step that should not happen to have happened, if the door were open.
     private static readonly TimeSpan TimeForABlockedStepToSneakIn = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan ConcurrencyStepDeadline = TimeSpan.FromSeconds(10);
 
@@ -108,8 +108,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await Task.WhenAll(firstOrderTask, secondOrderTask).WaitAsync(ConcurrencyStepDeadline);
     }
 
-    // Uma fila contínua de ordens não pode deixar o apagar esperando para sempre: ordem nova que chega
-    // depois do apagar espera ele passar.
+    // A continuous stream of orders cannot leave the delete waiting forever: a new order that arrives
+    // after the delete waits for it to pass.
     [Fact]
     public async Task Order_arriving_after_a_waiting_delete_runs_only_after_the_delete()
     {
@@ -127,13 +127,13 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var executedStepsInOrder = new List<string>();
         var deleteAllOrdersTask = symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(() =>
         {
-            lock (executedStepsInOrder) executedStepsInOrder.Add("apagar");
+            lock (executedStepsInOrder) executedStepsInOrder.Add("delete");
             return Task.CompletedTask;
         }, CancellationToken.None);
         await Task.Delay(TimeForABlockedStepToSneakIn);
         var laterOrderTask = symbolExposureMemory.DecideOrderOutsideDeleteAllAsync(() =>
         {
-            lock (executedStepsInOrder) executedStepsInOrder.Add("ordem que chegou depois");
+            lock (executedStepsInOrder) executedStepsInOrder.Add("order that arrived later");
             return Task.FromResult(CreateAcceptedBuyOrderDecision("VALE3", 1, 1.00m));
         }, CancellationToken.None);
         await Task.Delay(TimeForABlockedStepToSneakIn);
@@ -142,12 +142,12 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await Task.WhenAll(firstOrderTask, deleteAllOrdersTask, laterOrderTask).WaitAsync(ConcurrencyStepDeadline);
 
         Assert.Empty(stepsWhileTheFirstOrderWasInside);
-        Assert.Equal(["apagar", "ordem que chegou depois"], executedStepsInOrder);
+        Assert.Equal(["delete", "order that arrived later"], executedStepsInOrder);
     }
 
-    // Pelo DecideIncomingOrderUseCase de verdade: a ordem já gravada só sai da porta depois de somar na memória.
-    // Se a soma ficasse fora da porta, o apagar que espera veria a memória sem a ordem e o zero seria desfeito
-    // pela soma atrasada. Repete para a janela entre gravar e somar ser exercitada várias vezes.
+    // Through the real DecideIncomingOrderUseCase: the already stored order only leaves the door after adding to memory.
+    // If the addition happened outside the door, the waiting delete would see memory without the order and the zero
+    // would be undone by the late addition. Repeats so the window between storing and adding is exercised many times.
     [Fact]
     public async Task Order_through_the_use_case_adds_to_memory_before_a_waiting_delete_runs()
     {
@@ -177,9 +177,10 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         }
     }
 
-    // Pelo app inteiro: 100 ordens nos três símbolos; quando 30 já gravaram, 5 apagar pela rota entram no meio das
-    // que ainda estão em curso; depois dos apagar, mais 100 ordens. Sem exceção e sem deadlock; no fim sobram ordens
-    // (as que entraram depois do último apagar) e a exposição do banco é a da memória e a soma das aceitas que sobraram.
+    // Through the whole app: 100 orders on the three symbols; when 30 are already stored, 5 deletes through the route
+    // come in among the ones still in progress; after the deletes, 100 more orders. No exception and no deadlock; in the
+    // end orders remain (the ones that came after the last delete) and the database exposure equals the memory one and
+    // the sum of the remaining accepted orders.
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -205,8 +206,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             return orderDecision;
         })).ToList();
         await enoughOrdersStoredToFireTheDeletes.Task.WaitAsync(TimeSpan.FromMinutes(2));
-        // Conta pelas ordens já gravadas, não por Task.IsCompleted: a tarefa que dispara o sinal ainda não terminou
-        // quando o teste acorda e entraria como "em curso", somando uma a mais.
+        // Counts by the orders already stored, not by Task.IsCompleted: the task that fires the signal has not finished
+        // yet when the test wakes up and would count as "in progress", adding one too many.
         var ordersInProgressCountWhenTheDeletesFired = OrdersPerWave - Volatile.Read(ref storedOrdersCountBeforeTheDeletes);
         var deleteResponses = await Task.WhenAll(Enumerable.Range(0, SimultaneousDeletesPerRound)
             .Select(_ => Task.Run(() => orderAccumulatorClient.DeleteAsync("/api/orders")))).WaitAsync(TimeSpan.FromMinutes(2));
@@ -217,8 +218,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var remainingStoredOrdersCount = await orderAccumulatorDatabase.CountStoredOrdersAsync();
         var storedExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
         concurrencyTestOutput.WriteLine(
-            $"rodada {concurrencyRound}: {ordersInProgressCountWhenTheDeletesFired} ordens em curso quando os apagar saíram; " +
-            $"{remainingStoredOrdersCount} ordens sobraram; " +
+            $"round {concurrencyRound}: {ordersInProgressCountWhenTheDeletesFired} orders in progress when the deletes fired; " +
+            $"{remainingStoredOrdersCount} orders remained; " +
             string.Join(", ", storedExposures.Select(storedExposure => $"{storedExposure.Symbol}={storedExposure.Exposure}")));
         Assert.All(orderDecisions, orderDecision => Assert.True(orderDecision.Accepted));
         Assert.All(deleteResponses, deleteResponse => Assert.Equal(System.Net.HttpStatusCode.NoContent, deleteResponse.StatusCode));
@@ -279,6 +280,6 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     }
 
     private static DecideIncomingOrderOutput CreateAcceptedBuyOrderDecision(string symbol, decimal quantity, decimal price) =>
-        new(Guid.NewGuid().ToString("N"), "ordem", "execucao", symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price,
+        new(Guid.NewGuid().ToString("N"), "order", "execution", symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price,
             Accepted: true, RejectReason: null, RejectedForInvalidFields: false, IsRepeat: false);
 }

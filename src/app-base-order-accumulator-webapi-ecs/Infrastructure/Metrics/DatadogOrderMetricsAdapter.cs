@@ -4,7 +4,7 @@ using StatsdClient;
 namespace Base.OrderAccumulator.Infrastructure.Metrics;
 
 // Counts the order after the database decided, with the names and tags agreed with the dashboard.
-public sealed class DatadogOrderMetricsAdapter(IDogStatsd orderMetricsClient) : IOrderMetrics
+public sealed class DatadogOrderMetricsAdapter(IDogStatsd orderMetricsClient) : IOrderMetricsPort
 {
     public void CountAnsweredOrder(string? orderSymbol, char orderSide, bool orderAccepted)
     {

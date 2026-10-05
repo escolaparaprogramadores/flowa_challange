@@ -15,7 +15,7 @@
 
   <!-- The FIX session and the FIX 4.4 dictionary with tag 5100 sit next to the executable. -->
   <ItemGroup>
-    <!-- O build do Vite (F5) também vai para a saída, para dotnet run e o build comum servirem a página. -->
+    <!-- The Vite build (F5) also goes to the output, so dotnet run and the plain build serve the page. -->
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="initiator.cfg" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Infrastructure\Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
