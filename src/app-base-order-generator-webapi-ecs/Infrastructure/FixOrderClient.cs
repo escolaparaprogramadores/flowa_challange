@@ -5,7 +5,6 @@ using Base.OrderGenerator.Domain.Orders;
 using Base.OrderGenerator.Infrastructure.Fix;
 using QuickFix;
 using QuickFix.Fields;
-using QuickFix.Logger;
 using QuickFix.Store;
 using QuickFix.Transport;
 using FixSide = QuickFix.Fields.Side;
@@ -17,24 +16,57 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
 {
     public static readonly TimeSpan ExecutionReportTimeout = TimeSpan.FromSeconds(5);
 
+    private const string CommunicationErrorCode = "communication_error";
+    private const string UnexpectedErrorCode = "error";
+
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Message>> _ordersAwaitingExecutionReport = new();
     private readonly SocketInitiator _fixSocketInitiator;
+    private readonly IApplicationLogger<FixOrderClient> _orderSendingLogger;
     private SessionID? _initiatorSessionId;
 
-    public FixOrderClient(IConfiguration orderGeneratorConfiguration)
+    public FixOrderClient(IConfiguration orderGeneratorConfiguration, FixSessionLogFactory fixSessionLogFactory, IApplicationLogger<FixOrderClient> orderSendingLogger)
     {
-        var initiatorSettings = LoadInitiatorSessionSettings(orderGeneratorConfiguration);
+        _orderSendingLogger = orderSendingLogger;
         _fixSocketInitiator = new SocketInitiator(
-            this, new MemoryStoreFactory(), initiatorSettings, new TraceParentHidingLogFactory(new ScreenLogFactory(initiatorSettings)), null);
+            this, new MemoryStoreFactory(), LoadInitiatorSessionSettings(orderGeneratorConfiguration), fixSessionLogFactory, null);
     }
 
     internal int OrdersAwaitingExecutionReportCount => _ordersAwaitingExecutionReport.Count;
 
     public async Task<SentOrderResult> SendOrderAsync(OrderToSend orderToSend)
     {
-        var clOrdId = Guid.NewGuid().ToString("N");
+        // The span opens before the ClOrdID because the ClOrdID is its trace id; the order logs run inside it.
         using var orderSending = FixOrderTraceProvider.StartOrderSending();
+        var clOrdId = FixOrderTraceProvider.CreateClOrdId(orderSending);
 
+        var sentOrderResult = await SendNewOrderSingleAndWaitForExecutionReportAsync(
+            clOrdId, orderToSend, FixOrderTraceProvider.GetTraceParentOfOrderSending(orderSending));
+        LogOrderSendingFailure(sentOrderResult.Status);
+        return sentOrderResult;
+    }
+
+    // One log per failed order: no answer from the OrderAccumulator is an expected error (the 503), an
+    // ExecutionReport that is neither New nor Rejected is unexpected (the 500).
+    private void LogOrderSendingFailure(SentOrderStatus sentOrderStatus)
+    {
+        switch (sentOrderStatus)
+        {
+            case SentOrderStatus.NoLoggedOnSession:
+                _orderSendingLogger.LogWarning("Order not sent: the FIX session is not logged on.", new { ErrorCode = CommunicationErrorCode });
+                break;
+            case SentOrderStatus.ExecutionReportTimeout:
+                _orderSendingLogger.LogWarning("No ExecutionReport for the order within 5 seconds.", new { ErrorCode = CommunicationErrorCode });
+                break;
+            case SentOrderStatus.UnexpectedExecutionReport:
+                _orderSendingLogger.LogError(
+                    new InvalidOperationException("The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected."),
+                    "Unexpected ExecutionReport for the order.", new { ErrorCode = UnexpectedErrorCode });
+                break;
+        }
+    }
+
+    private async Task<SentOrderResult> SendNewOrderSingleAndWaitForExecutionReportAsync(string clOrdId, OrderToSend orderToSend, string? orderSendingTraceParent)
+    {
         // Sem sessão logada a ordem não sai: o QuickFIX a guardaria na store e mandaria depois do logon (D-34).
         var initiatorSessionId = _initiatorSessionId;
         var initiatorSession = initiatorSessionId is null ? null : Session.LookupSession(initiatorSessionId);
@@ -46,7 +78,7 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
         _ordersAwaitingExecutionReport[clOrdId] = executionReportWaiter;
         try
         {
-            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, orderToSend, FixOrderTraceProvider.GetTraceParentOfOrderSending(orderSending)), initiatorSessionId))
+            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, orderToSend, orderSendingTraceParent), initiatorSessionId))
                 return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
             return ToSentOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
@@ -145,25 +177,4 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
     }
 
     public void Dispose() => _fixSocketInitiator.Dispose();
-
-    // O ScreenLog escreve a mensagem FIX crua no stdout; o valor da 5100 (trace id) fica de fora.
-    private sealed class TraceParentHidingLogFactory(ILogFactory screenLogFactory) : ILogFactory
-    {
-        public ILog Create(SessionID fixSessionId) => new TraceParentHidingLog(screenLogFactory.Create(fixSessionId));
-
-        public ILog CreateNonSessionLog() => new TraceParentHidingLog(screenLogFactory.CreateNonSessionLog());
-    }
-
-    private sealed class TraceParentHidingLog(ILog fixSessionLog) : ILog
-    {
-        public void Clear() => fixSessionLog.Clear();
-
-        public void OnIncoming(string incomingFixMessage) => fixSessionLog.OnIncoming(FixOrderTraceProvider.HideTraceParentInLog(incomingFixMessage));
-
-        public void OnOutgoing(string outgoingFixMessage) => fixSessionLog.OnOutgoing(FixOrderTraceProvider.HideTraceParentInLog(outgoingFixMessage));
-
-        public void OnEvent(string fixSessionEvent) => fixSessionLog.OnEvent(FixOrderTraceProvider.HideTraceParentInLog(fixSessionEvent));
-
-        public void Dispose() => fixSessionLog.Dispose();
-    }
 }

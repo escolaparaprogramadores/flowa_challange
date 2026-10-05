@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.RegularExpressions;
 
 namespace Base.OrderGenerator.Infrastructure.Fix;
 
@@ -10,11 +9,8 @@ public static class FixOrderTraceProvider
 {
     public const int TraceParentTag = 5100;
     public const string TraceSourceName = "Flowa.Fix";
-    public const string HiddenLogValue = "***";
 
-    private const string TraceParentTagPrefix = "5100=";
     private static readonly ActivitySource OrderTraceSource = new(TraceSourceName);
-    private static readonly Regex TraceParentTagValuePattern = new("(?<=^|\u0001)5100=[^\u0001]*", RegexOptions.CultureInvariant);
 
     public static Activity? StartOrderSending() =>
         OrderTraceSource.StartActivity("fix.envio_da_ordem", ActivityKind.Producer);
@@ -22,10 +18,9 @@ public static class FixOrderTraceProvider
     public static string? GetTraceParentOfOrderSending(Activity? orderSending) =>
         orderSending is { IdFormat: ActivityIdFormat.W3C } ? orderSending.Id : null;
 
-    // The FIX session log writes the raw message, and the 5100 traceparent carries the trace id, which
-    // stays out of the log (decision 17). The tag stays on the line, only its value goes away.
-    public static string HideTraceParentInLog(string fixLogLine) =>
-        fixLogLine.Contains(TraceParentTagPrefix, StringComparison.Ordinal)
-            ? TraceParentTagValuePattern.Replace(fixLogLine, TraceParentTagPrefix + HiddenLogValue)
-            : fixLogLine;
+    // The order number is born from its trace (decision 21): the 32 hex of the 128-bit trace id, so the
+    // ClOrdID is the id to search in the log and in the Datadog APM. The Datadog tracer gives this span the
+    // trace id of the HTTP request span it starts inside. With no tracer there is no span: a random GUID.
+    public static string CreateClOrdId(Activity? orderSending) =>
+        orderSending is { IdFormat: ActivityIdFormat.W3C } ? orderSending.TraceId.ToString() : Guid.NewGuid().ToString("N");
 }

@@ -14,9 +14,11 @@ public sealed record DecideIncomingOrderOutput(
     decimal Price,
     bool Accepted,
     string? RejectReason,
+    bool RejectedForInvalidFields,
     bool IsRepeat)
 {
     public static DecideIncomingOrderOutput FromAnsweredOrder(Order answeredOrder, bool isRepeat) => new(
         answeredOrder.ClOrdId, answeredOrder.OrderId, answeredOrder.ExecId, answeredOrder.Symbol, answeredOrder.Side,
-        answeredOrder.Quantity, answeredOrder.Price, answeredOrder.Accepted, answeredOrder.RejectReason, isRepeat);
+        answeredOrder.Quantity, answeredOrder.Price, answeredOrder.Accepted, answeredOrder.RejectReason,
+        answeredOrder.WasRejectedForInvalidFields(), isRepeat);
 }

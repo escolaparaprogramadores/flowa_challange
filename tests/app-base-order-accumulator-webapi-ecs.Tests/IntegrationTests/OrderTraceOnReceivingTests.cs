@@ -37,46 +37,43 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         Assert.Equal(orderSending.TraceId, orderReceiving.TraceId);
         Assert.Equal(orderSending.SpanId, orderReceiving.ParentSpanId);
         Assert.Equal(ActivityKind.Consumer, orderReceiving.Kind);
-        // Decision 17: no tag on the span, and never the ClOrdID.
+        // No tag on the span: span names and shape stay as they were (CA-34).
         Assert.Empty(orderReceiving.TagObjects);
     }
 
     [Fact]
-    public async Task Fix_session_log_shows_tag_5100_without_the_trace_id()
+    public async Task Fix_session_log_shows_the_whole_traceparent_and_each_order_line_has_the_clordid_as_trace_id()
     {
-        // Reads the real stdout, like FixAcceptorTests: it is what docker compose logs and CloudWatch receive.
-        var capturedStdout = new StringWriter();
-        var originalStdout = Console.Out;
-        Console.SetOut(TextWriter.Synchronized(capturedStdout));
-        string sendingTraceId;
-        string sendingSpanId;
-        try
+        // Decision 17 fell: the traceparent goes to the log, and the trace id is the ClOrdID (decision 21, CA-8).
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        string orderClOrdId;
+        string orderTraceParent;
+        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
         {
             using var capturedOrderTraceSpans = new CapturedOrderTraceSpans();
-            await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
             using var orderSending = OrderSendingTestSource.StartActivity("fix.envio_da_ordem", ActivityKind.Producer);
             Assert.NotNull(orderSending);
-            sendingTraceId = orderSending.TraceId.ToHexString();
-            sendingSpanId = orderSending.SpanId.ToHexString();
-            var orderWithTrace = FixTestInitiator.NewOrder("log-sem-trace-id", "PETR4", '1', 100, 10.50m);
-            orderWithTrace.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, orderSending.Id!));
+            orderClOrdId = orderSending.TraceId.ToHexString();
+            orderTraceParent = orderSending.Id!;
+            var orderWithTrace = FixTestInitiator.NewOrder(orderClOrdId, "PETR4", '1', 100, 10.50m);
+            orderWithTrace.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, orderTraceParent));
 
             var orderExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithTrace);
 
             Assert.Equal(ExecType.NEW, orderExecutionReport.ExecType.Value);
             Assert.Equal(orderSending.TraceId, Assert.Single(capturedOrderTraceSpans.OrderReceivingSpans).TraceId);
         }
-        finally
-        {
-            Console.SetOut(originalStdout);
-        }
 
-        var stdoutLines = capturedStdout.ToString().Split(Environment.NewLine);
-        Assert.Single(stdoutLines, stdoutLine => stdoutLine.Contains("\u000135=D\u0001")
-            && stdoutLine.Contains("\u000111=log-sem-trace-id\u0001") && stdoutLine.Contains("\u00015100=***\u0001"));
-        Assert.DoesNotContain(stdoutLines, stdoutLine => stdoutLine.Contains(sendingTraceId));
-        Assert.DoesNotContain(stdoutLines, stdoutLine => stdoutLine.Contains(sendingSpanId));
+        // An accepted order leaves exactly two lines in the OrderAccumulator: the FIX message in and the answer out.
+        var orderLogLines = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.TraceId == orderClOrdId).ToList();
+        Assert.Equal(2, orderLogLines.Count);
+        var receivedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message received.");
+        Assert.Contains("|35=D|", receivedOrderLine.ReadScopeField("FixMessage"));
+        Assert.Contains($"|5100={orderTraceParent}|", receivedOrderLine.ReadScopeField("FixMessage"));
+        var sentExecutionReportLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
+        Assert.Contains("|35=8|", sentExecutionReportLine.ReadScopeField("FixMessage"));
+        Assert.Contains($"|11={orderClOrdId}|", sentExecutionReportLine.ReadScopeField("FixMessage"));
     }
 
     [Fact]

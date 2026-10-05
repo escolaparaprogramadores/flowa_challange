@@ -11,6 +11,8 @@ using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Entrypoint.Fix;
 using Base.OrderAccumulator.Entrypoint.Workers;
 using Base.OrderAccumulator.Entrypoint;
+using Base.OrderAccumulator.Infrastructure.Fix;
+using Base.OrderAccumulator.Infrastructure.Logging;
 using Base.OrderAccumulator.Infrastructure.Metrics;
 using Base.OrderAccumulator.Infrastructure.Persistence;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -18,6 +20,7 @@ using Microsoft.Extensions.Primitives;
 using Npgsql;
 
 var orderAccumulatorWebBuilder = WebApplication.CreateBuilder(args);
+orderAccumulatorWebBuilder.AddApplicationLogging();
 
 // O /version promete o sha completo; sem ele o app não sobe, para o erro aparecer no build e não no aceite.
 var buildCommitSha = ReadBuildCommitSha() is { Length: 40 } shaFromBuild
@@ -39,6 +42,7 @@ orderAccumulatorWebBuilder.Services.AddScoped<GetExposuresUseCase>();
 orderAccumulatorWebBuilder.Services.AddHostedService<SymbolExposureGaugeWorker>();
 
 // Acceptor FIX 4.4: sobe junto com o app, depois da migração abaixo.
+orderAccumulatorWebBuilder.Services.AddSingleton<FixSessionLogFactory>();
 orderAccumulatorWebBuilder.Services.AddSingleton<NewOrderSingleConsumer>();
 orderAccumulatorWebBuilder.Services.AddHostedService<FixAcceptorWorker>();
 

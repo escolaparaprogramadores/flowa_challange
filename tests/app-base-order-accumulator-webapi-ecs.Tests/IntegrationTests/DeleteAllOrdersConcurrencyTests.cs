@@ -280,5 +280,5 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
 
     private static DecideIncomingOrderOutput CreateAcceptedBuyOrderDecision(string symbol, decimal quantity, decimal price) =>
         new(Guid.NewGuid().ToString("N"), "ordem", "execucao", symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price,
-            Accepted: true, RejectReason: null, IsRepeat: false);
+            Accepted: true, RejectReason: null, RejectedForInvalidFields: false, IsRepeat: false);
 }

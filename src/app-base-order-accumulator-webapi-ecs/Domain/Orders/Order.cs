@@ -39,6 +39,11 @@ public sealed class Order : IAggregateRoot
     public static Order RejectOrderOverExposureLimit(IncomingOrder incomingOrder, string orderSymbol) =>
         CreateAnsweredOrder(incomingOrder, accepted: false, rejectReason: ExposureLimitPolicy.BuildExposureLimitRejectionText(orderSymbol));
 
+    // A rejected order whose fields pass the field rule can only have been stopped by the exposure limit.
+    // Asking the rule again also answers for an order loaded from the database.
+    public bool WasRejectedForInvalidFields() =>
+        !Accepted && OrderFieldRule.ValidateIncomingOrderFields(new IncomingOrder(ClOrdId, Symbol, Side, Quantity, Price)).ValidOrderFields is null;
+
     // Only the repository calls this, to load an order that was already answered.
     public static Order RestoreOrder(
         string clOrdId, string orderId, string execId, string? symbol, char side, decimal quantity, decimal price, bool accepted, string? rejectReason) =>

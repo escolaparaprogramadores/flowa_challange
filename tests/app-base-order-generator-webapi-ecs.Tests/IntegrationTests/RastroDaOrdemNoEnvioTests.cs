@@ -31,40 +31,10 @@ public sealed class RastroDaOrdemNoEnvioTests : IClassFixture<LoggedOnOrderGener
         var ordemRecebidaPeloAcceptor = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
         Assert.Equal($"00-{envioDaOrdem.TraceId}-{envioDaOrdem.SpanId}-01", ordemRecebidaPeloAcceptor.GetString(FixOrderTraceProvider.TraceParentTag));
         Assert.Equal(ActivityKind.Producer, envioDaOrdem.Kind);
-        // Decisão 17: nenhuma etiqueta no span, e o ClOrdID em particular nunca.
+        // Nenhuma etiqueta no span: nome e forma do span não mudam (CA-34).
         Assert.Empty(envioDaOrdem.TagObjects);
         // R-01: o contexto não usa o Text (58).
         Assert.False(ordemRecebidaPeloAcceptor.IsSetField(Tags.Text));
-    }
-
-    [Fact]
-    public async Task Log_da_sessao_FIX_mostra_a_tag_5100_sem_o_trace_id()
-    {
-        var enviosDaOrdem = new ConcurrentQueue<Activity>();
-        using var ouvinteDoRastroDaOrdem = OuvirEnviosDaOrdem(enviosDaOrdem);
-        // O ScreenLog do QuickFIX escreve no stdout, que é o que o docker compose logs e o CloudWatch recebem.
-        var stdoutOriginal = Console.Out;
-        var stdoutCapturado = new StringWriter();
-        Console.SetOut(TextWriter.Synchronized(stdoutCapturado));
-        HttpResponseMessage respostaDaOrdem;
-        try
-        {
-            respostaDaOrdem = await EnviarOrdemDeCompraDePetr4();
-        }
-        finally
-        {
-            Console.SetOut(stdoutOriginal);
-        }
-
-        Assert.Equal(HttpStatusCode.OK, respostaDaOrdem.StatusCode);
-        var envioDaOrdem = Assert.Single(enviosDaOrdem);
-        // A mensagem que saiu leva o traceparent inteiro; só o log fica sem ele.
-        var ordemRecebidaPeloAcceptor = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
-        Assert.Equal($"00-{envioDaOrdem.TraceId}-{envioDaOrdem.SpanId}-01", ordemRecebidaPeloAcceptor.GetString(FixOrderTraceProvider.TraceParentTag));
-        var linhasDoStdout = stdoutCapturado.ToString().Split('\n');
-        Assert.Single(linhasDoStdout, linhaDoStdout => linhaDoStdout.StartsWith("<outgoing> ") && linhaDoStdout.Contains("|35=D|") && linhaDoStdout.Contains("|5100=***|"));
-        Assert.DoesNotContain(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains(envioDaOrdem.TraceId.ToHexString()));
-        Assert.DoesNotContain(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains(envioDaOrdem.SpanId.ToHexString()));
     }
 
     [Fact]

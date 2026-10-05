@@ -1,39 +1,41 @@
+using System.Diagnostics;
 using Base.OrderGenerator.Infrastructure.Fix;
 
 namespace Base.OrderGenerator.Tests;
 
-// Decision 17: the trace id that travels in tag 5100 stays out of the FIX session log.
+// Decision 21: the order number is the 128-bit trace id of the sending span; with no span, a random GUID.
 public class FixOrderTraceProviderTests
 {
-    private const string TraceParent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
-
     [Fact]
-    public void Line_with_5100_in_the_middle_keeps_the_tag_and_loses_only_the_value()
+    public void ClOrdId_is_the_32_hex_trace_id_of_the_sending_span()
     {
-        var fixLogLine = $"8=FIX.4.4\u000135=D\u000111=abc\u00015100={TraceParent}\u000110=128\u0001";
+        using var orderSending = new Activity("fix.envio_da_ordem").SetIdFormat(ActivityIdFormat.W3C).Start();
 
-        Assert.Equal("8=FIX.4.4\u000135=D\u000111=abc\u00015100=***\u000110=128\u0001", FixOrderTraceProvider.HideTraceParentInLog(fixLogLine));
+        var clOrdId = FixOrderTraceProvider.CreateClOrdId(orderSending);
+
+        Assert.Equal(orderSending.TraceId.ToHexString(), clOrdId);
+        Assert.Matches("^[0-9a-f]{32}$", clOrdId);
     }
 
     [Fact]
-    public void Line_that_starts_with_5100_also_loses_the_value()
+    public void Without_a_sending_span_the_clordid_is_a_new_random_guid_each_time()
     {
-        Assert.Equal("5100=***\u000110=128", FixOrderTraceProvider.HideTraceParentInLog($"5100={TraceParent}\u000110=128"));
+        var firstClOrdId = FixOrderTraceProvider.CreateClOrdId(null);
+        var secondClOrdId = FixOrderTraceProvider.CreateClOrdId(null);
+
+        Assert.Matches("^[0-9a-f]{32}$", firstClOrdId);
+        Assert.True(Guid.TryParseExact(firstClOrdId, "N", out _));
+        Assert.NotEqual(firstClOrdId, secondClOrdId);
     }
 
     [Fact]
-    public void Another_tag_ending_in_5100_and_values_with_5100_stay_the_same()
+    public void Span_with_a_hierarchical_id_is_not_a_trace_and_gives_a_random_guid()
     {
-        var fixLogLine = "8=FIX.4.4\u000115100=x\u000158=5100=y\u000110=128\u0001";
+        using var hierarchicalSpan = new Activity("fix.envio_da_ordem").SetIdFormat(ActivityIdFormat.Hierarchical).Start();
 
-        Assert.Equal(fixLogLine, FixOrderTraceProvider.HideTraceParentInLog(fixLogLine));
-    }
+        var clOrdId = FixOrderTraceProvider.CreateClOrdId(hierarchicalSpan);
 
-    [Fact]
-    public void Line_without_5100_comes_back_as_the_same_instance()
-    {
-        var fixLogLine = "8=FIX.4.4\u000135=A\u000110=213\u0001";
-
-        Assert.Same(fixLogLine, FixOrderTraceProvider.HideTraceParentInLog(fixLogLine));
+        Assert.True(Guid.TryParseExact(clOrdId, "N", out _));
+        Assert.NotEqual(hierarchicalSpan.TraceId.ToHexString(), clOrdId);
     }
 }
