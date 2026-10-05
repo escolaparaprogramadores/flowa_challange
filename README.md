@@ -7,10 +7,12 @@
   </picture>
 </a>
 
-<img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?style=for-the-badge&logo=dotnet&logoColor=white">
-<img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black">
-<img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=for-the-badge&logo=postgresql&logoColor=white">
-<img alt="FIX 4.4" src="https://img.shields.io/badge/FIX-4.4-0F172A?style=for-the-badge">
+<p>
+  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?style=for-the-badge&logo=dotnet&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black">
+  <img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=for-the-badge&logo=postgresql&logoColor=white">
+  <img alt="FIX 4.4" src="https://img.shields.io/badge/FIX-4.4-0F172A?style=for-the-badge">
+</p>
 
 <p>
   <a href="#como-rodar-com-docker"><b>Como rodar</b></a> ·
@@ -184,23 +186,41 @@ O painel de exposição chama `GET /api/exposures` no OrderGenerator, que só re
 OrderAccumulator. A fonte do desenho fica em `docs/arquitetura/arquitetura-local.drawio` e o contrato
 entre as partes (rotas, mensagens FIX, portas) em `docs/contracts/contracts.md`.
 
+### Termos do negócio no código
+
+O texto deste README fala em português; o código usa os nomes em inglês abaixo.
+
+- **Ordem**: `Order`, no Domain do OrderAccumulator. A que chega pelo FIX é a `IncomingOrder`; a que o
+  OrderGenerator manda é a `OrderToSend`.
+- **Ativo**: o `Symbol` da ordem (PETR4, VALE3, VIIA4).
+- **Lado** (compra ou venda): `OrderSide`.
+- **Exposição de um ativo**: `SymbolExposure`.
+- **Limite de exposição**: `ExposureLimitPolicy`.
+- **Regra de campo**: `OrderFieldRule`.
+- **Resposta da ordem**: a mensagem FIX `ExecutionReport`.
+- **Número da ordem**: o `ClOrdID` do FIX, `ClOrdId` no código.
+
 ### Como o código é organizado
 
 Cada app é um projeto .NET só (`OrderGenerator.csproj` e `OrderAccumulator.csproj`, na solução
 `Flowa.slnx`). As camadas são pastas, com o namespace igual à pasta (`Base.OrderAccumulator.Domain`, por
 exemplo):
 
-- **Entrypoint**: rotas HTTP e a sessão FIX. Recebe o pedido, chama o caso de uso e responde.
+- **Entrypoint**: rotas HTTP, a sessão FIX do OrderAccumulator e a montagem das dependências. Recebe o
+  pedido, chama o caso de uso e responde.
 - **Application**: os casos de uso. Cada um só organiza o passo a passo, sem regra de negócio.
-- **Domain**: as regras do negócio: a ordem, a regra de campo, o limite de exposição.
-- **Infrastructure**: PostgreSQL, QuickFIX/n, Datadog e log. Toda biblioteca de fora fica aqui.
+- **Domain**: as regras do negócio: a ordem, a regra de campo, o limite de exposição. Não usa nenhuma
+  biblioteca de fora.
+- **Infrastructure**: PostgreSQL, cliente FIX, Datadog e log. Fora daqui, só o Entrypoint usa biblioteca
+  de fora: a QuickFIX/n na sessão FIX do OrderAccumulator e o Npgsql ao montar a conexão.
 - **Commons**: só contratos que as outras camadas usam, como a interface do log.
 
 As dependências só apontam para dentro: o Domain não conhece nenhuma outra camada. Um teste de cada app
 confere isso lendo o código compilado (`tests/*.Tests/Camadas/LayerDependencyTests.cs`).
 
-Dentro de Domain e Application há uma pasta por assunto do negócio (`Orders`, `Exposures`), com o mesmo
-nome nas duas camadas. Na Application, cada fluxo é uma pasta com um caso de uso só:
+Dentro da Application há uma pasta por assunto do negócio, e cada fluxo é uma pasta com um caso de uso só.
+No OrderAccumulator as pastas `Orders` e `Exposures` têm o mesmo nome no Domain, onde ficam as regras. No
+OrderGenerator só `Orders` tem Domain: a exposição ali é só repassada do OrderAccumulator, sem regra.
 
 ```
 src/app-base-order-accumulator-webapi-ecs/
@@ -221,11 +241,15 @@ src/app-base-order-accumulator-webapi-ecs/
 src/app-base-order-generator-webapi-ecs/
 ├─ Entrypoint/        rotas HTTP e a página
 ├─ Application/
-│  └─ Orders/
-│     └─ SendOrder/   manda a ordem por FIX e devolve a resposta
+│  ├─ Orders/
+│  │  ├─ SendOrder/         manda a ordem por FIX e devolve a resposta
+│  │  ├─ ListOrders/        repassa a lista de ordens do OrderAccumulator
+│  │  └─ DeleteAllOrders/   repassa o "apagar tudo" ao OrderAccumulator
+│  └─ Exposures/
+│     └─ GetExposures/      repassa a exposição de cada ativo
 ├─ Domain/
-│  └─ Orders/
-├─ Infrastructure/    cliente FIX, rastro, log
+│  └─ Orders/         OrderToSend, SentOrderResult
+├─ Infrastructure/    cliente FIX, cliente HTTP do OrderAccumulator, rastro, log
 └─ Commons/
 ```
 
