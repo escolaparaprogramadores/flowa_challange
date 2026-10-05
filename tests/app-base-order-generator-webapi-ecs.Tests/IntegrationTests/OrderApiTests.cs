@@ -329,30 +329,6 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         Assert.Equal(0, _loggedOnOrderGenerator.OrderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
 
-    [Fact]
-    public async Task Mensagens_FIX_de_ida_e_volta_aparecem_no_stdout()
-    {
-        // Contrato §3: o log FIX vai para o stdout, que é o que o docker compose logs mostra.
-        var originalConsoleStdout = Console.Out;
-        var capturedConsoleStdout = new StringWriter();
-        Console.SetOut(TextWriter.Synchronized(capturedConsoleStdout));
-        string clOrdId;
-        try
-        {
-            var orderResponse = await ReadOrderGeneratorResponseJson(await PostOrderJson("""{"symbol":"VALE3","side":"buy","quantity":3,"price":45.10}"""));
-            clOrdId = orderResponse.GetProperty("clOrdId").GetString()!;
-        }
-        finally
-        {
-            Console.SetOut(originalConsoleStdout);
-        }
-
-        // O ScreenLog do QuickFIX troca o separador SOH por "|" e marca a direção da mensagem.
-        var fixLogLines = capturedConsoleStdout.ToString().Split('\n');
-        Assert.Single(fixLogLines, fixLogLine => fixLogLine.StartsWith("<outgoing> ") && fixLogLine.Contains("|35=D|") && fixLogLine.Contains("|11=" + clOrdId + "|"));
-        Assert.Single(fixLogLines, fixLogLine => fixLogLine.StartsWith("<incoming> ") && fixLogLine.Contains("|35=8|") && fixLogLine.Contains("|11=" + clOrdId + "|"));
-    }
-
     // A sessão FIX entrega em ordem: se uma ordem inválida tivesse saído, ela chegaria antes da sentinela.
     private async Task AssertOnlySentinelReachedAcceptor()
     {

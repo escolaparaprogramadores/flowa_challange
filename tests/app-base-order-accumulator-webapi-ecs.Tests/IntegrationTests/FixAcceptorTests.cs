@@ -6,6 +6,8 @@ using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Entrypoint.Fix;
 using Base.OrderAccumulator.Entrypoint.Workers;
 using Base.OrderAccumulator.Entrypoint;
+using Base.OrderAccumulator.Infrastructure.Fix;
+using Base.OrderAccumulator.Infrastructure.Logging;
 using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
 using Microsoft.Extensions.Configuration;
@@ -110,7 +112,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Assert.Equal(ExecType.NEW, repeatedOrderExecutionReport.ExecType.Value);
         Assert.Equal(50.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("repetida"));
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Information Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: ClOrdID repetida repetido: devolvendo a resposta original.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Information Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: Repeated ClOrdID: sending the stored answer back.");
     }
 
     [Fact]
@@ -153,32 +155,56 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     }
 
     [Fact]
-    public async Task Fix_messages_in_and_out_are_written_to_stdout()
+    public async Task Fix_heartbeats_are_exchanged_but_never_logged()
     {
-        // Lê o stdout de verdade: o console do app, com o formato de uma linha do appsettings.json.
-        var capturedStdout = new StringWriter();
-        var originalStdout = Console.Out;
-        Console.SetOut(TextWriter.Synchronized(capturedStdout));
-        try
+        // Decision 22. Positive control: with a 1 s interval the acceptor really sends heartbeats during the test.
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        int heartbeatsSentByTheAcceptor;
+        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
         {
-            await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-            using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-            await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("log-ca19", "PETR4", '2', 5, 20.00m));
-        }
-        finally
-        {
-            Console.SetOut(originalStdout);
+            using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort, heartbeatIntervalSeconds: 1);
+            var heartbeatClock = System.Diagnostics.Stopwatch.StartNew();
+            while (fixTestInitiator.ReceivedHeartbeatCount < 2 && heartbeatClock.Elapsed < TimeSpan.FromSeconds(10))
+                await Task.Delay(100);
+            heartbeatsSentByTheAcceptor = fixTestInitiator.ReceivedHeartbeatCount;
         }
 
-        var stdoutLines = capturedStdout.ToString().Split(Environment.NewLine);
-        foreach (var stdoutLine in stdoutLines)
-            fixLogTestOutput.WriteLine(stdoutLine);
+        Assert.True(heartbeatsSentByTheAcceptor >= 2, $"the acceptor sent {heartbeatsSentByTheAcceptor} heartbeats in 10 s");
+        Assert.Contains(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.ReadLogField("FixMessage")?.Contains("|35=A|") == true);
+        Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.ReadLogField("FixMessage")?.Contains("|35=0|") == true);
+    }
 
-        const string sessionLogPrefix = "info: QuickFix.SessionLogs.FIX.4.4-ORDERACCUMULATOR-ORDERGENERATOR";
-        Assert.Single(stdoutLines, stdoutLine => stdoutLine.Contains(sessionLogPrefix) && stdoutLine.Contains("\u000135=D\u0001") && stdoutLine.Contains("\u000111=log-ca19\u0001"));
-        Assert.Single(stdoutLines, stdoutLine => stdoutLine.Contains(sessionLogPrefix) && stdoutLine.Contains("\u000135=8\u0001") && stdoutLine.Contains("\u000111=log-ca19\u0001"));
-        Assert.Contains(stdoutLines, stdoutLine => stdoutLine.EndsWith(sessionLogPrefix + "[0] Session reset: ResetOnLogon"));
-        Assert.Contains(stdoutLines, stdoutLine => stdoutLine.EndsWith(sessionLogPrefix + "[0] Session reset: ResetOnDisconnect"));
+    [Fact]
+    public async Task Fix_messages_in_and_out_are_written_to_stdout_as_json_lines()
+    {
+        // CA-7: reads the real stdout of the app, every line one JSON log line.
+        using (var stdoutJsonLogCapture = new StdoutJsonLogCapture())
+        {
+            await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+            {
+                using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+                await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("log-ca19", "PETR4", '2', 5, 20.00m));
+            }
+
+            foreach (var stdoutLine in stdoutJsonLogCapture.StdoutLines)
+                fixLogTestOutput.WriteLine(stdoutLine);
+
+            const string fixSessionLogCategory = "Base.OrderAccumulator.Infrastructure.Fix.FixSessionLog";
+            const string acceptorFixSession = "FIX.4.4:ORDERACCUMULATOR->ORDERGENERATOR";
+            var fixSessionLogLines = stdoutJsonLogCapture.JsonLogLines
+                .Where(jsonLogLine => jsonLogLine.Category == fixSessionLogCategory && jsonLogLine.ReadLogField("FixSession") == acceptorFixSession)
+                .ToList();
+            var receivedOrderLine = Assert.Single(fixSessionLogLines, fixLogLine =>
+                fixLogLine.Message == "FIX message received." && fixLogLine.ReadLogField("FixMessage")!.Contains("|35=D|") && fixLogLine.ReadLogField("FixMessage")!.Contains("|11=log-ca19|"));
+            var sentExecutionReportLine = Assert.Single(fixSessionLogLines, fixLogLine =>
+                fixLogLine.Message == "FIX message sent." && fixLogLine.ReadLogField("FixMessage")!.Contains("|35=8|") && fixLogLine.ReadLogField("FixMessage")!.Contains("|11=log-ca19|"));
+            Assert.Equal("Information", receivedOrderLine.LogLevel);
+            Assert.Equal("Information", sentExecutionReportLine.LogLevel);
+            Assert.StartsWith("8=FIX.4.4|", receivedOrderLine.ReadLogField("FixMessage"));
+            Assert.Contains(fixSessionLogLines, fixLogLine => fixLogLine.Message == "Session reset: ResetOnLogon");
+            Assert.Contains(fixSessionLogLines, fixLogLine => fixLogLine.Message == "Session reset: ResetOnDisconnect");
+            Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Debug" or "Trace");
+        }
     }
 
     [Fact]
@@ -193,7 +219,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         var orderExecutionReportAfterDatabaseFailure = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("depois-da-falha", "PETR4", '1', 10, 1.00m));
 
         Assert.Equal(ExecType.NEW, orderExecutionReportAfterDatabaseFailure.ExecType.Value);
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Error Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Error Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: Order decision failed; no ExecutionReport sent.");
         Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
@@ -268,7 +294,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
 
         newOrderSingleConsumer.OnMessage(FixTestInitiator.NewOrder("sem-sessao", "VIIA4", '1', 10, 2.00m), acceptorSessionId);
 
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Warning Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: ExecutionReport da ordem sem-sessao não foi enviado: a sessão FIX não está logada.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Warning Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: ExecutionReport not sent: the FIX session is not logged on.");
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("sem-sessao"));
         Assert.Equal(20.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
     }
@@ -288,9 +314,11 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     {
         var fixAcceptorPort = OrderAccumulatorFixTestHost.FindFreeFixAcceptorTcpPort();
         var fixAcceptorService = new FixAcceptorWorker(
-            new NewOrderSingleConsumer(new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), NullLogger<NewOrderSingleConsumer>.Instance),
+            new NewOrderSingleConsumer(
+                new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
+                new ApplicationLogger<NewOrderSingleConsumer>(NullLogger<NewOrderSingleConsumer>.Instance)),
             BuildFixAcceptorConfiguration(("Fix:AcceptorPort", fixAcceptorPort.ToString()), ("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost)),
-            NullLoggerFactory.Instance);
+            new FixSessionLogFactory(new ApplicationLogger<FixSessionLog>(NullLogger<FixSessionLog>.Instance)));
         await fixAcceptorService.StartAsync(CancellationToken.None);
 
         // O host pode descartar antes, depois ou junto com a parada: nenhuma ordem pode lançar exceção.

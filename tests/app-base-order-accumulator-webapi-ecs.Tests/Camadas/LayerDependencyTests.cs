@@ -110,6 +110,20 @@ public sealed class LayerDependencyTests
         Assert.Contains("Base.OrderAccumulator.Infrastructure.Persistence.OrderRepository", infrastructureCheckedAgainstTheDomainList.FailingTypeNames ?? []);
     }
 
+    // CA-7: the application logs only through IApplicationLogger<T> (Commons); the logging SDK of the framework
+    // is used only by the Infrastructure implementation, never by the other layers.
+    [Fact]
+    public void Only_the_infrastructure_uses_the_logging_sdk()
+    {
+        var typesUsingTheLoggingSdk = Types.InAssembly(OrderAccumulatorAssembly).That().HaveDependencyOn("Microsoft.Extensions.Logging").GetTypes()
+            // The generated Program (and its closures) is the composition root: it only calls AddApplicationLogging.
+            .Where(declaredType => declaredType.Namespace is not null)
+            .ToList();
+
+        Assert.Contains(typesUsingTheLoggingSdk, declaredType => declaredType.Namespace == LayerNamespace("Infrastructure.Logging"));
+        Assert.All(typesUsingTheLoggingSdk, declaredType => Assert.StartsWith(LayerNamespace("Infrastructure") + ".", declaredType.Namespace));
+    }
+
     private static void AssertLayerOnlyDependsOn(string layerName, params string[] allowedNamespaces)
     {
         var layerTypes = TypesOfLayer(layerName);

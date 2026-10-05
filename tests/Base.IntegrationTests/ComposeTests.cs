@@ -100,23 +100,64 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal("1.0", await composeUnderTest.ReadContainerEnvironmentVariableAsync(serviceName, "DD_TRACE_SAMPLE_RATE"));
     }
 
-    // CA-O5 da onda 3: com o tracer carregado (sem agente), a ordem sai com a 5100, e o log das duas
-    // pontas mostra a tag sem o valor: o trace id não vai ao log (decisão 17).
+    // CA-7, CA-8 and decision 21 end to end, with the Datadog tracer loaded in both images (no agent): the order
+    // number is the trace id of its trace, and in both containers each log line of the order is JSON and carries it
+    // as TraceId. The traceparent in tag 5100 goes whole to the log (decision 17 fell).
     [Fact]
-    public async Task Ordem_sai_com_a_tag_5100_e_o_log_das_duas_pontas_nao_mostra_o_trace_id()
+    public async Task Order_lines_of_both_containers_are_json_with_the_clordid_as_trace_id()
     {
         var acceptedOrder = await PostOrderAsync("PETR4", "buy", 7, 10.10m);
         var clOrdId = acceptedOrder.GetProperty("clOrdId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", clOrdId);
 
-        var sentNewOrderSingle = await FindSingleFixMessageAsync("ordergenerator", "D", clOrdId, senderCompId: "ORDERGENERATOR");
-        var receivedNewOrderSingle = await FindSingleFixMessageAsync("orderaccumulator", "D", clOrdId, senderCompId: "ORDERGENERATOR");
-        Assert.Equal("***", sentNewOrderSingle.ReadFixTagValue(5100));
-        Assert.Equal("***", receivedNewOrderSingle.ReadFixTagValue(5100));
-        Assert.DoesNotMatch(TraceParentW3C, await composeUnderTest.ReadServiceLogAsync("ordergenerator"));
-        Assert.DoesNotMatch(TraceParentW3C, await composeUnderTest.ReadServiceLogAsync("orderaccumulator"));
+        var generatorOrderLines = await ReadOrderLogLinesAsync("ordergenerator", clOrdId);
+        Assert.Equal(2, generatorOrderLines.Count);
+        var sentNewOrderSingle = Assert.Single(generatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
+        Assert.Contains("|35=D|", sentNewOrderSingle.ReadLogField("FixMessage"));
+        // The trace flags are the Datadog tracer's (it decides the sampling), so only the trace id is fixed here.
+        Assert.Matches($@"\|5100=00-{clOrdId}-[0-9a-f]{{16}}-[0-9a-f]{{2}}\|", sentNewOrderSingle.ReadLogField("FixMessage"));
+        var receivedExecutionReport = Assert.Single(generatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message received.");
+        Assert.Contains("|35=8|", receivedExecutionReport.ReadLogField("FixMessage"));
+
+        var accumulatorOrderLines = await ReadOrderLogLinesAsync("orderaccumulator", clOrdId);
+        Assert.Equal(2, accumulatorOrderLines.Count);
+        var receivedNewOrderSingle = Assert.Single(accumulatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message received.");
+        Assert.Contains("|35=D|", receivedNewOrderSingle.ReadLogField("FixMessage"));
+        var sentExecutionReport = Assert.Single(accumulatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
+        Assert.Contains("|35=8|", sentExecutionReport.ReadLogField("FixMessage"));
     }
 
-    private static readonly Regex TraceParentW3C = new("[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}");
+    // CA-7 and decision 22: every stdout line of each container is JSON (the parse fails otherwise), the FIX logon is
+    // one of them, and no line is Debug. The heartbeat is proven in FixAcceptorTests, where one is sure to happen.
+    [Theory]
+    [InlineData("ordergenerator")]
+    [InlineData("orderaccumulator")]
+    public async Task Container_log_is_json_with_the_fix_logon_and_without_debug(string serviceName)
+    {
+        var serviceLogLines = await ReadServiceJsonLogLinesAsync(serviceName);
+
+        Assert.Contains(serviceLogLines, serviceLogLine => serviceLogLine.ReadLogField("FixMessage")?.Contains("|35=A|") == true);
+        Assert.DoesNotContain(serviceLogLines, serviceLogLine => serviceLogLine.LogLevel is "Debug" or "Trace");
+    }
+
+    // RN-01 with the real Datadog tracer: the OrderGenerator does not continue a caller traceparent, so two orders
+    // sent in the same caller trace get different ClOrdIDs, and the second is decided, not answered as a repeat.
+    [Fact]
+    public async Task Orders_sent_with_the_same_caller_traceparent_get_different_clordids()
+    {
+        const string callerTraceId = "0af7651916cd43dd8448eb211c80319c";
+        const string callerTraceParent = $"00-{callerTraceId}-b7ad6b7169203331-01";
+
+        var firstOrder = await PostOrderWithCallerTraceParentAsync(callerTraceParent);
+        var secondOrder = await PostOrderWithCallerTraceParentAsync(callerTraceParent);
+
+        var firstClOrdId = firstOrder.GetProperty("clOrdId").GetString();
+        var secondClOrdId = secondOrder.GetProperty("clOrdId").GetString();
+        Assert.NotEqual(firstClOrdId, secondClOrdId);
+        Assert.NotEqual(callerTraceId, firstClOrdId);
+        Assert.NotEqual(callerTraceId, secondClOrdId);
+        Assert.NotEqual(firstOrder.GetProperty("orderId").GetString(), secondOrder.GetProperty("orderId").GetString());
+    }
 
     [Fact]
     public async Task Ordem_que_passa_do_limite_volta_rejeitada_com_150_8_e_o_texto_do_contrato()
@@ -135,6 +176,10 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal("8", executionReport.ReadFixTagValue(150));
         Assert.Equal("8", executionReport.ReadFixTagValue(39));
         Assert.Equal(expectedLimitRejectionText, executionReport.ReadFixTagValue(58));
+        // CA-13: one Warning in the OrderAccumulator, with the ClOrdID as trace id.
+        var limitRejectionWarning = Assert.Single(await ReadOrderLogLinesAsync("orderaccumulator", clOrdId), orderLogLine => orderLogLine.LogLevel == "Warning");
+        Assert.Equal("Order rejected: exposure limit exceeded.", limitRejectionWarning.Message);
+        Assert.Equal("exposure_limit_exceeded", limitRejectionWarning.ReadLogField("ErrorCode"));
     }
 
     // CA-28: the field rule lives only in the OrderAccumulator, so an invalid field goes by FIX and comes back rejected.
@@ -155,6 +200,10 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal("8", executionReport.ReadFixTagValue(150));
         Assert.Equal("8", executionReport.ReadFixTagValue(39));
         Assert.Equal(expectedFieldRejectionText, executionReport.ReadFixTagValue(58));
+        // CA-13: one Warning in the OrderAccumulator, with the ClOrdID as trace id.
+        var fieldRejectionWarning = Assert.Single(await ReadOrderLogLinesAsync("orderaccumulator", clOrdId), orderLogLine => orderLogLine.LogLevel == "Warning");
+        Assert.Equal("Order rejected: invalid fields.", fieldRejectionWarning.Message);
+        Assert.Equal("invalid_order_fields", fieldRejectionWarning.ReadLogField("ErrorCode"));
     }
 
     // Decision 24: what a NewOrderSingle cannot carry stops at the OrderGenerator with a 400 and the reason.
@@ -245,6 +294,20 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         return symbolExposureRow.GetProperty("exposure").GetDecimal();
     }
 
+    private async Task<JsonElement> PostOrderWithCallerTraceParentAsync(string callerTraceParent)
+    {
+        using var orderHttpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/orders")
+        {
+            Content = JsonContent.Create(new { symbol = "PETR4", side = "buy", quantity = 1, price = 1.00m })
+        };
+        orderHttpRequest.Headers.Add("traceparent", callerTraceParent);
+        using var createOrderResponse = await composeUnderTest.OrderGeneratorHttp.SendAsync(orderHttpRequest);
+        Assert.Equal(HttpStatusCode.OK, createOrderResponse.StatusCode);
+        var orderResponse = await createOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
+        return orderResponse;
+    }
+
     private async Task<JsonElement> PostOrderAsync(string symbol, string side, int quantity, decimal price)
     {
         using var createOrderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync("/api/orders", new { symbol, side, quantity, price });
@@ -259,6 +322,15 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
             .ToList();
         return Assert.Single(matchingFixMessages);
     }
+
+    private async Task<IReadOnlyList<ComposeJsonLogLine>> ReadServiceJsonLogLinesAsync(string serviceName) =>
+        (await composeUnderTest.ReadServiceStdoutAsync(serviceName))
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(ComposeJsonLogLine.ParseContainerLogLine)
+            .ToList();
+
+    private async Task<IReadOnlyList<ComposeJsonLogLine>> ReadOrderLogLinesAsync(string serviceName, string clOrdId) =>
+        (await ReadServiceJsonLogLinesAsync(serviceName)).Where(serviceLogLine => serviceLogLine.TraceId == clOrdId).ToList();
 }
 
 // Roda sem Docker: o limite é constante do OrderAccumulator e não pode vazar para configuração (CA-21).

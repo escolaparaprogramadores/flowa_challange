@@ -275,7 +275,9 @@ public sealed class OrdersProxyTests : IDisposable
         var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), ordersPath));
 
         Assert.Equal(expectedOrdersResponseStatus, ordersResponse.StatusCode);
-        Assert.DoesNotContain(orderGeneratorLogCaptureProvider.CapturedLogLines, capturedLogLine => capturedLogLine.StartsWith($"{LogLevel.Information} "));
+        // No FIX acceptor runs in this test: the FIX session logs its reconnection attempts, which do not come from the call.
+        Assert.DoesNotContain(orderGeneratorLogCaptureProvider.CapturedLogLines, capturedLogLine =>
+            capturedLogLine.StartsWith($"{LogLevel.Information} ") && !capturedLogLine.StartsWith($"{LogLevel.Information} Base.OrderGenerator.Infrastructure.Fix.FixSessionLog: "));
     }
 
     private static async Task AnswerOrdersPageOrDeletion(HttpContext ordersHttpContext)

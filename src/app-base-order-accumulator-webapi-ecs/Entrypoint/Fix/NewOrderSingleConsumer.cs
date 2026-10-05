@@ -1,4 +1,5 @@
 using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+using Base.OrderAccumulator.Commons;
 using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Fields;
@@ -10,9 +11,14 @@ namespace Base.OrderAccumulator.Entrypoint.Fix;
 
 // Receives the NewOrderSingle, hands it to the order use case and answers with the ExecutionReport.
 // Field validation (D-13), the limit and the repeated order (D-11) live in DecideIncomingOrderUseCase.
-public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationScopeFactory, ILogger<NewOrderSingleConsumer> orderFixLogger)
+public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationScopeFactory, IApplicationLogger<NewOrderSingleConsumer> orderFixLogger)
     : MessageCracker, IApplication
 {
+    private const string InvalidOrderFieldsErrorCode = "invalid_order_fields";
+    private const string ExposureLimitExceededErrorCode = "exposure_limit_exceeded";
+    private const string ExecutionReportNotSentErrorCode = "execution_report_not_sent";
+    private const string UnexpectedErrorCode = "error";
+
     public void FromApp(Message fixMessage, SessionID fixSessionId) => Crack(fixMessage, fixSessionId);
 
     public void OnMessage(NewOrderSingle newOrderSingle, SessionID fixSessionId)
@@ -37,17 +43,29 @@ public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationSc
             // Single error point of this entry. Without an answer, the OrderGenerator gives up after 5 s and shows
             // communication_error (contract, section 3). The use case stores in a single transaction
             // (DecideIncomingOrderUseCase), so the failure leaves no half-stored order; the FIX session stays up.
-            orderFixLogger.LogError(orderDecisionException, "Falha ao processar a ordem {ClOrdId}; nenhum ExecutionReport enviado.", incomingOrder.ClOrdId);
+            orderFixLogger.LogError(orderDecisionException, "Order decision failed; no ExecutionReport sent.", new { ErrorCode = UnexpectedErrorCode });
             return;
         }
 
-        if (orderDecision.IsRepeat)
-            orderFixLogger.LogInformation("ClOrdID {ClOrdId} repetido: devolvendo a resposta original.", orderDecision.ClOrdId);
+        LogOrderDecision(orderDecision);
 
         // The order is already stored. If the session dropped before the answer, resending the same ClOrdID returns
         // the stored answer (D-11); the warning makes the case visible in the log.
         if (!Session.SendToTarget(BuildExecutionReport(orderDecision), fixSessionId))
-            orderFixLogger.LogWarning("ExecutionReport da ordem {ClOrdId} não foi enviado: a sessão FIX não está logada.", orderDecision.ClOrdId);
+            orderFixLogger.LogWarning("ExecutionReport not sent: the FIX session is not logged on.", new { ErrorCode = ExecutionReportNotSentErrorCode });
+    }
+
+    // These logs run inside the order span, so their trace id is the ClOrdID. A rejection breaks a business rule:
+    // an expected error, logged as Warning without stack. A repeat is a normal answer (D-11): Information. An
+    // accepted order needs no line of its own; the FIX messages in and out already record it.
+    private void LogOrderDecision(DecideIncomingOrderOutput orderDecision)
+    {
+        if (orderDecision.IsRepeat)
+            orderFixLogger.LogInformation("Repeated ClOrdID: sending the stored answer back.");
+        else if (orderDecision is { Accepted: false, RejectedForInvalidFields: true })
+            orderFixLogger.LogWarning("Order rejected: invalid fields.", new { ErrorCode = InvalidOrderFieldsErrorCode });
+        else if (!orderDecision.Accepted)
+            orderFixLogger.LogWarning("Order rejected: exposure limit exceeded.", new { ErrorCode = ExposureLimitExceededErrorCode });
     }
 
     // Each order gets its own unit of work (one database connection), as an HTTP request would.
