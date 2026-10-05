@@ -264,18 +264,17 @@ test('CA-45: com 503 sem apagar no servidor, a tela relê lista e exposição an
     if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
     await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
   });
-  const controleDaReleituraDaLista = await segurarReleituraDaListaDepoisDoApagar(page);
+  const controleDasReleituras = await segurarReleiturasDepoisDoApagar(page);
 
   await localizarBotaoDeletarTudoDoCabecalho(page).click();
   await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
-  await controleDaReleituraDaLista.releituraChegou;
-  // Enquanto a releitura não volta, o erro ainda não aparece.
+  await controleDasReleituras.releiturasChegaram;
+  // Enquanto lista e exposição não voltam, o erro ainda não aparece.
   await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
-  controleDaReleituraDaLista.liberarReleituraDaLista();
+  controleDasReleituras.liberarReleituras();
 
   await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
   await expect(localizarJanelaDeConfirmacao(page)).toBeVisible();
-  expect(controleDaReleituraDaLista.exposicaoRelidaDepoisDoApagar()).toBe(true);
   await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(ORDENS_DE_COMPRA_DO_TESTE.length);
   expect(await lerExposicoesNaTela(page)).toEqual(exposicoesAntes);
   expect(await contarOrdensNoServidor(page)).toBe(ORDENS_DE_COMPRA_DO_TESTE.length);
@@ -289,17 +288,16 @@ test('CA-45: com 503 depois de o servidor apagar (prazo do OrderGenerator), a re
     expect(respostaDoServidor.status()).toBe(204);
     await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
   });
-  const controleDaReleituraDaLista = await segurarReleituraDaListaDepoisDoApagar(page);
+  const controleDasReleituras = await segurarReleiturasDepoisDoApagar(page);
 
   await localizarBotaoDeletarTudoDoCabecalho(page).click();
   await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
-  await controleDaReleituraDaLista.releituraChegou;
-  // Enquanto a releitura não volta, o erro ainda não aparece.
+  await controleDasReleituras.releiturasChegaram;
+  // Enquanto lista e exposição não voltam, o erro ainda não aparece.
   await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
-  controleDaReleituraDaLista.liberarReleituraDaLista();
+  controleDasReleituras.liberarReleituras();
 
   await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
-  expect(controleDaReleituraDaLista.exposicaoRelidaDepoisDoApagar()).toBe(true);
   await conferirTelaZerada(page);
   expect(await contarOrdensNoServidor(page)).toBe(0);
 });
@@ -317,21 +315,17 @@ test('ASSUMI-04: com a tela na página 2, o 503 no apagar relê a própria pági
     if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
     await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
   });
-  const leiturasDepoisDoApagar: string[] = [];
-  let apagarJaSaiu = false;
-  page.on('request', (requisicaoDaTela) => {
-    if (ehChamadaDaApi(requisicaoDaTela, 'DELETE', ROTA_DAS_ORDENS)) apagarJaSaiu = true;
-    else if (apagarJaSaiu && new URL(requisicaoDaTela.url()).pathname.startsWith('/api/')) {
-      const enderecoDaChamada = new URL(requisicaoDaTela.url());
-      leiturasDepoisDoApagar.push(`${requisicaoDaTela.method()} ${enderecoDaChamada.pathname}${enderecoDaChamada.search}`);
-    }
-  });
+  const controleDasReleituras = await segurarReleiturasDepoisDoApagar(page);
 
   await localizarBotaoDeletarTudoDoCabecalho(page).click();
   await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
+  await controleDasReleituras.releiturasChegaram;
+  // A releitura pede a própria página 2, e o erro espera lista e exposição voltarem.
+  expect(controleDasReleituras.lerPaginaPedidaNaReleitura()).toBe('2');
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
+  controleDasReleituras.liberarReleituras();
 
   await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
-  expect(leiturasDepoisDoApagar.sort()).toEqual(['GET /api/exposures', 'GET /api/orders?page=2']);
   await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(3);
   await expect(page.getByRole('group', { name: 'Páginas da lista de ordens' }).getByRole('button', { name: 'Página 2', exact: true })).toHaveAttribute('aria-current', 'page');
 });
@@ -409,23 +403,36 @@ test('ASSUMI-05: abrir a janela de novo depois de um erro começa sem a mensagem
   await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
 });
 
-// Segura a primeira leitura da lista que sai depois do DELETE, para o teste olhar a janela antes de ela voltar.
-async function segurarReleituraDaListaDepoisDoApagar(paginaDaBoleta: Page) {
+// Segura as duas releituras que saem depois do DELETE (a da lista e a da exposição), para o teste
+// olhar a janela antes de elas voltarem: o erro só pode aparecer depois que as duas foram aplicadas.
+async function segurarReleiturasDepoisDoApagar(paginaDaBoleta: Page) {
   let apagarJaSaiu = false;
-  let exposicaoRelida = false;
-  let avisarQueReleituraChegou: () => void = () => {};
-  let liberarReleitura: () => void = () => {};
-  const releituraChegou = new Promise<void>((resolverChegada) => (avisarQueReleituraChegou = resolverChegada));
-  const releituraLiberada = new Promise<void>((resolverLiberacao) => (liberarReleitura = resolverLiberacao));
+  let paginaPedidaNaReleitura: string | null = null;
+  let avisarListaChegou: () => void = () => {};
+  let avisarExposicaoChegou: () => void = () => {};
+  let liberarReleituras: () => void = () => {};
+  const listaChegou = new Promise<void>((resolverChegada) => (avisarListaChegou = resolverChegada));
+  const exposicaoChegou = new Promise<void>((resolverChegada) => (avisarExposicaoChegou = resolverChegada));
+  const releiturasLiberadas = new Promise<void>((resolverLiberacao) => (liberarReleituras = resolverLiberacao));
   paginaDaBoleta.on('request', (requisicaoDaTela) => {
     if (ehChamadaDaApi(requisicaoDaTela, 'DELETE', ROTA_DAS_ORDENS)) apagarJaSaiu = true;
-    if (apagarJaSaiu && ehChamadaDaApi(requisicaoDaTela, 'GET', ROTA_DAS_EXPOSICOES)) exposicaoRelida = true;
   });
   await paginaDaBoleta.route((enderecoDaChamada) => enderecoDaChamada.pathname === ROTA_DAS_ORDENS && enderecoDaChamada.searchParams.has('page'), async (rotaInterceptada) => {
     if (!apagarJaSaiu) return rotaInterceptada.fallback();
-    avisarQueReleituraChegou();
-    await releituraLiberada;
+    paginaPedidaNaReleitura = new URL(rotaInterceptada.request().url()).searchParams.get('page');
+    avisarListaChegou();
+    await releiturasLiberadas;
     await rotaInterceptada.fallback();
   });
-  return { releituraChegou, liberarReleituraDaLista: () => liberarReleitura(), exposicaoRelidaDepoisDoApagar: () => exposicaoRelida };
+  await paginaDaBoleta.route((enderecoDaChamada) => enderecoDaChamada.pathname === ROTA_DAS_EXPOSICOES, async (rotaInterceptada) => {
+    if (!apagarJaSaiu) return rotaInterceptada.fallback();
+    avisarExposicaoChegou();
+    await releiturasLiberadas;
+    await rotaInterceptada.fallback();
+  });
+  return {
+    releiturasChegaram: Promise.all([listaChegou, exposicaoChegou]),
+    liberarReleituras: () => liberarReleituras(),
+    lerPaginaPedidaNaReleitura: () => paginaPedidaNaReleitura,
+  };
 }

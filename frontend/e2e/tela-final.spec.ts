@@ -141,9 +141,14 @@ for (const larguraDaJanela of [860, 375]) {
     const caixaDaJanela = await conferirVisivelELerCaixaDoElemento(page.getByRole('dialog', { name: 'Deletar todos os dados?' }), 'janela');
     expect(caixaDaJanela.x).toBeGreaterThanOrEqual(0);
     expect(caixaDaJanela.x + caixaDaJanela.width).toBeLessThanOrEqual(larguraDaJanela);
+    expect(caixaDaJanela.y).toBeGreaterThanOrEqual(0);
+    expect(caixaDaJanela.y + caixaDaJanela.height).toBeLessThanOrEqual(page.viewportSize()!.height);
     for (const nomeDoBotao of ['Cancelar', 'Deletar tudo']) {
       const caixaDoBotao = await conferirVisivelELerCaixaDoElemento(page.getByRole('dialog').getByRole('button', { name: nomeDoBotao }), nomeDoBotao);
+      expect(caixaDoBotao.x, nomeDoBotao).toBeGreaterThanOrEqual(caixaDaJanela.x);
       expect(caixaDoBotao.x + caixaDoBotao.width, nomeDoBotao).toBeLessThanOrEqual(caixaDaJanela.x + caixaDaJanela.width);
+      expect(caixaDoBotao.y, nomeDoBotao).toBeGreaterThanOrEqual(caixaDaJanela.y);
+      expect(caixaDoBotao.y + caixaDoBotao.height, nomeDoBotao).toBeLessThanOrEqual(caixaDaJanela.y + caixaDaJanela.height);
     }
     await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, `08-janela-aberta-${larguraDaJanela}.png`) });
   });
