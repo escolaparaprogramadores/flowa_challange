@@ -317,11 +317,13 @@ jobs:
         run: |
           search_start_ms=$(( ($(date +%s) - 86400) * 1000 ))
           for app_log_group in flowa-challenge-order-generator flowa-challenge-order-accumulator; do
-            # AWS errors carry account ARNs; they stay out of this public log.
+            # AWS errors carry account ARNs; only the error code reaches this public log.
+            aws_error_file="$RUNNER_TEMP/cloudwatch-$app_log_group.err"
             if ! evidence_order_lines=$(aws logs filter-log-events --log-group-name "$app_log_group" \
                  --log-stream-name-prefix app/ --start-time "$search_start_ms" \
-                 --filter-pattern "\"$EVIDENCE_ORDER_CLORDID\"" --query 'events[].message' --output json 2> /dev/null); then
-              echo "$app_log_group: could not read CloudWatch (the deploy role needs logs:FilterLogEvents)"
+                 --filter-pattern "\"$EVIDENCE_ORDER_CLORDID\"" --query 'events[].message' --output json 2> "$aws_error_file"); then
+              aws_error_code=$(grep -oE '\([A-Za-z]+(Exception|Error)\)' "$aws_error_file" | head -n 1 | tr -d '()')
+              echo "$app_log_group: could not read CloudWatch (${aws_error_code:-unknown error})"
               continue
             fi
             echo "$app_log_group: $(jq length <<< "$evidence_order_lines") line(s) of order $EVIDENCE_ORDER_CLORDID"
