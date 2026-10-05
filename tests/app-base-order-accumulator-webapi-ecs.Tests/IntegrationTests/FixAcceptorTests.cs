@@ -155,6 +155,26 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     }
 
     [Fact]
+    public async Task Fix_heartbeats_are_exchanged_but_never_logged()
+    {
+        // Decision 22. Positive control: with a 1 s interval the acceptor really sends heartbeats during the test.
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        int heartbeatsSentByTheAcceptor;
+        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        {
+            using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort, heartbeatIntervalSeconds: 1);
+            var heartbeatClock = System.Diagnostics.Stopwatch.StartNew();
+            while (fixTestInitiator.ReceivedHeartbeatCount < 2 && heartbeatClock.Elapsed < TimeSpan.FromSeconds(10))
+                await Task.Delay(100);
+            heartbeatsSentByTheAcceptor = fixTestInitiator.ReceivedHeartbeatCount;
+        }
+
+        Assert.True(heartbeatsSentByTheAcceptor >= 2, $"the acceptor sent {heartbeatsSentByTheAcceptor} heartbeats in 10 s");
+        Assert.Contains(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.ReadLogField("FixMessage")?.Contains("|35=A|") == true);
+        Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.ReadLogField("FixMessage")?.Contains("|35=0|") == true);
+    }
+
+    [Fact]
     public async Task Fix_messages_in_and_out_are_written_to_stdout_as_json_lines()
     {
         // CA-7: reads the real stdout of the app, every line one JSON log line.

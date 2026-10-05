@@ -127,17 +127,36 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Contains("|35=8|", sentExecutionReport.ReadLogField("FixMessage"));
     }
 
-    // Decision 22: no FIX heartbeat and no Debug line in either container, and every line is JSON (CA-7).
+    // CA-7 and decision 22: every stdout line of each container is JSON (the parse fails otherwise), the FIX logon is
+    // one of them, and no line is Debug. The heartbeat is proven in FixAcceptorTests, where one is sure to happen.
     [Theory]
     [InlineData("ordergenerator")]
     [InlineData("orderaccumulator")]
-    public async Task Container_log_is_json_without_heartbeat_nor_debug(string serviceName)
+    public async Task Container_log_is_json_with_the_fix_logon_and_without_debug(string serviceName)
     {
         var serviceLogLines = await ReadServiceJsonLogLinesAsync(serviceName);
 
-        Assert.NotEmpty(serviceLogLines);
+        Assert.Contains(serviceLogLines, serviceLogLine => serviceLogLine.ReadLogField("FixMessage")?.Contains("|35=A|") == true);
         Assert.DoesNotContain(serviceLogLines, serviceLogLine => serviceLogLine.LogLevel is "Debug" or "Trace");
-        Assert.DoesNotContain(serviceLogLines, serviceLogLine => serviceLogLine.ReadLogField("FixMessage")?.Contains("|35=0|") == true);
+    }
+
+    // RN-01 with the real Datadog tracer: the OrderGenerator does not continue a caller traceparent, so two orders
+    // sent in the same caller trace get different ClOrdIDs, and the second is decided, not answered as a repeat.
+    [Fact]
+    public async Task Orders_sent_with_the_same_caller_traceparent_get_different_clordids()
+    {
+        const string callerTraceId = "0af7651916cd43dd8448eb211c80319c";
+        const string callerTraceParent = $"00-{callerTraceId}-b7ad6b7169203331-01";
+
+        var firstOrder = await PostOrderWithCallerTraceParentAsync(callerTraceParent);
+        var secondOrder = await PostOrderWithCallerTraceParentAsync(callerTraceParent);
+
+        var firstClOrdId = firstOrder.GetProperty("clOrdId").GetString();
+        var secondClOrdId = secondOrder.GetProperty("clOrdId").GetString();
+        Assert.NotEqual(firstClOrdId, secondClOrdId);
+        Assert.NotEqual(callerTraceId, firstClOrdId);
+        Assert.NotEqual(callerTraceId, secondClOrdId);
+        Assert.NotEqual(firstOrder.GetProperty("orderId").GetString(), secondOrder.GetProperty("orderId").GetString());
     }
 
     [Fact]
@@ -273,6 +292,20 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         var symbolExposureRow = Assert.Single(exposuresBody.GetProperty("exposures").EnumerateArray(),
             exposureRowOfSymbol => exposureRowOfSymbol.GetProperty("symbol").GetString() == symbol);
         return symbolExposureRow.GetProperty("exposure").GetDecimal();
+    }
+
+    private async Task<JsonElement> PostOrderWithCallerTraceParentAsync(string callerTraceParent)
+    {
+        using var orderHttpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/orders")
+        {
+            Content = JsonContent.Create(new { symbol = "PETR4", side = "buy", quantity = 1, price = 1.00m })
+        };
+        orderHttpRequest.Headers.Add("traceparent", callerTraceParent);
+        using var createOrderResponse = await composeUnderTest.OrderGeneratorHttp.SendAsync(orderHttpRequest);
+        Assert.Equal(HttpStatusCode.OK, createOrderResponse.StatusCode);
+        var orderResponse = await createOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
+        return orderResponse;
     }
 
     private async Task<JsonElement> PostOrderAsync(string symbol, string side, int quantity, decimal price)

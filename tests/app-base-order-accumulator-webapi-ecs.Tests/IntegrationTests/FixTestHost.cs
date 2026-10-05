@@ -93,14 +93,15 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     private readonly Channel<BusinessMessageReject> businessMessageRejects = Channel.CreateUnbounded<BusinessMessageReject>();
     private readonly Channel<Reject> sessionRejects = Channel.CreateUnbounded<Reject>();
     private SessionID? fixSessionId;
+    private int receivedHeartbeatCount;
 
-    private FixTestInitiator(int fixAcceptorPort)
+    private FixTestInitiator(int fixAcceptorPort, int heartbeatIntervalSeconds)
     {
         var fixTestInitiatorSettings = new SessionSettings(new StringReader($"""
             [DEFAULT]
             ConnectionType=initiator
             ReconnectInterval=1
-            HeartBtInt=30
+            HeartBtInt={heartbeatIntervalSeconds}
             StartTime=00:00:00
             EndTime=00:00:00
             UseDataDictionary=Y
@@ -119,9 +120,13 @@ public sealed class FixTestInitiator : IApplication, IDisposable
         fixTestSocketInitiator = new SocketInitiator(this, new MemoryStoreFactory(), fixTestInitiatorSettings, (ILoggerFactory?)null, null);
     }
 
-    public static async Task<FixTestInitiator> LogOnToAcceptorAsync(int fixAcceptorPort)
+    // Heartbeats (35=0) the acceptor sent to this initiator: the acceptor sends one whenever the session is quiet
+    // for the interval the initiator asked for at logon.
+    public int ReceivedHeartbeatCount => Volatile.Read(ref receivedHeartbeatCount);
+
+    public static async Task<FixTestInitiator> LogOnToAcceptorAsync(int fixAcceptorPort, int heartbeatIntervalSeconds = 30)
     {
-        var fixTestInitiator = new FixTestInitiator(fixAcceptorPort);
+        var fixTestInitiator = new FixTestInitiator(fixAcceptorPort, heartbeatIntervalSeconds);
         fixTestInitiator.fixTestSocketInitiator.Start();
         await fixTestInitiator.fixSessionLoggedOn.Task.WaitAsync(FixAnswerTimeout);
         return fixTestInitiator;
@@ -193,6 +198,8 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     {
         if (fixMessage is Reject receivedSessionReject)
             sessionRejects.Writer.TryWrite(receivedSessionReject);
+        else if (fixMessage is Heartbeat)
+            Interlocked.Increment(ref receivedHeartbeatCount);
     }
     public void ToApp(Message fixMessage, SessionID fixSessionId) { }
 }
