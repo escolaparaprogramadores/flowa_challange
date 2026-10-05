@@ -1,6 +1,6 @@
 using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
 using Base.OrderAccumulator.Domain.Orders;
-using Flowa.Shared.Fix;
+using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
 using QuickFix;

@@ -2,7 +2,6 @@ using Base.OrderAccumulator.Application.Exposures;
 using Base.OrderAccumulator.Commons;
 using Base.OrderAccumulator.Domain.Exposures;
 using Base.OrderAccumulator.Domain.Orders;
-using Flowa.Shared;
 
 namespace Base.OrderAccumulator.Application.Orders.DeleteAllOrders;
 
@@ -23,7 +22,7 @@ public sealed class DeleteAllOrdersUseCase(
         await unitOfWork.BeginTransactionAsync(CancellationToken.None);
         try
         {
-            await exposureRepository.ZeroSymbolExposuresAsync(OrderRules.AllowedOrderSymbols, CancellationToken.None);
+            await exposureRepository.ZeroSymbolExposuresAsync(OrderFieldRule.AllowedOrderSymbols, CancellationToken.None);
             await orderRepository.DeleteAllOrdersAsync(CancellationToken.None);
             await unitOfWork.CommitTransactionAsync(CancellationToken.None);
         }

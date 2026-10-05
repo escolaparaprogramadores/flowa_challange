@@ -20,10 +20,8 @@ RUN case "$TARGETARCH" in \
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY Directory.Build.props ./
-COPY src/Flowa.Shared/Flowa.Shared.csproj src/Flowa.Shared/
 COPY src/app-base-order-accumulator-webapi-ecs/OrderAccumulator.csproj src/app-base-order-accumulator-webapi-ecs/
 RUN dotnet restore src/app-base-order-accumulator-webapi-ecs/OrderAccumulator.csproj
-COPY src/Flowa.Shared/ src/Flowa.Shared/
 COPY src/app-base-order-accumulator-webapi-ecs/ src/app-base-order-accumulator-webapi-ecs/
 # Os apps só sobem com o commit gravado no build (rota /version). O build precisa do .git no contexto:
 # num clone o SHA sai dele; numa worktree, onde .git é só um arquivo, quem chama passa SOURCE_REVISION_ID.

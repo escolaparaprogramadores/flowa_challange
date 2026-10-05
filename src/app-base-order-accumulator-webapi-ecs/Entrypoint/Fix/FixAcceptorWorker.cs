@@ -1,5 +1,5 @@
 using Base.OrderAccumulator.Commons;
-using Flowa.Shared.Fix;
+using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Store;
 using QuickFix;
 

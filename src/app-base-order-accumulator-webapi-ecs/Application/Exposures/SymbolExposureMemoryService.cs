@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
 using Base.OrderAccumulator.Domain.Exposures;
-using Flowa.Shared;
+using Base.OrderAccumulator.Domain.Orders;
 
 namespace Base.OrderAccumulator.Application.Exposures;
 
@@ -52,7 +52,7 @@ public sealed class SymbolExposureMemoryService
             try
             {
                 await deleteAllStoredOrdersAndZeroExposures();
-                foreach (var orderSymbol in OrderRules.AllowedOrderSymbols)
+                foreach (var orderSymbol in OrderFieldRule.AllowedOrderSymbols)
                     exposureBySymbol[orderSymbol] = 0m;
             }
             finally
@@ -82,7 +82,7 @@ public sealed class SymbolExposureMemoryService
     }
 
     public IReadOnlyList<SymbolExposure> ReadCurrentSymbolExposures() =>
-        OrderRules.AllowedOrderSymbols
+        OrderFieldRule.AllowedOrderSymbols
             .Select(orderSymbol => new SymbolExposure(orderSymbol, exposureBySymbol.GetValueOrDefault(orderSymbol)))
             .ToList();
 }

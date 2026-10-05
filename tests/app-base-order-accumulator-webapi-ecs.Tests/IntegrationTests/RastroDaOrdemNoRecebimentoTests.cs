@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using Flowa.Shared.Fix;
+using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
 
@@ -11,6 +11,8 @@ namespace Base.OrderAccumulator.Tests;
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
+    private static readonly ActivitySource OrderSendingTestSource = new(FixOrderTraceProvider.TraceSourceName);
+
     public Task InitializeAsync() => orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -21,11 +23,11 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
         using var spansDoRastro = new SpansDoRastroDaOrdemCapturados();
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-        // O envio sai do mesmo helper que o OrderGenerator usa (FixOrderClient).
-        using var envioDaOrdem = FixOrderTraceProvider.StartOrderSending();
+        // The sending span plays the OrderGenerator part: same source name and the same W3C traceparent in tag 5100.
+        using var envioDaOrdem = OrderSendingTestSource.StartActivity("fix.envio_da_ordem", ActivityKind.Producer);
         Assert.NotNull(envioDaOrdem);
         var ordemComRastro = FixTestInitiator.NewOrder("rastro-com-5100", "PETR4", '1', 100, 10.50m);
-        ordemComRastro.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, FixOrderTraceProvider.GetTraceParentOfOrderSending(envioDaOrdem)!));
+        ordemComRastro.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, envioDaOrdem.Id!));
 
         var relatorioDaOrdem = await fixTestInitiator.SendExpectingExecutionReportAsync(ordemComRastro);
 
@@ -53,12 +55,12 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
             using var spansDoRastro = new SpansDoRastroDaOrdemCapturados();
             await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-            using var envioDaOrdem = FixOrderTraceProvider.StartOrderSending();
+            using var envioDaOrdem = OrderSendingTestSource.StartActivity("fix.envio_da_ordem", ActivityKind.Producer);
             Assert.NotNull(envioDaOrdem);
             traceIdDoEnvio = envioDaOrdem.TraceId.ToHexString();
             spanIdDoEnvio = envioDaOrdem.SpanId.ToHexString();
             var ordemComRastro = FixTestInitiator.NewOrder("log-sem-trace-id", "PETR4", '1', 100, 10.50m);
-            ordemComRastro.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, FixOrderTraceProvider.GetTraceParentOfOrderSending(envioDaOrdem)!));
+            ordemComRastro.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, envioDaOrdem.Id!));
 
             var relatorioDaOrdem = await fixTestInitiator.SendExpectingExecutionReportAsync(ordemComRastro);
 

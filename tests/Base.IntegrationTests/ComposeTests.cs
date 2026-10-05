@@ -137,6 +137,44 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(expectedLimitRejectionText, executionReport.ReadFixTagValue(58));
     }
 
+    // CA-28: the field rule lives only in the OrderAccumulator, so an invalid field goes by FIX and comes back rejected.
+    [Fact]
+    public async Task Order_with_invalid_fields_goes_by_fix_and_comes_back_rejected_with_the_reasons()
+    {
+        var invalidOrder = await PostOrderAsync("ITUB4", "buy", 100000, 1000m);
+
+        const string expectedFieldRejectionText =
+            "Símbolo inválido. Use PETR4, VALE3 ou VIIA4. A quantidade deve ser menor que 100.000. O preço deve ser menor que 1.000,00.";
+        Assert.Equal("rejected", invalidOrder.GetProperty("status").GetString());
+        Assert.Equal(expectedFieldRejectionText, invalidOrder.GetProperty("message").GetString());
+
+        var clOrdId = invalidOrder.GetProperty("clOrdId").GetString()!;
+        var newOrderSingle = await FindSingleFixMessageAsync("ordergenerator", "D", clOrdId, senderCompId: "ORDERGENERATOR");
+        Assert.Equal("ITUB4", newOrderSingle.ReadFixTagValue(55));
+        var executionReport = await FindSingleFixMessageAsync("orderaccumulator", "8", clOrdId, senderCompId: "ORDERACCUMULATOR");
+        Assert.Equal("8", executionReport.ReadFixTagValue(150));
+        Assert.Equal("8", executionReport.ReadFixTagValue(39));
+        Assert.Equal(expectedFieldRejectionText, executionReport.ReadFixTagValue(58));
+    }
+
+    // Decision 24: what a NewOrderSingle cannot carry stops at the OrderGenerator with a 400 and the reason.
+    [Theory]
+    [InlineData("""{"symbol":"PETR4","side":"buy","quantity":100}""", "price", "Informe o preço.")]
+    [InlineData("""{"symbol":"PETR4","side":"buy","quantity":"abc","price":10.50}""", "quantity", "A quantidade deve ser um número inteiro.")]
+    [InlineData("""{"symbol":"PETR4","side":"compra","quantity":100,"price":10.50}""", "side", "Lado inválido. Use compra ou venda.")]
+    public async Task Order_that_does_not_fit_fix_gets_400_with_the_reason(string orderJson, string expectedOrderField, string expectedOrderFieldMessage)
+    {
+        using var badFormatResponse = await composeUnderTest.OrderGeneratorHttp.PostAsync(
+            "/api/orders", new StringContent(orderJson, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, badFormatResponse.StatusCode);
+        var validationErrorBody = await badFormatResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("validation_error", validationErrorBody.GetProperty("status").GetString());
+        var orderFieldError = Assert.Single(validationErrorBody.GetProperty("errors").EnumerateArray());
+        Assert.Equal(expectedOrderField, orderFieldError.GetProperty("field").GetString());
+        Assert.Equal(expectedOrderFieldMessage, orderFieldError.GetProperty("message").GetString());
+    }
+
     [Fact]
     public async Task Pagina_e_exposicao_respondem_pelo_OrderGenerator()
     {

@@ -1,6 +1,6 @@
 using Base.OrderAccumulator.Domain.Exposures;
 using Dapper;
-using Flowa.Shared;
+using Base.OrderAccumulator.Domain.Orders;
 using Xunit.Abstractions;
 
 namespace Base.OrderAccumulator.Tests;

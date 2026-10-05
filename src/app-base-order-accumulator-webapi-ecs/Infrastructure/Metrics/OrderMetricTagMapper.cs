@@ -1,4 +1,4 @@
-using Flowa.Shared;
+using Base.OrderAccumulator.Domain.Orders;
 
 namespace Base.OrderAccumulator.Infrastructure.Metrics;
 
@@ -10,7 +10,7 @@ public static class OrderMetricTagMapper
 
     public static string[] BuildOrderDecisionTags(string? orderSymbol, char orderSide)
     {
-        if (orderSymbol is null || !OrderRules.AllowedOrderSymbols.Contains(orderSymbol))
+        if (orderSymbol is null || !OrderFieldRule.AllowedOrderSymbols.Contains(orderSymbol))
             return [$"symbol:{InvalidTagValue}", $"side:{InvalidTagValue}"];
 
         return [$"symbol:{orderSymbol}", $"side:{ToOrderSideTagValue(orderSide)}"];

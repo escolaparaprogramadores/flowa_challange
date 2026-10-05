@@ -3,7 +3,6 @@ using System.Reflection;
 using System.Text.Json;
 using Base.OrderGenerator.Application.Orders.SendOrder;
 using Base.OrderGenerator.Domain.Orders;
-using Flowa.Shared;
 
 namespace Base.OrderGenerator.Entrypoint;
 
@@ -49,22 +48,21 @@ public static class OrderGeneratorApiEndpoints
     private static async Task<IResult> PostOrderAsync(HttpRequest orderHttpRequest, SendOrderUseCase sendOrderUseCase)
     {
         var rawOrderFields = await ReadRawOrderFields(orderHttpRequest);
-        var orderValidation = OrderValidator.ValidateOrderFromJson(
+        var orderRequestFormatValidation = OrderRequestFormatValidator.ValidateOrderRequestFormat(
             rawOrderFields.Symbol, rawOrderFields.Side, rawOrderFields.Quantity, rawOrderFields.Price);
-        if (!orderValidation.IsOrderValid)
+        if (orderRequestFormatValidation.OrderToSend is not { } orderToSend)
         {
             return Results.Json(
-                new { status = "validation_error", message = InvalidOrderMessage, errors = orderValidation.OrderFieldErrors },
+                new { status = "validation_error", message = InvalidOrderMessage, errors = orderRequestFormatValidation.OrderFieldFormatErrors },
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
-        var validOrder = orderValidation.ValidatedOrder!;
-        var sentOrderResult = await sendOrderUseCase.SendOrderAsync(validOrder);
+        var sentOrderResult = await sendOrderUseCase.SendOrderAsync(orderToSend);
 
         return sentOrderResult.Status switch
         {
-            SentOrderStatus.Accepted => Results.Json(BuildOrderResponseBody("accepted", sentOrderResult, validOrder, AcceptedOrderMessage)),
-            SentOrderStatus.Rejected => Results.Json(BuildOrderResponseBody("rejected", sentOrderResult, validOrder,
+            SentOrderStatus.Accepted => Results.Json(BuildOrderResponseBody("accepted", sentOrderResult, orderToSend, AcceptedOrderMessage)),
+            SentOrderStatus.Rejected => Results.Json(BuildOrderResponseBody("rejected", sentOrderResult, orderToSend,
                 sentOrderResult.RejectionText ?? RejectedOrderWithoutTextMessage)),
             SentOrderStatus.NoLoggedOnSession or SentOrderStatus.ExecutionReportTimeout => BuildOrderAccumulatorCommunicationErrorResponse(OrderCommunicationMessage),
             _ => BuildOrderGeneratorUnexpectedErrorResponse()
@@ -145,20 +143,20 @@ public static class OrderGeneratorApiEndpoints
         Results.Json(new { status = "communication_error", message = communicationErrorMessage },
             statusCode: StatusCodes.Status503ServiceUnavailable);
 
-    private static object BuildOrderResponseBody(string orderStatus, SentOrderResult sentOrderResult, ValidOrder validOrder, string orderMessage) => new
+    private static object BuildOrderResponseBody(string orderStatus, SentOrderResult sentOrderResult, OrderToSend sentOrder, string orderMessage) => new
     {
         status = orderStatus,
         clOrdId = sentOrderResult.ClOrdId,
         orderId = sentOrderResult.OrderId,
         execId = sentOrderResult.ExecId,
-        symbol = validOrder.OrderSymbol,
-        side = validOrder.OrderSide.ToJsonOrderSide(),
-        quantity = validOrder.OrderQuantity,
-        price = validOrder.OrderPrice,
+        symbol = sentOrder.Symbol,
+        side = OrderRequestFormatValidator.ToJsonOrderSide(sentOrder.Side),
+        quantity = sentOrder.Quantity,
+        price = sentOrder.Price,
         message = orderMessage
     };
 
-    // Quantidade e preço chegam como texto cru para o validador dar a mensagem certa a "abc" ou 1.5.
+    // Quantity and price arrive as raw text so the format check can answer "abc" with a message.
     private static async Task<(string? Symbol, string? Side, string? Quantity, string? Price)> ReadRawOrderFields(HttpRequest orderHttpRequest)
     {
         JsonDocument orderJsonDocument;
@@ -168,7 +166,7 @@ public static class OrderGeneratorApiEndpoints
         }
         catch (JsonException)
         {
-            // Corpo que não é JSON vira ordem vazia: o validador diz o que falta em cada campo.
+            // A body that is not JSON becomes an empty order: the format check reports what each field is missing.
             return default;
         }
 
@@ -178,10 +176,10 @@ public static class OrderGeneratorApiEndpoints
             if (orderJson.ValueKind != JsonValueKind.Object)
                 return default;
 
-            return (ReadRawOrderFieldText(orderJson, OrderFields.OrderSymbolFieldName),
-                ReadRawOrderFieldText(orderJson, OrderFields.OrderSideFieldName),
-                ReadRawOrderFieldText(orderJson, OrderFields.OrderQuantityFieldName),
-                ReadRawOrderFieldText(orderJson, OrderFields.OrderPriceFieldName));
+            return (ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderSymbolFieldName),
+                ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderSideFieldName),
+                ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderQuantityFieldName),
+                ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderPriceFieldName));
         }
     }
 

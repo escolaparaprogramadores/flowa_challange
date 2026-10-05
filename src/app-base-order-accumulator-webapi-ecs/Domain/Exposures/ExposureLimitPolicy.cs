@@ -1,5 +1,5 @@
 using System.Globalization;
-using Flowa.Shared;
+using Base.OrderAccumulator.Domain.Orders;
 
 namespace Base.OrderAccumulator.Domain.Exposures;
 

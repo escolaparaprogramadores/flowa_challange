@@ -1,5 +1,4 @@
 using Base.OrderAccumulator.Domain.Exposures;
-using Flowa.Shared;
 
 namespace Base.OrderAccumulator.Domain.Orders;
 
@@ -10,21 +9,18 @@ public sealed class OrderDecisionDomainService(IExposureRepository exposureRepos
 {
     public async Task<Order> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
     {
-        var orderValidation = OrderValidator.ValidateOrderFromFix(
-            incomingOrder.Symbol, incomingOrder.Side, incomingOrder.Quantity, incomingOrder.Price);
-        if (!orderValidation.IsOrderValid)
-            return Order.RejectOrderWithInvalidFields(
-                incomingOrder, orderValidation.OrderFieldErrors.Select(orderFieldError => orderFieldError.OrderFieldErrorMessage));
+        var orderFieldValidation = OrderFieldRule.ValidateIncomingOrderFields(incomingOrder);
+        if (orderFieldValidation.ValidOrderFields is not { } validOrderFields)
+            return Order.RejectOrderWithInvalidFields(incomingOrder, orderFieldValidation.InvalidOrderFieldMessages);
 
-        var validOrder = orderValidation.ValidatedOrder!;
         var orderFitsExposureLimit = await exposureRepository.TryMoveSymbolExposureWithinLimitAsync(
-            validOrder.OrderSymbol,
-            ExposureLimitPolicy.CalculateOrderExposureDelta(validOrder.OrderSide, validOrder.OrderQuantity, validOrder.OrderPrice),
+            validOrderFields.Symbol,
+            ExposureLimitPolicy.CalculateOrderExposureDelta(validOrderFields.Side, validOrderFields.Quantity, validOrderFields.Price),
             ExposureLimitPolicy.PerSymbol,
             cancellationToken);
 
         return orderFitsExposureLimit
             ? Order.AcceptOrder(incomingOrder)
-            : Order.RejectOrderOverExposureLimit(incomingOrder, validOrder.OrderSymbol);
+            : Order.RejectOrderOverExposureLimit(incomingOrder, validOrderFields.Symbol);
     }
 }

@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
-using Flowa.Shared.Fix;
+using Base.OrderGenerator.Infrastructure.Fix;
 using QuickFix.Fields;
 
 namespace Base.OrderGenerator.Tests;

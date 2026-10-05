@@ -13,7 +13,6 @@ using Base.OrderAccumulator.Entrypoint.Workers;
 using Base.OrderAccumulator.Entrypoint;
 using Base.OrderAccumulator.Infrastructure.Metrics;
 using Base.OrderAccumulator.Infrastructure.Persistence;
-using Flowa.Shared;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Primitives;
 using Npgsql;

@@ -5,10 +5,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Flowa.Shared/Flowa.Shared.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="QuickFIXn.Core" Version="1.14.1" />
     <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" />
   </ItemGroup>
@@ -17,11 +13,12 @@
     <InternalsVisibleTo Include="OrderGenerator.Tests" />
   </ItemGroup>
 
-  <!-- A sessão vai junto do binário; o dicionário (FIX44-flowa.xml) chega pelo Flowa.Shared. -->
+  <!-- The FIX session and the FIX 4.4 dictionary with tag 5100 sit next to the executable. -->
   <ItemGroup>
     <!-- O build do Vite (F5) também vai para a saída, para dotnet run e o build comum servirem a página. -->
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="initiator.cfg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Infrastructure\Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

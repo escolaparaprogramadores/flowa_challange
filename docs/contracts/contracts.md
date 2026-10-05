@@ -3,11 +3,11 @@
 Este arquivo é o acordo entre o OrderGenerator, o OrderAccumulator, a tela e o `docker compose`.
 Quem implementa segue o que está aqui. Mudou alguma coisa? Sobe a versão e avisa quem usa.
 
-As regras de campo da ordem (símbolo, lado, quantidade e preço) e as mensagens de erro moram em
-`src/Flowa.Shared` (`OrderRules`, `OrderValidator`, `OrderMessages`). O OrderGenerator chama
-`OrderValidator.ValidateOrderFromJson` com o texto cru do JSON; o OrderAccumulator chama
-`OrderValidator.ValidateOrderFromFix` com os valores da mensagem FIX. Os dois apps usam esse projeto,
-então a regra é uma só.
+A regra de campo da ordem (símbolos `PETR4`/`VALE3`/`VIIA4`, lado, quantidade inteira maior que zero e
+menor que 100.000, preço maior que zero, menor que 1.000 e múltiplo de 0,01) e as mensagens dela moram
+só no OrderAccumulator, em `Base.OrderAccumulator.Domain.Orders` (`OrderFieldRule`, `OrderFieldMessages`).
+O OrderGenerator não aplica essa regra: confere só o formato (o que nem cabe numa `NewOrderSingle`) e
+manda o resto pelo FIX. A tela guarda uma cópia da regra só para avisar antes de enviar.
 
 ## 1. Rotas HTTP
 
@@ -16,7 +16,7 @@ Números (quantidade, preço, exposição) vão como número JSON, com ponto com
 
 ### OrderGenerator — `POST /api/orders`
 
-Recebe a ordem da tela, valida com o `OrderValidator`, manda a `NewOrderSingle` e devolve o que o
+Recebe a ordem da tela, confere o formato, manda a `NewOrderSingle` e devolve o que o
 OrderAccumulator respondeu.
 
 Pedido:
@@ -26,9 +26,9 @@ Pedido:
 ```
 
 - `side` é `"buy"` (Compra) ou `"sell"` (Venda).
-- O servidor lê `quantity` e `price` como texto cru (número ou string JSON) e passa esse texto ao
-  validador. Assim, `"abc"` ou `1.5` na quantidade voltam com a mensagem certa, e não com um erro
-  genérico do framework.
+- O servidor lê `quantity` e `price` como texto cru (número ou string JSON) e confere o formato desse
+  texto. Assim, `"abc"` na quantidade volta com a mensagem certa, e não com um erro genérico do
+  framework. `1.5` na quantidade cabe no FIX: vai para o OrderAccumulator, que a rejeita.
 - O `ClOrdID` é gerado pelo OrderGenerator (UUID sem traços, 32 caracteres). A tela não manda.
 
 Respostas:
@@ -36,13 +36,20 @@ Respostas:
 | Situação | HTTP | Corpo |
 |---|---|---|
 | Ordem aceita (`150=0`) | 200 | `{ "status": "accepted", "clOrdId", "orderId", "execId", "symbol", "side", "quantity", "price", "message": "Ordem aceita." }` |
-| Ordem rejeitada (`150=8`) | 200 | `{ "status": "rejected", "clOrdId", "orderId", "execId", "symbol", "side", "quantity", "price", "message": "<texto da tag 58>" }` |
-| Campo inválido (nada é enviado por FIX) | 400 | `{ "status": "validation_error", "message": "A ordem tem campos inválidos.", "errors": [ { "field": "price", "message": "O preço deve ser múltiplo de 0,01." } ] }` |
+| Ordem rejeitada (`150=8`), por limite ou por campo fora da regra | 200 | `{ "status": "rejected", "clOrdId", "orderId", "execId", "symbol", "side", "quantity", "price", "message": "<texto da tag 58>" }` |
+| Ordem que não cabe no FIX (nada é enviado por FIX) | 400 | `{ "status": "validation_error", "message": "A ordem tem campos inválidos.", "errors": [ { "field": "price", "message": "Informe o preço." } ] }` |
 | Sem sessão FIX ou sem resposta em 5 s | 503 | `{ "status": "communication_error", "message": "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes." }` |
 | Erro inesperado | 500 | `{ "status": "error", "message": "Erro inesperado ao processar a ordem." }` (sem stack trace) |
 
+- O `400` só sai quando a ordem não cabe no FIX: campo faltando (`"Informe o símbolo."`,
+  `"Informe o lado da ordem."`, `"Informe a quantidade."`, `"Informe o preço."`), lado diferente de
+  `"buy"`/`"sell"` (`"Lado inválido. Use compra ou venda."`), quantidade que não é número
+  (`"A quantidade deve ser um número inteiro."`), preço que não é número (`"O preço deve ser um número."`)
+  e símbolo com caractere de controle (`"O símbolo não pode ter caractere de controle."`). Número com mais
+  dígitos do que o decimal do FIX guarda conta como "não é número".
 - `field` é um de `symbol`, `side`, `quantity`, `price`, e vem no máximo um erro por campo.
-- `message` de cada erro é exatamente uma constante de `OrderMessages`.
+- Campo que cabe no FIX, mas está fora da regra (símbolo `ITUB4`, quantidade `0`, `1.5` ou `100000`,
+  preço `1000` ou `10.005`), vai pelo FIX e volta `200` com `status: "rejected"` e os motivos na `message`.
 - Em `accepted` e `rejected`, `side` volta como `"buy"`/`"sell"` e `quantity`/`price` como número.
 
 ### OrderAccumulator — `GET /api/exposures`
@@ -149,7 +156,7 @@ Pacotes: `QuickFIXn.Core` e `QuickFIXn.FIX44`, versão `1.14.1` (os dois têm al
 
 O motivo da rejeição em `58`:
 
-- campo inválido (o OrderAccumulator valida de novo, porque pode receber FIX direto): as mensagens de `OrderMessages` dos campos com erro, separadas por espaço,
+- campo fora da regra (só o OrderAccumulator valida, venha a ordem da tela ou de FIX direto): as mensagens de `OrderFieldMessages` dos campos com erro, separadas por espaço,
   na ordem `symbol`, `side`, `quantity`, `price`. Uma ordem rejeitada aqui não muda a exposição.
 - limite: `Ordem rejeitada: a exposição de <SÍMBOLO> passaria do limite de 100.000.000,00.`
 
@@ -211,7 +218,7 @@ basta publicar a porta `8080` do OrderGenerator; as outras podem ficar só na re
 
 ## 5. A página
 
-- O build do Vite (fatia da tela) sai em `src/OrderGenerator/wwwroot/`. Essa pasta é gerada e fica
+- O build do Vite (fatia da tela) sai em `src/app-base-order-generator-webapi-ecs/wwwroot/`. Essa pasta é gerada e fica
   fora do Git.
 - O OrderGenerator serve essa pasta na raiz (`/`), com `index.html` como página padrão. Caminhos que
   começam com `/api` nunca caem no `index.html`.
