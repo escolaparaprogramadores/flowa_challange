@@ -333,37 +333,118 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     public async Task Api_error_answers_and_logs_the_trace_id_of_the_real_tracer(string apiPath, HttpStatusCode expectedHttpStatus, string expectedProblemType)
     {
         using var apiErrorResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync(apiPath);
+        var apiErrorTraceId = await ReadProblemTraceIdAsync(apiErrorResponse, expectedHttpStatus, expectedProblemType);
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", apiErrorTraceId, "Warning", "Expected error in request.", expectedProblemType);
+    }
+
+    // The exception path of the GlobalErrorHandler, outside an order: with the OrderAccumulator paused the 5 s of the
+    // HttpClient run out and GET /api/exposures answers 503.
+    [Fact]
+    public async Task OrderGenerator_503_without_orderaccumulator_answers_and_logs_the_trace_id_of_the_real_tracer()
+    {
+        const string expectedProblemType = "urn:base-investimentos:problem:order-accumulator-unavailable";
+        string unavailableTraceId;
+        await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "pause", "orderaccumulator");
+        try
+        {
+            using var unavailableResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/exposures");
+            unavailableTraceId = await ReadProblemTraceIdAsync(unavailableResponse, HttpStatusCode.ServiceUnavailable, expectedProblemType);
+        }
+        finally
+        {
+            await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "unpause", "orderaccumulator");
+        }
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", unavailableTraceId, "Warning", "Expected error in request.", expectedProblemType);
+    }
+
+    // The OrderAccumulator port is not open on the host: the request leaves from inside its container. The 400 of the
+    // page comes from the problem writer, without exception.
+    [Fact]
+    public async Task OrderAccumulator_400_answers_and_logs_the_trace_id_of_the_real_tracer()
+    {
+        const string expectedProblemType = "urn:base-investimentos:problem:invalid-page";
+        var (invalidPageStatus, invalidPageProblem) = await RequestOrderAccumulatorFromInsideItsContainerAsync("/api/orders?page=0");
+        Assert.Equal(400, invalidPageStatus);
+        Assert.Equal(expectedProblemType, invalidPageProblem.GetProperty("type").GetString());
+        var invalidPageTraceId = invalidPageProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", invalidPageTraceId);
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("orderaccumulator", invalidPageTraceId, "Warning", "Expected error in request.", expectedProblemType);
+    }
+
+    // The exception path of the OrderAccumulator GlobalErrorHandler: with the Postgres stopped the page read fails and
+    // the 500 leaves one Error line in the trace the answer carries.
+    [Fact]
+    public async Task OrderAccumulator_500_without_postgres_answers_and_logs_the_trace_id_of_the_real_tracer()
+    {
+        const string expectedProblemType = "urn:base-investimentos:problem:internal-error";
+        int ordersPageStatus;
+        JsonElement ordersPageProblem;
+        await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "stop", "postgres");
+        try
+        {
+            (ordersPageStatus, ordersPageProblem) = await RequestOrderAccumulatorFromInsideItsContainerAsync("/api/orders?page=1");
+        }
+        finally
+        {
+            await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(2), "up", "-d", "--wait", "postgres");
+            await WaitForOrdersPageToAnswerAsync();
+        }
+
+        Assert.Equal(500, ordersPageStatus);
+        Assert.Equal(expectedProblemType, ordersPageProblem.GetProperty("type").GetString());
+        var ordersPageTraceId = ordersPageProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", ordersPageTraceId);
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("orderaccumulator", ordersPageTraceId, "Error", "Unexpected application error.", expectedProblemType);
+    }
+
+    private static async Task<string> ReadProblemTraceIdAsync(HttpResponseMessage apiErrorResponse, HttpStatusCode expectedHttpStatus, string expectedProblemType)
+    {
         Assert.Equal(expectedHttpStatus, apiErrorResponse.StatusCode);
         Assert.Equal("application/problem+json", apiErrorResponse.Content.Headers.ContentType?.MediaType);
         var apiErrorProblem = await apiErrorResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(expectedProblemType, apiErrorProblem.GetProperty("type").GetString());
         var apiErrorTraceId = apiErrorProblem.GetProperty("traceId").GetString()!;
         Assert.Matches("^[0-9a-f]{32}$", apiErrorTraceId);
+        return apiErrorTraceId;
+    }
 
-        var apiErrorLine = Assert.Single(await ReadServiceJsonLogLinesAsync("ordergenerator"),
+    // Exactly one Warning or Error in the trace of the answer, and the tracer injected that same trace as dd_trace_id.
+    private async Task AssertSingleErrorLineCarriesTheTraceIdAsync(
+        string serviceName, string apiErrorTraceId, string expectedLogLevel, string expectedLogMessage, string expectedProblemType)
+    {
+        var apiErrorLine = Assert.Single(await ReadServiceJsonLogLinesAsync(serviceName),
             serviceLogLine => serviceLogLine.LogLevel is "Warning" or "Error" && serviceLogLine.TraceId == apiErrorTraceId);
-        Assert.Equal(("Warning", "Expected error in request.", expectedProblemType),
+        Assert.Equal((expectedLogLevel, expectedLogMessage, expectedProblemType),
             (apiErrorLine.LogLevel, apiErrorLine.Message, apiErrorLine.ReadLogField("ErrorCode")));
         Assert.Equal(apiErrorTraceId, apiErrorLine.ReadLogField("dd_trace_id"));
     }
 
-    // The same for the OrderAccumulator, whose port is not open on the host: the 400 of the page it answers to the
-    // OrderGenerator leaves its own Warning, with TraceId equal to the dd_trace_id.
-    [Fact]
-    public async Task OrderAccumulator_error_logs_the_trace_id_of_the_real_tracer()
+    // The aspnet image has no curl: the GET goes by the /dev/tcp of bash, to the 8081 of the OrderAccumulator.
+    private async Task<(int HttpStatus, JsonElement Body)> RequestOrderAccumulatorFromInsideItsContainerAsync(string pathAndQuery)
     {
-        using var invalidPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=0");
-        Assert.Equal(HttpStatusCode.BadRequest, invalidPageResponse.StatusCode);
+        var rawHttpResponse = await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "bash", "-c",
+            $"exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET {pathAndQuery} HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && cat <&3");
+        var httpStatus = int.Parse(rawHttpResponse.Split(' ', 3)[1]);
+        using var bodyDocument = JsonDocument.Parse(rawHttpResponse[rawHttpResponse.IndexOf('{')..]);
+        return (httpStatus, bodyDocument.RootElement.Clone());
+    }
 
-        var invalidPageLines = (await ReadServiceJsonLogLinesAsync("orderaccumulator"))
-            .Where(serviceLogLine => serviceLogLine.LogLevel == "Warning" && serviceLogLine.ReadLogField("ErrorCode") == "urn:base-investimentos:problem:invalid-page")
-            .ToList();
-        Assert.NotEmpty(invalidPageLines);
-        Assert.All(invalidPageLines, invalidPageLine =>
+    // The tests after this one send orders, which the OrderAccumulator stores in the Postgres.
+    private async Task WaitForOrdersPageToAnswerAsync()
+    {
+        var ordersPageDeadline = DateTime.UtcNow.AddMinutes(1);
+        while (DateTime.UtcNow < ordersPageDeadline)
         {
-            Assert.Matches("^[0-9a-f]{32}$", invalidPageLine.TraceId);
-            Assert.Equal(invalidPageLine.TraceId, invalidPageLine.ReadLogField("dd_trace_id"));
-        });
+            using var ordersPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=1");
+            if (ordersPageResponse.StatusCode == HttpStatusCode.OK)
+                return;
+            await Task.Delay(500);
+        }
+        throw new TimeoutException("a página de ordens não voltou a responder 200 em 1 minuto depois de religar o Postgres");
     }
 
     private async Task<decimal> ReadSymbolExposureAsync(string symbol)
