@@ -122,7 +122,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     }
 
     [Fact]
-    public async Task Corpo_que_nao_e_JSON_responde_400_com_os_quatro_campos_obrigatorios()
+    public async Task Body_that_is_not_json_gets_400_with_the_four_required_fields()
     {
         var notJsonHttpResponse = await PostOrderJson("isto não é json");
 
@@ -146,7 +146,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     [InlineData("42")]
     [InlineData("null")]
     [InlineData("""{"symbol":null,"side":null,"quantity":null,"price":null}""")]
-    public async Task JSON_sem_os_campos_da_ordem_responde_400_com_os_quatro_campos_obrigatorios(string orderJsonWithoutFields)
+    public async Task Json_without_the_order_fields_gets_400_with_the_four_required_fields(string orderJsonWithoutFields)
     {
         var emptyOrderHttpResponse = await PostOrderJson(orderJsonWithoutFields);
 

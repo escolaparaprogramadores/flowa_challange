@@ -124,8 +124,8 @@ static ListedOrderResponse ToListedOrderResponse(OrderListItem storedOrder) => n
 // Lado fora de 1/2 só existe em ordem rejeitada que chegou direto pelo FIX; sai como null, igual ao símbolo.
 static string? ToJsonOrderSideOfStoredOrder(string storedOrderSide) => storedOrderSide switch
 {
-    [OrderSideCodes.BuyOrderSideFixCode] => OrderSideCodes.BuyOrderSideJsonCode,
-    [OrderSideCodes.SellOrderSideFixCode] => OrderSideCodes.SellOrderSideJsonCode,
+    [OrderSideCodes.BuyOrderSideFixCode] => "buy",
+    [OrderSideCodes.SellOrderSideFixCode] => "sell",
     _ => null
 };
 

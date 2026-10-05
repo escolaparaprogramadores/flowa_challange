@@ -66,7 +66,6 @@ public class OrderRequestFormatValidatorTests
         var orderToSend = OrderRequestFormatValidator.ValidateOrderRequestFormat(ValidOrderSymbol, orderSide, ValidOrderQuantityText, ValidOrderPriceText).OrderToSend!;
 
         Assert.Equal(expectedOrderSide, orderToSend.Side);
-        Assert.Equal(orderSide, OrderRequestFormatValidator.ToJsonOrderSide(orderToSend.Side));
     }
 
     [Theory]

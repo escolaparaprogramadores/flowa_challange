@@ -6,11 +6,9 @@ public enum OrderSide
     Sell
 }
 
-// Tag 54 values of the FIX message and the "side" values of the HTTP contract.
+// Tag 54 values of the FIX message, the language the two contexts share.
 public static class OrderSideCodes
 {
-    public const string BuyOrderSideJsonCode = "buy";
-    public const string SellOrderSideJsonCode = "sell";
     public const char BuyOrderSideFixCode = '1';
     public const char SellOrderSideFixCode = '2';
 }

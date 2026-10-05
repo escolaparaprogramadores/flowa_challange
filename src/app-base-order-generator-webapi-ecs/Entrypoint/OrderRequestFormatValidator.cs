@@ -41,22 +41,20 @@ public static class OrderRequestFormatValidator
     {
         var orderFieldFormatErrors = new List<OrderFieldFormatError>();
 
-        var formattedOrderSymbol = CheckOrderSymbolFormat(orderSymbol, orderFieldFormatErrors);
-        var formattedOrderSide = ParseOrderSide(orderSide, orderFieldFormatErrors);
-        var formattedOrderQuantity = ParseOrderNumber(orderQuantity, OrderQuantityFieldName,
+        var checkedOrderSymbol = CheckOrderSymbolFormat(orderSymbol, orderFieldFormatErrors);
+        var parsedOrderSide = ParseOrderSide(orderSide, orderFieldFormatErrors);
+        var parsedOrderQuantity = ParseOrderQuantityOrPriceText(orderQuantity, OrderQuantityFieldName,
             OrderQuantityRequiredMessage, OrderQuantityNotNumberMessage, orderFieldFormatErrors);
-        var formattedOrderPrice = ParseOrderNumber(orderPrice, OrderPriceFieldName,
+        var parsedOrderPrice = ParseOrderQuantityOrPriceText(orderPrice, OrderPriceFieldName,
             OrderPriceRequiredMessage, OrderPriceNotNumberMessage, orderFieldFormatErrors);
 
         if (orderFieldFormatErrors.Count > 0)
             return new OrderRequestFormatValidation(null, orderFieldFormatErrors);
 
         return new OrderRequestFormatValidation(
-            new OrderToSend(formattedOrderSymbol!, formattedOrderSide!.Value, formattedOrderQuantity!.Value, formattedOrderPrice!.Value),
+            new OrderToSend(checkedOrderSymbol!, parsedOrderSide!.Value, parsedOrderQuantity!.Value, parsedOrderPrice!.Value),
             orderFieldFormatErrors);
     }
-
-    public static string ToJsonOrderSide(OrderSide orderSide) => orderSide == OrderSide.Buy ? BuyOrderSideJsonCode : SellOrderSideJsonCode;
 
     // FIX separates fields with control character 0x01; a symbol carrying one would break the message.
     private static string? CheckOrderSymbolFormat(string? orderSymbol, List<OrderFieldFormatError> orderFieldFormatErrors)
@@ -86,23 +84,23 @@ public static class OrderRequestFormatValidator
 
     // A number the FIX decimal field cannot hold exactly is the wrong type: decimal would round it, and
     // a rounded price could pass the 0.01 step it does not meet.
-    private static decimal? ParseOrderNumber(string? orderNumberText, string orderField, string requiredMessage, string notNumberMessage,
+    private static decimal? ParseOrderQuantityOrPriceText(string? orderQuantityOrPriceText, string orderField, string requiredMessage, string notNumberMessage,
         List<OrderFieldFormatError> orderFieldFormatErrors)
     {
-        if (string.IsNullOrEmpty(orderNumberText))
+        if (string.IsNullOrEmpty(orderQuantityOrPriceText))
             return AddOrderFieldFormatError<decimal>(orderFieldFormatErrors, orderField, requiredMessage);
 
-        if (!decimal.TryParse(orderNumberText, OrderFieldJsonNumberStyle, CultureInfo.InvariantCulture, out var parsedOrderNumber)
-            || CountSignificantDecimalPlaces(orderNumberText) != CountSignificantDecimalPlaces(parsedOrderNumber.ToString(CultureInfo.InvariantCulture)))
+        if (!decimal.TryParse(orderQuantityOrPriceText, OrderFieldJsonNumberStyle, CultureInfo.InvariantCulture, out var parsedOrderQuantityOrPrice)
+            || CountSignificantDecimalPlaces(orderQuantityOrPriceText) != CountSignificantDecimalPlaces(parsedOrderQuantityOrPrice.ToString(CultureInfo.InvariantCulture)))
             return AddOrderFieldFormatError<decimal>(orderFieldFormatErrors, orderField, notNumberMessage);
 
-        return parsedOrderNumber;
+        return parsedOrderQuantityOrPrice;
     }
 
-    private static int CountSignificantDecimalPlaces(string orderNumberText)
+    private static int CountSignificantDecimalPlaces(string orderQuantityOrPriceText)
     {
-        var decimalSeparatorPosition = orderNumberText.IndexOf('.');
-        return decimalSeparatorPosition < 0 ? 0 : orderNumberText[(decimalSeparatorPosition + 1)..].TrimEnd('0').Length;
+        var decimalSeparatorPosition = orderQuantityOrPriceText.IndexOf('.');
+        return decimalSeparatorPosition < 0 ? 0 : orderQuantityOrPriceText[(decimalSeparatorPosition + 1)..].TrimEnd('0').Length;
     }
 
     private static TOrderFieldValue? AddOrderFieldFormatError<TOrderFieldValue>(

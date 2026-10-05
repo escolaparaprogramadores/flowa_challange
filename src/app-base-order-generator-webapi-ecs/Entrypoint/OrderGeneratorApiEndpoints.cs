@@ -150,7 +150,7 @@ public static class OrderGeneratorApiEndpoints
         orderId = sentOrderResult.OrderId,
         execId = sentOrderResult.ExecId,
         symbol = sentOrder.Symbol,
-        side = OrderRequestFormatValidator.ToJsonOrderSide(sentOrder.Side),
+        side = sentOrder.Side == OrderSide.Buy ? OrderRequestFormatValidator.BuyOrderSideJsonCode : OrderRequestFormatValidator.SellOrderSideJsonCode,
         quantity = sentOrder.Quantity,
         price = sentOrder.Price,
         message = orderMessage

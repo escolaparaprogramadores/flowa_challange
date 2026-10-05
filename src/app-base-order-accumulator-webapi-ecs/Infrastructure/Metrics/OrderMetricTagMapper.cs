@@ -7,6 +7,8 @@ namespace Base.OrderAccumulator.Infrastructure.Metrics;
 public static class OrderMetricTagMapper
 {
     public const string InvalidTagValue = "invalido";
+    public const string BuyOrderSideTagValue = "buy";
+    public const string SellOrderSideTagValue = "sell";
 
     public static string[] BuildOrderDecisionTags(string? orderSymbol, char orderSide)
     {
@@ -20,8 +22,8 @@ public static class OrderMetricTagMapper
 
     private static string ToOrderSideTagValue(char orderSide) => orderSide switch
     {
-        OrderSideCodes.BuyOrderSideFixCode => OrderSideCodes.BuyOrderSideJsonCode,
-        OrderSideCodes.SellOrderSideFixCode => OrderSideCodes.SellOrderSideJsonCode,
+        OrderSideCodes.BuyOrderSideFixCode => BuyOrderSideTagValue,
+        OrderSideCodes.SellOrderSideFixCode => SellOrderSideTagValue,
         _ => InvalidTagValue
     };
 }
