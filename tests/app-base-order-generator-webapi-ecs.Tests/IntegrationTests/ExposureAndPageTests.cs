@@ -88,16 +88,21 @@ public sealed class ExposureProxyTests
         await AssertExposureError(await orderGeneratorClient.GetAsync("/api/exposures"));
     }
 
-    [Fact]
-    public async Task Unexpected_error_becomes_500_problem_without_internal_detail()
+    // A caller that asks for HTML (a browser opening the address) gets the same contract.
+    [Theory]
+    [InlineData("application/json")]
+    [InlineData("text/html")]
+    public async Task Unexpected_error_becomes_500_problem_without_internal_detail(string acceptedMediaType)
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(orderGeneratorWebHostBuilder =>
             orderGeneratorWebHostBuilder.ConfigureTestServices(testServices => testServices
                 .AddHttpClient<IOrderAccumulatorHttpClient, OrderAccumulatorHttpClient>(OrderAccumulatorHttpClient.OrderAccumulatorHttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => new ExplodingAccumulatorHandler())));
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+        var exposuresRequest = new HttpRequestMessage(HttpMethod.Get, "/api/exposures");
+        exposuresRequest.Headers.Accept.ParseAdd(acceptedMediaType);
 
-        var unexpectedErrorHttpResponse = await orderGeneratorClient.GetAsync("/api/exposures");
+        var unexpectedErrorHttpResponse = await orderGeneratorClient.SendAsync(exposuresRequest);
         var unexpectedErrorBody = await unexpectedErrorHttpResponse.Content.ReadAsStringAsync();
 
         var unexpectedErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(unexpectedErrorHttpResponse, HttpStatusCode.InternalServerError);
@@ -210,15 +215,18 @@ public sealed class OrderGeneratorPageTests : IDisposable
     }
 
     [Theory]
-    [InlineData("/api")]
-    [InlineData("/api/nao-existe")]
-    [InlineData("/api/orders/123")]
-    public async Task Caminho_de_api_desconhecido_responde_404_e_nao_o_index(string apiPath)
+    [InlineData("/api", "application/json")]
+    [InlineData("/api/nao-existe", "application/json")]
+    [InlineData("/api/nada", "text/html")]
+    [InlineData("/api/orders/123", "application/json")]
+    public async Task Unknown_api_path_answers_404_problem_and_not_the_index(string apiPath, string acceptedMediaType)
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), orderGeneratorWebRoot: _temporaryWebRoot);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+        var unknownApiRequest = new HttpRequestMessage(HttpMethod.Get, apiPath);
+        unknownApiRequest.Headers.Accept.ParseAdd(acceptedMediaType);
 
-        var unknownApiResponse = await orderGeneratorClient.GetAsync(apiPath);
+        var unknownApiResponse = await orderGeneratorClient.SendAsync(unknownApiRequest);
 
         Assert.DoesNotContain("boleta-de-teste", await unknownApiResponse.Content.ReadAsStringAsync());
         var notFoundProblem = await OrderApiTests.ReadProblemDetailsAsync(unknownApiResponse, HttpStatusCode.NotFound);

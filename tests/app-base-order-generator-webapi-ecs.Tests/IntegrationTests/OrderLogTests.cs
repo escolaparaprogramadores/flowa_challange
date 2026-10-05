@@ -146,6 +146,29 @@ public sealed class OrderLogTests
             unavailableProblem.GetProperty("traceId").GetString());
     }
 
+    // CA-6: the 404 of an unknown API path and the 400 of format have their one Warning too, without any exception.
+    [Theory]
+    [InlineData("GET", "/api/nada", "", "urn:base-investimentos:problem:not-found", "/api/{**unknownApiPath}", HttpStatusCode.NotFound)]
+    [InlineData("POST", "/api/orders", """{"symbol":"PETR4","side":"buy","quantity":100}""", "urn:base-investimentos:problem:invalid-order", "/api/orders", HttpStatusCode.BadRequest)]
+    public async Task Client_error_logs_one_warning_with_the_trace_id_of_the_answer(string httpMethod, string apiPath, string requestJson,
+        string expectedErrorCode, string expectedRouteTemplate, HttpStatusCode expectedHttpStatus)
+    {
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        JsonElement clientErrorProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            var clientErrorRequest = new HttpRequestMessage(new HttpMethod(httpMethod), apiPath)
+            {
+                Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
+            };
+            clientErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await orderGeneratorClient.SendAsync(clientErrorRequest), expectedHttpStatus);
+        }
+
+        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            expectedErrorCode, httpMethod, expectedRouteTemplate, clientErrorProblem.GetProperty("traceId").GetString());
+    }
+
     // Exactly one Warning or Error line for the failed call, from the GlobalErrorHandler, with the problem type as
     // ErrorCode, the method and the route template; an expected error carries no exception, an unexpected one does.
     private static JsonLogLine AssertSingleHttpErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture, string expectedLogLevel, string expectedMessage,
