@@ -44,7 +44,7 @@ type ExposicaoNoServidor = { symbol: string; exposure: number; remaining: number
 async function lerExposicaoEmCentavosNoServidor(requisicaoDoTeste: APIRequestContext, simboloDaExposicao: string) {
   const respostaDasExposicoes = await requisicaoDoTeste.get(ROTA_DAS_EXPOSICOES);
   expect(respostaDasExposicoes.status()).toBe(200);
-  const corpoDasExposicoes = (await respostaDasExposicoes.json()) as { exposures: ExposicaoNoServidor[] };
+  const corpoDasExposicoes = ((await respostaDasExposicoes.json()) as { data: { exposures: ExposicaoNoServidor[] } }).data;
   const exposicaoDoSimbolo = corpoDasExposicoes.exposures.find((exposicaoNoServidor) => exposicaoNoServidor.symbol === simboloDaExposicao);
   if (!exposicaoDoSimbolo) throw new Error('Símbolo ' + simboloDaExposicao + ' ausente em /api/exposures');
   return Math.round(exposicaoDoSimbolo.exposure * 100);
@@ -55,7 +55,7 @@ async function enviarOrdemAceitaPelaApi(requisicaoDoTeste: APIRequestContext, si
     data: { symbol: simbolo, side: lado, quantity: quantidade, price: precoEmCentavos / 100 },
   });
   expect(respostaDaOrdem.status()).toBe(200);
-  expect(((await respostaDaOrdem.json()) as { status: string }).status).toBe('accepted');
+  expect(((await respostaDaOrdem.json()) as { data: { status: string } }).data.status).toBe('accepted');
 }
 
 // Anda sempre na direção do alvo, então nenhuma ordem intermediária passa do limite.

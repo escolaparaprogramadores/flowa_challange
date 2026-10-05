@@ -62,8 +62,8 @@ public sealed class OrderTraceOnSendingTests : IClassFixture<LoggedOnOrderGenera
         var firstOrderResponse = await PostBuyPetr4OrderWithCallerTraceParent(callerTraceParent);
         var secondOrderResponse = await PostBuyPetr4OrderWithCallerTraceParent(callerTraceParent);
 
-        var firstClOrdId = (await OrderApiTests.ReadOrderGeneratorResponseJson(firstOrderResponse)).GetProperty("clOrdId").GetString();
-        var secondClOrdId = (await OrderApiTests.ReadOrderGeneratorResponseJson(secondOrderResponse)).GetProperty("clOrdId").GetString();
+        var firstClOrdId = (await OrderApiTests.ReadOrderDataAsync(firstOrderResponse)).GetProperty("clOrdId").GetString();
+        var secondClOrdId = (await OrderApiTests.ReadOrderDataAsync(secondOrderResponse)).GetProperty("clOrdId").GetString();
         Assert.NotEqual(firstClOrdId, secondClOrdId);
         Assert.NotEqual(callerTraceId, firstClOrdId);
         Assert.NotEqual(callerTraceId, secondClOrdId);

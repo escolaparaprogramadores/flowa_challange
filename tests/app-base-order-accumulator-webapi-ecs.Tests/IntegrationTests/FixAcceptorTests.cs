@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Http.Json;
 using System.Net.NetworkInformation;
 using System.Net;
+using System.Text.Json;
 using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Entrypoint.Fix;
 using Base.OrderAccumulator.Entrypoint.Workers;
@@ -95,8 +96,8 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
             $"35=8|37={storedOrderExecutionIds.OrderId}|17={storedOrderExecutionIds.ExecId}|150=8|39=8|11=invalida-ca13|55={symbol}|54={side}|151=0|14=0|6=0|58={expectedRejectionText}",
             FormatExecutionReportContractTags(orderExecutionReport));
 
-        var exposuresResponse = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
-        Assert.Equal([0m, 0m, 0m], exposuresResponse!.Exposures.Select(symbolExposure => symbolExposure.Exposure));
+        var exposuresResponse = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/exposures");
+        Assert.Equal([0m, 0m, 0m], ReadExposuresData(exposuresResponse).Exposures.Select(symbolExposure => symbolExposure.Exposure));
     }
 
     [Fact]
@@ -143,8 +144,8 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
 
         // Volta na MESMA porta: só sobe se a parada anterior fechou o acceptor.
         await using var restartedOrderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, fixAcceptorPort).StartWithFixAcceptor();
-        var exposuresResponse = await restartedOrderAccumulatorTestApp.CreateClient().GetFromJsonAsync<ExposuresResponse>("/api/exposures");
-        Assert.Equal(1_000.00m, exposuresResponse!.Exposures.Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
+        var exposuresResponse = await restartedOrderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/exposures");
+        Assert.Equal(1_000.00m, ReadExposuresData(exposuresResponse).Exposures.Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
 
         using var fixTestInitiatorAfterRestart = await FixTestInitiator.LogOnToAcceptorAsync(restartedOrderAccumulatorTestApp.FixAcceptorPort);
         var resentOrderExecutionReport = await fixTestInitiatorAfterRestart.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("antes-do-reinicio", "VALE3", '1', 100, 10.00m));
@@ -337,6 +338,10 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
 
         Assert.Equal("Defina a porta do acceptor FIX em Fix__AcceptorPort.", missingAcceptorPortError.Message);
     }
+
+    // GET /api/exposures answers a DataMessage; the exposure body is its "data".
+    private static ExposuresResponse ReadExposuresData(JsonElement exposuresDataMessage) =>
+        exposuresDataMessage.GetProperty("data").Deserialize<ExposuresResponse>(JsonSerializerOptions.Web)!;
 
     // As tags da tabela do ExecutionReport no contrato, na ordem dele; tag ausente sai vazia.
     private static string FormatExecutionReportContractTags(ExecutionReport orderExecutionReport) =>

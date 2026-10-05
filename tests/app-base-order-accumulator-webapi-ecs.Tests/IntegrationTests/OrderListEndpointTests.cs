@@ -141,30 +141,23 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     [InlineData("+1")]
     [InlineData("1001")]
     [InlineData("99999999999")]
-    public async Task Invalid_page_returns_400_validation_error_on_the_page_field(string invalidPageQueryValue)
+    public async Task Invalid_page_returns_400_problem_on_the_page(string invalidPageQueryValue)
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
 
         var invalidPageResponse = await orderAccumulatorTestApp.CreateClient().GetAsync($"/api/orders?page={Uri.EscapeDataString(invalidPageQueryValue)}");
 
-        Assert.Equal(HttpStatusCode.BadRequest, invalidPageResponse.StatusCode);
-        Assert.Equal("application/json", invalidPageResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(
-            """{"status":"validation_error","message":"Página inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}""",
-            await invalidPageResponse.Content.ReadAsStringAsync());
+        HttpContractAssertions.AssertInvalidPageProblem(await HttpContractAssertions.ReadProblemDetailsAsync(invalidPageResponse, HttpStatusCode.BadRequest));
     }
 
     [Fact]
-    public async Task Repeated_page_parameter_returns_400_validation_error()
+    public async Task Repeated_page_parameter_returns_400_problem()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
 
         var repeatedPageResponse = await orderAccumulatorTestApp.CreateClient().GetAsync("/api/orders?page=1&page=2");
 
-        Assert.Equal(HttpStatusCode.BadRequest, repeatedPageResponse.StatusCode);
-        Assert.Equal(
-            """{"status":"validation_error","message":"Página inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}""",
-            await repeatedPageResponse.Content.ReadAsStringAsync());
+        HttpContractAssertions.AssertInvalidPageProblem(await HttpContractAssertions.ReadProblemDetailsAsync(repeatedPageResponse, HttpStatusCode.BadRequest));
     }
 
     [Fact]
@@ -178,12 +171,15 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=2");
         await orderAccumulatorTestApp.CreateClient().GetAsync("/api/orders?page=abc");
 
-        var informationLogLinesOfTheListing = orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines
+        var logLinesOfTheListing = orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines
             .Skip(logLineCountBeforeTheListing)
             .Where(capturedLogLine => !capturedLogLine.StartsWith("Trace ") && !capturedLogLine.StartsWith("Debug "))
             .Where(capturedLogLine => !capturedLogLine.Contains(" QuickFix") && !capturedLogLine.Contains(" Base.OrderAccumulator.Entrypoint.Fix."))
             .ToList();
-        Assert.Empty(informationLogLinesOfTheListing);
+        // The two good pages write nothing; the invalid page is an HTTP error and has its one Warning (CA-6).
+        Assert.Equal(
+            ["Warning Base.OrderAccumulator.Entrypoint.Errors.GlobalErrorHandler: Expected error in request."],
+            logLinesOfTheListing);
     }
 
     // Uma por vez, para cada ordem ter received_at e id maiores que a anterior.
@@ -219,10 +215,9 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
 
     private static async Task<JsonElement> GetOrderPageJsonAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp, string orderPageUrl)
     {
-        var orderPageResponse = await orderAccumulatorTestApp.CreateClient().GetAsync(orderPageUrl);
-        Assert.Equal(HttpStatusCode.OK, orderPageResponse.StatusCode);
-        Assert.Equal("application/json", orderPageResponse.Content.Headers.ContentType?.MediaType);
-        return JsonDocument.Parse(await orderPageResponse.Content.ReadAsStringAsync()).RootElement;
+        var orderPageDataMessage = await HttpContractAssertions.ReadSuccessDataMessageAsync(await orderAccumulatorTestApp.CreateClient().GetAsync(orderPageUrl));
+        Assert.Equal("Página de ordens lida.", orderPageDataMessage.GetProperty("message").GetString());
+        return orderPageDataMessage.GetProperty("data");
     }
 
     private static (int Page, int PageSize, long Total) ReadOrderPageHeader(JsonElement orderPage) =>

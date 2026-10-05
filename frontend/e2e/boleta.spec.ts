@@ -109,7 +109,7 @@ test('CA-23: clicar em VIIA4 troca o rótulo e a ordem sai com VIIA4', async ({ 
   expect((await requisicaoDaCriacaoDaOrdem).postDataJSON()).toEqual({ symbol: 'VIIA4', side: 'buy', quantity: 1, price: 1 });
   const respostaDoServidor = await respostaDaCriacaoDaOrdem;
   expect(respostaDoServidor.status()).toBe(200);
-  expect((await respostaDoServidor.json()).symbol).toBe('VIIA4');
+  expect((await respostaDoServidor.json()).data.symbol).toBe('VIIA4');
 });
 
 test('CA-23/CA-27: pelo teclado, Tab chega nos símbolos, Enter e Espaço escolhem, e o foco aparece', async ({ page }) => {

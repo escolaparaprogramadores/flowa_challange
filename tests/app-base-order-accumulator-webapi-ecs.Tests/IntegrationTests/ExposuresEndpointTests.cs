@@ -47,10 +47,10 @@ public sealed class ExposuresEndpointTests(OrderAccumulatorPostgresFixture order
 
     private static async Task<JsonElement> GetExposuresJsonAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp)
     {
-        var exposuresHttpResponse = await orderAccumulatorTestApp.CreateClient().GetAsync("/api/exposures");
-        Assert.Equal(HttpStatusCode.OK, exposuresHttpResponse.StatusCode);
-        Assert.Equal("application/json", exposuresHttpResponse.Content.Headers.ContentType?.MediaType);
-        return JsonDocument.Parse(await exposuresHttpResponse.Content.ReadAsStringAsync()).RootElement;
+        var exposuresDataMessage = await HttpContractAssertions.ReadSuccessDataMessageAsync(
+            await orderAccumulatorTestApp.CreateClient().GetAsync("/api/exposures"));
+        Assert.Equal("Exposição dos símbolos lida.", exposuresDataMessage.GetProperty("message").GetString());
+        return exposuresDataMessage.GetProperty("data");
     }
 
     // Lê pelos nomes do contrato (camelCase), não pelo tipo C#: um nome trocado aqui quebra o teste.

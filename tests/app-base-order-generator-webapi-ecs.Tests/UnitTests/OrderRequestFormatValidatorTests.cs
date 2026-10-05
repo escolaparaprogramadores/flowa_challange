@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Base.OrderGenerator.Domain.Orders;
 using Base.OrderGenerator.Entrypoint;
 
@@ -130,21 +129,5 @@ public class OrderRequestFormatValidatorTests
                 new OrderFieldFormatError("price", "Informe o preço.")
             ],
             orderRequestFormatValidation.OrderFieldFormatErrors);
-    }
-
-    // The error is serialized straight into the API response: the contract names cannot change.
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void Format_error_is_serialized_with_the_contract_names(bool useWebJsonOptions)
-    {
-        var orderFieldFormatError = new OrderFieldFormatError("price", "O preço deve ser um número.");
-        var errorJsonOptions = useWebJsonOptions ? JsonSerializerOptions.Web : JsonSerializerOptions.Default;
-
-        using var orderFieldFormatErrorJson = JsonDocument.Parse(JsonSerializer.Serialize(orderFieldFormatError, errorJsonOptions));
-
-        Assert.Equal(["field", "message"], orderFieldFormatErrorJson.RootElement.EnumerateObject().Select(jsonProperty => jsonProperty.Name));
-        Assert.Equal("price", orderFieldFormatErrorJson.RootElement.GetProperty("field").GetString());
-        Assert.Equal("O preço deve ser um número.", orderFieldFormatErrorJson.RootElement.GetProperty("message").GetString());
     }
 }

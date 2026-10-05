@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Base.OrderGenerator.Infrastructure.Fix;
 using QuickFix.Fields;
 
@@ -12,7 +13,7 @@ namespace Base.OrderGenerator.Tests;
 // Each test builds its own host inside the capture, because the console logger keeps the stdout it found.
 public sealed class OrderLogTests
 {
-    private const string FixOrderClientCategory = "Base.OrderGenerator.Infrastructure.FixOrderClient";
+    private const string GlobalErrorHandlerCategory = "Base.OrderGenerator.Entrypoint.Errors.GlobalErrorHandler";
     private const string FixSessionLogCategory = "Base.OrderGenerator.Infrastructure.Fix.FixSessionLog";
     private const string ValidOrderJson = """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.50}""";
 
@@ -34,7 +35,7 @@ public sealed class OrderLogTests
             var orderHttpResponse = await PostOrder(orderGeneratorClient, ValidOrderJson);
 
             Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
-            orderClOrdId = (await OrderApiTests.ReadOrderGeneratorResponseJson(orderHttpResponse)).GetProperty("clOrdId").GetString()!;
+            orderClOrdId = (await OrderApiTests.ReadOrderDataAsync(orderHttpResponse)).GetProperty("clOrdId").GetString()!;
         }
 
         // Decision 21: the order number is the trace id of the sending span.
@@ -54,49 +55,47 @@ public sealed class OrderLogTests
         Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Debug" or "Trace");
     }
 
+    // CA-6, CA-11 and CA-13: the 503 of an order that has a ClOrdID leaves one Warning, written by the GlobalErrorHandler
+    // under the ClOrdID (HttpErrorTraceScope), and both the log and the answer carry the ClOrdID as trace id.
     [Fact]
-    public async Task Order_without_a_logged_on_fix_session_logs_one_warning_inside_the_order_span()
+    public async Task Order_without_a_logged_on_fix_session_logs_one_warning_and_answers_the_clordid_as_trace_id()
     {
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         var orderSendingSpans = new ConcurrentQueue<Activity>();
         using var orderTraceListener = ListenToOrderSendingSpans(orderSendingSpans);
+        JsonElement communicationErrorProblem;
         await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()))
         {
             using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, (await PostOrder(orderGeneratorClient, ValidOrderJson)).StatusCode);
+            communicationErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await PostOrder(orderGeneratorClient, ValidOrderJson), HttpStatusCode.ServiceUnavailable);
         }
 
-        var orderSending = Assert.Single(orderSendingSpans);
-        var communicationWarning = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
-        Assert.Equal(FixOrderClientCategory, communicationWarning.Category);
-        Assert.Equal(("Warning", "Order not sent: the FIX session is not logged on."), (communicationWarning.LogLevel, communicationWarning.Message));
-        Assert.Equal("communication_error", communicationWarning.ReadLogField("ErrorCode"));
-        Assert.Equal(orderSending.TraceId.ToHexString(), communicationWarning.TraceId);
-        Assert.Null(communicationWarning.Exception);
+        var orderClOrdId = Assert.Single(orderSendingSpans).TraceId.ToHexString();
+        Assert.Equal(orderClOrdId, communicationErrorProblem.GetProperty("traceId").GetString());
+        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:fix-session-not-logged-on", "POST", "/api/orders", orderClOrdId);
     }
 
     [Fact]
-    public async Task Order_without_execution_report_in_5_seconds_logs_one_warning_with_the_clordid_as_trace_id()
+    public async Task Order_without_execution_report_in_5_seconds_logs_one_warning_and_answers_the_clordid_as_trace_id()
     {
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         var orderSendingSpans = new ConcurrentQueue<Activity>();
         using var orderTraceListener = ListenToOrderSendingSpans(orderSendingSpans);
         using var silentFixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
         silentFixTestAcceptor.StartFixTestAcceptor();
+        JsonElement communicationErrorProblem;
         await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(silentFixTestAcceptor.AcceptorPort))
         {
             using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
             await silentFixTestAcceptor.WaitForFixSessionLogonAsync();
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, (await PostOrder(orderGeneratorClient, ValidOrderJson)).StatusCode);
+            communicationErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await PostOrder(orderGeneratorClient, ValidOrderJson), HttpStatusCode.ServiceUnavailable);
         }
 
         var unansweredClOrdId = Assert.Single(silentFixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
-        var communicationWarning = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
-        Assert.Equal(FixOrderClientCategory, communicationWarning.Category);
-        Assert.Equal(("Warning", "No ExecutionReport for the order within 5 seconds."), (communicationWarning.LogLevel, communicationWarning.Message));
-        Assert.Equal("communication_error", communicationWarning.ReadLogField("ErrorCode"));
-        Assert.Equal(unansweredClOrdId, communicationWarning.TraceId);
-        Assert.Null(communicationWarning.Exception);
+        Assert.Equal(unansweredClOrdId, communicationErrorProblem.GetProperty("traceId").GetString());
+        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:execution-report-timeout", "POST", "/api/orders", unansweredClOrdId);
     }
 
     [Fact]
@@ -108,20 +107,23 @@ public sealed class OrderLogTests
         using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
         fixTestAcceptor.ExecutionReportResponder = receivedOrder => fixTestAcceptor.BuildExecutionReport(receivedOrder, ExecType.FILL, OrdStatus.FILLED, 0);
         fixTestAcceptor.StartFixTestAcceptor();
+        JsonElement unexpectedErrorProblem;
         await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(fixTestAcceptor.AcceptorPort))
         {
             using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
             await fixTestAcceptor.WaitForFixSessionLogonAsync();
-            Assert.Equal(HttpStatusCode.InternalServerError, (await PostOrder(orderGeneratorClient, ValidOrderJson)).StatusCode);
+            unexpectedErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await PostOrder(orderGeneratorClient, ValidOrderJson), HttpStatusCode.InternalServerError);
         }
 
         var answeredClOrdId = Assert.Single(fixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
-        var unexpectedAnswerError = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
-        Assert.Equal(FixOrderClientCategory, unexpectedAnswerError.Category);
-        Assert.Equal(("Error", "Unexpected ExecutionReport for the order."), (unexpectedAnswerError.LogLevel, unexpectedAnswerError.Message));
-        Assert.Equal("error", unexpectedAnswerError.ReadLogField("ErrorCode"));
-        Assert.Equal(answeredClOrdId, unexpectedAnswerError.TraceId);
-        Assert.StartsWith("System.InvalidOperationException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
+        Assert.Equal(answeredClOrdId, unexpectedErrorProblem.GetProperty("traceId").GetString());
+        Assert.Equal("urn:base-investimentos:problem:internal-error", unexpectedErrorProblem.GetProperty("type").GetString());
+        Assert.Equal("Erro interno", unexpectedErrorProblem.GetProperty("title").GetString());
+        Assert.Equal("InternalError", unexpectedErrorProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unexpectedErrorProblem.GetProperty("errors").EnumerateArray());
+        var unexpectedAnswerError = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Error", "Unexpected application error.",
+            "urn:base-investimentos:problem:internal-error", "POST", "/api/orders", answeredClOrdId);
+        Assert.StartsWith("Base.OrderGenerator.Commons.UnexpectedExecutionReportException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
     }
 
     // Route is the route template, not the path the caller typed: the path can vary (case), the template cannot.
@@ -134,25 +136,88 @@ public sealed class OrderLogTests
     {
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         var accumulatorBaseUrlWithNobodyListening = $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}";
+        JsonElement unavailableProblem;
         await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), accumulatorBaseUrlWithNobodyListening))
         {
             using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
             var forwardedCallResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(forwardedHttpMethod), requestedPath));
-            Assert.Equal(HttpStatusCode.ServiceUnavailable, forwardedCallResponse.StatusCode);
+            unavailableProblem = await OrderApiTests.ReadProblemDetailsAsync(forwardedCallResponse, HttpStatusCode.ServiceUnavailable);
         }
 
-        var forwardedCallWarning = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
-        Assert.Equal(("Program", "Warning", "The OrderAccumulator did not answer the forwarded call."),
-            (forwardedCallWarning.Category, forwardedCallWarning.LogLevel, forwardedCallWarning.Message));
-        Assert.Equal("communication_error", forwardedCallWarning.ReadLogField("ErrorCode"));
-        Assert.Equal(forwardedHttpMethod, forwardedCallWarning.ReadLogField("Method"));
-        Assert.Equal(expectedRouteTemplate, forwardedCallWarning.ReadLogField("Route"));
-        Assert.Null(forwardedCallWarning.Exception);
+        // The support finds the log line by the traceId of the answer.
+        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:order-accumulator-unavailable", forwardedHttpMethod, expectedRouteTemplate,
+            unavailableProblem.GetProperty("traceId").GetString());
+    }
+
+    // RF-10 without anybody listening to the order trace (decision 21: the ClOrdID is then a random GUID): the answer
+    // and the log line still carry that ClOrdID, the one the OrderAccumulator received in tag 11.
+    [Fact]
+    public async Task Order_without_execution_report_and_without_tracer_answers_and_logs_the_clordid_as_trace_id()
+    {
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        using var silentFixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        silentFixTestAcceptor.StartFixTestAcceptor();
+        JsonElement communicationErrorProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(silentFixTestAcceptor.AcceptorPort))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            await silentFixTestAcceptor.WaitForFixSessionLogonAsync();
+            communicationErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await PostOrder(orderGeneratorClient, ValidOrderJson), HttpStatusCode.ServiceUnavailable);
+        }
+
+        var unansweredClOrdId = Assert.Single(silentFixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
+        Assert.Equal(unansweredClOrdId, communicationErrorProblem.GetProperty("traceId").GetString());
+        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:execution-report-timeout", "POST", "/api/orders", unansweredClOrdId);
+    }
+
+    // CA-6: the 404 of an unknown API path (also for a caller that asks for HTML) and the 400 of format have their
+    // one Warning too, without any exception.
+    [Theory]
+    [InlineData("GET", "/api/nada", "", "application/json", "urn:base-investimentos:problem:not-found", "/api/{**unknownApiPath}", HttpStatusCode.NotFound)]
+    [InlineData("GET", "/api/nada", "", "text/html", "urn:base-investimentos:problem:not-found", "/api/{**unknownApiPath}", HttpStatusCode.NotFound)]
+    [InlineData("POST", "/api/orders", """{"symbol":"PETR4","side":"buy","quantity":100}""", "application/json", "urn:base-investimentos:problem:invalid-order", "/api/orders", HttpStatusCode.BadRequest)]
+    public async Task Client_error_logs_one_warning_with_the_trace_id_of_the_answer(string httpMethod, string apiPath, string requestJson,
+        string acceptedMediaType, string expectedErrorCode, string expectedRouteTemplate, HttpStatusCode expectedHttpStatus)
+    {
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        JsonElement clientErrorProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            var clientErrorRequest = new HttpRequestMessage(new HttpMethod(httpMethod), apiPath)
+            {
+                Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
+            };
+            clientErrorRequest.Headers.Accept.ParseAdd(acceptedMediaType);
+            clientErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(await orderGeneratorClient.SendAsync(clientErrorRequest), expectedHttpStatus);
+        }
+
+        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            expectedErrorCode, httpMethod, expectedRouteTemplate, clientErrorProblem.GetProperty("traceId").GetString());
+    }
+
+    // Exactly one Warning or Error line for the failed call, from the GlobalErrorHandler, with the problem type as
+    // ErrorCode, the method and the route template; an expected error carries no exception, an unexpected one does.
+    internal static JsonLogLine AssertSingleHttpErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture, string expectedLogLevel, string expectedMessage,
+        string expectedErrorCode, string expectedHttpMethod, string expectedRouteTemplate, string? expectedTraceId)
+    {
+        var httpErrorLine = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
+        Assert.Equal((GlobalErrorHandlerCategory, expectedLogLevel, expectedMessage), (httpErrorLine.Category, httpErrorLine.LogLevel, httpErrorLine.Message));
+        Assert.Equal(expectedErrorCode, httpErrorLine.ReadLogField("ErrorCode"));
+        Assert.Equal(expectedHttpMethod, httpErrorLine.ReadLogField("Method"));
+        Assert.Equal(expectedRouteTemplate, httpErrorLine.ReadLogField("Route"));
+        Assert.Matches("^[0-9a-f]{32}$", expectedTraceId);
+        Assert.Equal(expectedTraceId, httpErrorLine.TraceId);
+        if (expectedLogLevel == "Warning")
+            Assert.Null(httpErrorLine.Exception);
+        return httpErrorLine;
     }
 
     // Exactly one log per error counts every Warning or Error line the app wrote, whatever class wrote it. The test
     // host has no wwwroot, so the static files middleware warns about that at startup; that line is not about the call.
-    private static JsonLogLine AssertSingleWarningOrErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture) =>
+    internal static JsonLogLine AssertSingleWarningOrErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture) =>
         Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine =>
             jsonLogLine.LogLevel is "Warning" or "Error" && jsonLogLine.Category != "Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware");
 

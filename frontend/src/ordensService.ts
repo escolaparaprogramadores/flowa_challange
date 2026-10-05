@@ -39,13 +39,6 @@ export type RespostaDaOrdem =
 
 export type ExposicaoDoSimbolo = { simbolo: string; exposicao: number; restanteAteOLimite: number };
 
-type CorpoDaRespostaDaOrdem = {
-  status?: string; message?: string; clOrdId?: string; orderId?: string; symbol?: string; side?: string;
-  quantity?: number; price?: number; errors?: Array<{ field: string; message: string }>;
-};
-
-type CorpoDasExposicoes = { exposures?: Array<{ symbol: string; exposure: number; remaining: number }>; message?: string };
-
 export type OrdemDaLista = {
   recebidaEm: string;
   situacao: 'aceita' | 'rejeitada';
@@ -59,31 +52,53 @@ export type OrdemDaLista = {
 
 export type PaginaDeOrdens = { pagina: number; totalDeOrdens: number; ordens: OrdemDaLista[] };
 
-type OrdemGravadaNoServidor = {
+// "data" of each route (docs/contracts/contracts.md, section 1).
+type OrderResponseData = {
+  status?: string; clOrdId?: string; orderId?: string; symbol?: string; side?: string; quantity?: number; price?: number;
+};
+
+type ExposuresResponseData = { exposures?: Array<{ symbol: string; exposure: number; remaining: number }> };
+
+type StoredOrderResponseData = {
   receivedAt: string; status: string; symbol: string | null; side: string | null;
   quantity: number; price: number; orderId: string; clOrdId: string;
 };
 
-type CorpoDaPaginaDeOrdens = { page?: number; total?: number; orders?: OrdemGravadaNoServidor[] };
+type OrdersPageResponseData = { page?: number; total?: number; orders?: StoredOrderResponseData[] };
+
+// Success of the API: a DataMessage. Error: a problem+json (RFC 9457). Both become this one answer here, so the
+// rest of the screen never reads a problem+json field.
+type ApiAnswer<ResponseData> = { success: boolean; message: string; data: ResponseData | null; errors: string[] };
+
+type ApiProblem = { title?: string; detail?: string; errors?: string[] };
+
+function convertBodyToApiAnswer<ResponseData>(httpResponse: Response, responseBody: unknown): ApiAnswer<ResponseData> | undefined {
+  if (typeof responseBody !== 'object' || responseBody === null) return undefined;
+  if (httpResponse.headers.get('content-type')?.includes('application/problem+json')) {
+    const apiProblem = responseBody as ApiProblem;
+    return { success: false, message: apiProblem.detail ?? apiProblem.title ?? '', data: null, errors: apiProblem.errors ?? [] };
+  }
+  return responseBody as ApiAnswer<ResponseData>;
+}
 
 // O prazo vale até o corpo terminar de chegar: um servidor que manda os cabeçalhos e trava
 // no corpo também é abandonado. Corpo vazio, HTML ou cortado vira "sem corpo".
-async function chamarApiDoOrderGeneratorComPrazo<CorpoEsperado>(rotaDaApi: string, opcoesDaRequisicao: RequestInit = {}) {
-  const cancelamentoPorPrazo = new AbortController();
-  const temporizadorDoPrazo = setTimeout(() => cancelamentoPorPrazo.abort(), PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS);
+async function callOrderGeneratorApiWithDeadline<ResponseData>(apiRoute: string, requestOptions: RequestInit = {}) {
+  const deadlineCancellation = new AbortController();
+  const deadlineTimer = setTimeout(() => deadlineCancellation.abort(), PRAZO_MAXIMO_DE_ESPERA_DA_TELA_EM_MS);
   try {
-    const respostaHttp = await fetch(rotaDaApi, { ...opcoesDaRequisicao, signal: cancelamentoPorPrazo.signal });
-    const corpoDaResposta = (await respostaHttp.json().catch(() => undefined)) as CorpoEsperado | undefined;
-    return { respostaHttp, corpoDaResposta };
+    const httpResponse = await fetch(apiRoute, { ...requestOptions, signal: deadlineCancellation.signal });
+    const responseBody: unknown = await httpResponse.json().catch(() => undefined);
+    return { httpResponse, apiAnswer: convertBodyToApiAnswer<ResponseData>(httpResponse, responseBody) };
   } finally {
-    clearTimeout(temporizadorDoPrazo);
+    clearTimeout(deadlineTimer);
   }
 }
 
 export async function enviarOrdem(ordemParaEnviar: OrdemParaEnviar): Promise<RespostaDaOrdem> {
-  let respostaDaCriacaoDaOrdem: Awaited<ReturnType<typeof chamarApiDoOrderGeneratorComPrazo<CorpoDaRespostaDaOrdem>>>;
+  let orderCreationCall: Awaited<ReturnType<typeof callOrderGeneratorApiWithDeadline<OrderResponseData>>>;
   try {
-    respostaDaCriacaoDaOrdem = await chamarApiDoOrderGeneratorComPrazo<CorpoDaRespostaDaOrdem>(ROTA_DE_CRIACAO_DE_ORDEM, {
+    orderCreationCall = await callOrderGeneratorApiWithDeadline<OrderResponseData>(ROTA_DE_CRIACAO_DE_ORDEM, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -97,76 +112,79 @@ export async function enviarOrdem(ordemParaEnviar: OrdemParaEnviar): Promise<Res
     return { situacao: 'falha-de-comunicacao', mensagemDoServidor: MENSAGEM_DE_ORDEM_NAO_CONFIRMADA };
   }
 
-  const { respostaHttp, corpoDaResposta } = respostaDaCriacaoDaOrdem;
-  if (respostaHttp.ok && (corpoDaResposta?.status === 'accepted' || corpoDaResposta?.status === 'rejected')) {
+  const { httpResponse, apiAnswer } = orderCreationCall;
+  const answeredOrder = apiAnswer?.success ? apiAnswer.data : null;
+  if (httpResponse.ok && (answeredOrder?.status === 'accepted' || answeredOrder?.status === 'rejected')) {
     return {
-      situacao: corpoDaResposta.status === 'accepted' ? 'aceita' : 'rejeitada',
-      mensagemDoServidor: corpoDaResposta.message ?? '',
-      clOrdId: corpoDaResposta.clOrdId ?? '',
-      orderId: corpoDaResposta.orderId ?? '',
-      simbolo: corpoDaResposta.symbol ?? ordemParaEnviar.simbolo,
-      lado: corpoDaResposta.side === 'sell' ? 'Venda' : 'Compra',
-      quantidade: corpoDaResposta.quantity ?? ordemParaEnviar.quantidade,
-      precoEmReais: corpoDaResposta.price ?? ordemParaEnviar.precoEmCentavos / 100,
+      situacao: answeredOrder.status === 'accepted' ? 'aceita' : 'rejeitada',
+      mensagemDoServidor: apiAnswer?.message ?? '',
+      clOrdId: answeredOrder.clOrdId ?? '',
+      orderId: answeredOrder.orderId ?? '',
+      simbolo: answeredOrder.symbol ?? ordemParaEnviar.simbolo,
+      lado: answeredOrder.side === 'sell' ? 'Venda' : 'Compra',
+      quantidade: answeredOrder.quantity ?? ordemParaEnviar.quantidade,
+      precoEmReais: answeredOrder.price ?? ordemParaEnviar.precoEmCentavos / 100,
     };
   }
-  if (respostaHttp.status === 400 && corpoDaResposta?.status === 'validation_error') {
+  if (httpResponse.status === 400 && apiAnswer?.success === false) {
     return {
       situacao: 'invalida',
-      mensagemDoServidor: corpoDaResposta.message ?? 'A ordem tem campos inválidos.',
-      errosDeCampo: (corpoDaResposta.errors ?? []).map((erroDeCampo) => erroDeCampo.message),
+      mensagemDoServidor: apiAnswer.message || 'A ordem tem campos inválidos.',
+      errosDeCampo: apiAnswer.errors,
     };
   }
   // 503 (sem sessão FIX ou sem resposta em 5 s) e corpo que não chegou são falta de resposta; outro status de erro é resposta com erro.
-  const servidorRespondeuComErro = respostaHttp.status >= 400 && respostaHttp.status !== 503;
+  const serverAnsweredWithError = httpResponse.status >= 400 && httpResponse.status !== 503;
   return {
     situacao: 'falha-de-comunicacao',
-    mensagemDoServidor: servidorRespondeuComErro ? MENSAGEM_DE_ERRO_INESPERADO_NO_SERVIDOR : MENSAGEM_DE_ORDEM_NAO_CONFIRMADA,
+    mensagemDoServidor: serverAnsweredWithError ? MENSAGEM_DE_ERRO_INESPERADO_NO_SERVIDOR : MENSAGEM_DE_ORDEM_NAO_CONFIRMADA,
   };
 }
 
 export async function lerExposicoes(): Promise<ExposicaoDoSimbolo[]> {
-  const { respostaHttp, corpoDaResposta } = await chamarApiDoOrderGeneratorComPrazo<CorpoDasExposicoes>(ROTA_DAS_EXPOSICOES).catch(() => {
+  const { httpResponse, apiAnswer } = await callOrderGeneratorApiWithDeadline<ExposuresResponseData>(ROTA_DAS_EXPOSICOES).catch(() => {
     throw new Error(MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
   });
-  if (!respostaHttp.ok || !corpoDaResposta?.exposures) {
+  const symbolExposures = apiAnswer?.success ? apiAnswer.data?.exposures : undefined;
+  if (!httpResponse.ok || !symbolExposures) {
     throw new Error(MENSAGEM_DE_EXPOSICAO_INDISPONIVEL);
   }
-  return corpoDaResposta.exposures.map((exposicaoNoServidor) => ({
-    simbolo: exposicaoNoServidor.symbol,
-    exposicao: exposicaoNoServidor.exposure,
-    restanteAteOLimite: exposicaoNoServidor.remaining,
+  return symbolExposures.map((symbolExposure) => ({
+    simbolo: symbolExposure.symbol,
+    exposicao: symbolExposure.exposure,
+    restanteAteOLimite: symbolExposure.remaining,
   }));
 }
 
 export async function listarOrdens(pagina: number): Promise<PaginaDeOrdens> {
-  const { respostaHttp, corpoDaResposta } = await chamarApiDoOrderGeneratorComPrazo<CorpoDaPaginaDeOrdens>(
+  const { httpResponse, apiAnswer } = await callOrderGeneratorApiWithDeadline<OrdersPageResponseData>(
     `${ROTA_DAS_ORDENS}?page=${pagina}`,
   ).catch(() => {
     throw new Error(MENSAGEM_DE_LISTA_DE_ORDENS_INDISPONIVEL);
   });
-  if (!respostaHttp.ok || !Array.isArray(corpoDaResposta?.orders) || typeof corpoDaResposta.total !== 'number') {
+  const ordersPage = apiAnswer?.success ? apiAnswer.data : null;
+  if (!httpResponse.ok || !Array.isArray(ordersPage?.orders) || typeof ordersPage.total !== 'number') {
     throw new Error(MENSAGEM_DE_LISTA_DE_ORDENS_INDISPONIVEL);
   }
   return {
-    pagina: corpoDaResposta.page ?? pagina,
-    totalDeOrdens: corpoDaResposta.total,
-    ordens: corpoDaResposta.orders.map((ordemGravada) => ({
-      recebidaEm: ordemGravada.receivedAt,
-      situacao: ordemGravada.status === 'accepted' ? 'aceita' : 'rejeitada',
-      simbolo: ordemGravada.symbol,
-      lado: ordemGravada.side === 'buy' ? 'Compra' : ordemGravada.side === 'sell' ? 'Venda' : null,
-      quantidade: ordemGravada.quantity,
-      precoEmReais: ordemGravada.price,
-      orderId: ordemGravada.orderId,
-      clOrdId: ordemGravada.clOrdId,
+    pagina: ordersPage.page ?? pagina,
+    totalDeOrdens: ordersPage.total,
+    ordens: ordersPage.orders.map((storedOrder) => ({
+      recebidaEm: storedOrder.receivedAt,
+      situacao: storedOrder.status === 'accepted' ? 'aceita' : 'rejeitada',
+      simbolo: storedOrder.symbol,
+      lado: storedOrder.side === 'buy' ? 'Compra' : storedOrder.side === 'sell' ? 'Venda' : null,
+      quantidade: storedOrder.quantity,
+      precoEmReais: storedOrder.price,
+      orderId: storedOrder.orderId,
+      clOrdId: storedOrder.clOrdId,
     })),
   };
 }
 
 export async function apagarTodasAsOrdens(): Promise<void> {
-  const { respostaHttp } = await chamarApiDoOrderGeneratorComPrazo(ROTA_DAS_ORDENS, { method: 'DELETE' }).catch(() => {
+  const { httpResponse } = await callOrderGeneratorApiWithDeadline(ROTA_DAS_ORDENS, { method: 'DELETE' }).catch(() => {
     throw new Error(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
   });
-  if (!respostaHttp.ok) throw new Error(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
+  if (!httpResponse.ok) throw new Error(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
 }

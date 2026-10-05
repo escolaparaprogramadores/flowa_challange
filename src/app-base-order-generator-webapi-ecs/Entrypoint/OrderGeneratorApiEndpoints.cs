@@ -1,42 +1,36 @@
-using System.Net;
 using System.Reflection;
 using System.Text.Json;
+using Base.OrderGenerator.Application.Exposures.GetExposures;
+using Base.OrderGenerator.Application.Orders.DeleteAllOrders;
+using Base.OrderGenerator.Application.Orders.ListOrders;
 using Base.OrderGenerator.Application.Orders.SendOrder;
 using Base.OrderGenerator.Commons;
 using Base.OrderGenerator.Domain.Orders;
+using Base.OrderGenerator.Entrypoint.Errors;
 
 namespace Base.OrderGenerator.Entrypoint;
 
-// Rotas HTTP do contrato v1. Recebem, chamam quem faz o trabalho e traduzem o resultado.
+// HTTP routes of the contract (docs/contracts/contracts.md). They take the request, call the use case and answer:
+// success as DataMessage, error as problem+json. No error is handled here: the GlobalErrorHandler is the one place.
 public static class OrderGeneratorApiEndpoints
 {
-    public const string AccumulatorHttpClientName = "OrderAccumulator";
-
-    private const string CommunicationErrorCode = "communication_error";
-
     public const string InvalidOrderMessage = "A ordem tem campos inválidos.";
-    public const string AcceptedOrderMessage = "Ordem aceita.";
-    public const string RejectedOrderWithoutTextMessage = "Ordem rejeitada.";
-    public const string OrderCommunicationMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
-    public const string ExposureCommunicationMessage = "Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.";
-    public const string OrdersPageCommunicationMessage = "Não foi possível ler as ordens no OrderAccumulator. Tente de novo em instantes.";
-    public const string OrdersDeletionCommunicationMessage = "Não foi possível apagar as ordens no OrderAccumulator. Tente de novo em instantes.";
-    public const string UnexpectedErrorMessage = "Erro inesperado ao processar a ordem.";
+    public const string InvalidOrderErrorCode = "invalid-order";
 
     public static void MapOrderGeneratorRoutes(this WebApplication orderGeneratorApp, string buildCommitSha)
     {
         orderGeneratorApp.MapPost("/api/orders", PostOrderAsync);
-        orderGeneratorApp.MapGet("/api/orders", GetOrdersPage);
-        orderGeneratorApp.MapDelete("/api/orders", DeleteAllOrders);
-        orderGeneratorApp.MapGet("/api/exposures", GetExposures);
+        orderGeneratorApp.MapGet("/api/orders", GetOrdersPageAsync);
+        orderGeneratorApp.MapDelete("/api/orders", DeleteAllOrdersAsync);
+        orderGeneratorApp.MapGet("/api/exposures", GetExposuresAsync);
         orderGeneratorApp.MapGet("/health", () => Results.Text("Healthy"));
         orderGeneratorApp.MapGet("/version", () => Results.Json(new { commit = buildCommitSha }));
 
-        // Caminho de API que não existe responde 404; nunca cai no index.html da tela.
+        // An API path that does not exist answers the 404 problem; it never falls into the index.html of the screen.
         orderGeneratorApp.Map("/api/{**unknownApiPath}", () => Results.NotFound());
     }
 
-    // O SDK grava o commit na versão informativa do assembly ("1.0.0+<sha>") quando compila dentro do git.
+    // The SDK writes the commit into the informational version of the assembly ("1.0.0+<sha>") when it builds inside git.
     public static string? ReadBuildCommitSha()
     {
         var informationalVersion = typeof(OrderGeneratorApiEndpoints).Assembly
@@ -45,9 +39,6 @@ public static class OrderGeneratorApiEndpoints
         return commitSeparatorIndex < 0 ? null : informationalVersion![(commitSeparatorIndex + 1)..];
     }
 
-    public static IResult BuildOrderGeneratorUnexpectedErrorResponse() =>
-        Results.Json(new { status = "error", message = UnexpectedErrorMessage }, statusCode: StatusCodes.Status500InternalServerError);
-
     private static async Task<IResult> PostOrderAsync(HttpRequest orderHttpRequest, SendOrderUseCase sendOrderUseCase)
     {
         var rawOrderFields = await ReadRawOrderFields(orderHttpRequest);
@@ -55,122 +46,41 @@ public static class OrderGeneratorApiEndpoints
             rawOrderFields.Symbol, rawOrderFields.Side, rawOrderFields.Quantity, rawOrderFields.Price);
         if (orderRequestFormatValidation.OrderToSend is not { } orderToSend)
         {
-            return Results.Json(
-                new { status = "validation_error", message = InvalidOrderMessage, errors = orderRequestFormatValidation.OrderFieldFormatErrors },
-                statusCode: StatusCodes.Status400BadRequest);
+            var orderFieldFormatMessages = orderRequestFormatValidation.OrderFieldFormatErrors
+                .Select(orderFieldFormatError => orderFieldFormatError.OrderFieldFormatMessage).ToList();
+            return DataMessage<OrderResponse>.CreateErrorMessage(InvalidOrderMessage, ResultStatus.InvalidInput, orderFieldFormatMessages, InvalidOrderErrorCode)
+                .ConvertToHttpResponse();
         }
 
-        var sentOrderResult = await sendOrderUseCase.SendOrderAsync(orderToSend);
-
-        return sentOrderResult.Status switch
-        {
-            SentOrderStatus.Accepted => Results.Json(BuildOrderResponseBody("accepted", sentOrderResult, orderToSend, AcceptedOrderMessage)),
-            SentOrderStatus.Rejected => Results.Json(BuildOrderResponseBody("rejected", sentOrderResult, orderToSend,
-                sentOrderResult.RejectionText ?? RejectedOrderWithoutTextMessage)),
-            SentOrderStatus.NoLoggedOnSession or SentOrderStatus.ExecutionReportTimeout => BuildOrderAccumulatorCommunicationErrorResponse(OrderCommunicationMessage),
-            _ => BuildOrderGeneratorUnexpectedErrorResponse()
-        };
+        var sentOrderMessage = await sendOrderUseCase.SendOrderAsync(orderToSend);
+        return sentOrderMessage.ConvertToHttpResponse(sentOrderResult => ConvertToOrderResponse(sentOrderResult, orderToSend));
     }
 
-    private static async Task<IResult> GetExposures(
-        HttpRequest exposuresHttpRequest, IHttpClientFactory accumulatorHttpClientFactory, IApplicationLogger<Program> forwardedCallLogger, CancellationToken requestAborted)
-    {
-        var accumulatorClient = accumulatorHttpClientFactory.CreateClient(AccumulatorHttpClientName);
-        try
-        {
-            using var accumulatorExposuresResponse = await accumulatorClient.GetAsync("/api/exposures", requestAborted);
-            if (accumulatorExposuresResponse.StatusCode != HttpStatusCode.OK)
-                return RespondOrderAccumulatorUnavailable(forwardedCallLogger, exposuresHttpRequest, ExposureCommunicationMessage);
+    private static async Task<IResult> GetExposuresAsync(GetExposuresUseCase getExposuresUseCase, CancellationToken requestAborted) =>
+        (await getExposuresUseCase.GetExposuresAsync(requestAborted)).ConvertToHttpResponse();
 
-            var exposuresJson = await accumulatorExposuresResponse.Content.ReadAsStringAsync(requestAborted);
-            return Results.Content(exposuresJson, "application/json", statusCode: StatusCodes.Status200OK);
-        }
-        catch (HttpRequestException)
-        {
-            return RespondOrderAccumulatorUnavailable(forwardedCallLogger, exposuresHttpRequest, ExposureCommunicationMessage);
-        }
-        catch (TaskCanceledException) when (!requestAborted.IsCancellationRequested)
-        {
-            // Cancelamento sem pedido de quem chamou é o timeout de 5 s do HttpClient.
-            return RespondOrderAccumulatorUnavailable(forwardedCallLogger, exposuresHttpRequest, ExposureCommunicationMessage);
-        }
+    private static async Task<IResult> GetOrdersPageAsync(HttpRequest ordersPageHttpRequest, ListOrdersUseCase listOrdersUseCase, CancellationToken requestAborted)
+    {
+        var requestedPageNumber = ordersPageHttpRequest.Query.TryGetValue("page", out var pageQueryValues) ? pageQueryValues.ToString() : null;
+        return (await listOrdersUseCase.ListOrdersAsync(requestedPageNumber, requestAborted)).ConvertToHttpResponse();
     }
 
-    private static Task<IResult> GetOrdersPage(
-        HttpRequest ordersPageHttpRequest, IHttpClientFactory accumulatorHttpClientFactory, IApplicationLogger<Program> forwardedCallLogger, CancellationToken requestAborted)
+    // The contract answers the deletion with 204 and no body: there is no body to put in the envelope (ASSUMI-5).
+    private static async Task<IResult> DeleteAllOrdersAsync(DeleteAllOrdersUseCase deleteAllOrdersUseCase, CancellationToken requestAborted)
     {
-        // Só a página segue adiante: o tamanho da página é fixo no accumulator e o do cliente é ignorado.
-        var accumulatorOrdersPagePath = ordersPageHttpRequest.Query.TryGetValue("page", out var requestedOrdersPage)
-            ? $"/api/orders?page={Uri.EscapeDataString(requestedOrdersPage.ToString())}"
-            : "/api/orders";
-
-        return CallOrderAccumulatorOrdersRoute(ordersPageHttpRequest, accumulatorHttpClientFactory, forwardedCallLogger, OrdersPageCommunicationMessage, requestAborted, async accumulatorClient =>
-        {
-            using var accumulatorOrdersPageResponse = await accumulatorClient.GetAsync(accumulatorOrdersPagePath, requestAborted);
-            // O 400 de página inválida volta igual, com o corpo validation_error do accumulator.
-            if (accumulatorOrdersPageResponse.StatusCode is not (HttpStatusCode.OK or HttpStatusCode.BadRequest))
-                return RespondOrderAccumulatorUnavailable(forwardedCallLogger, ordersPageHttpRequest, OrdersPageCommunicationMessage);
-
-            var ordersPageJson = await accumulatorOrdersPageResponse.Content.ReadAsStringAsync(requestAborted);
-            return Results.Content(ordersPageJson, "application/json", statusCode: (int)accumulatorOrdersPageResponse.StatusCode);
-        });
+        var ordersDeletionMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(requestAborted);
+        return ordersDeletionMessage.Success ? Results.NoContent() : ordersDeletionMessage.ConvertToHttpResponse();
     }
 
-    private static Task<IResult> DeleteAllOrders(
-        HttpRequest ordersDeletionHttpRequest, IHttpClientFactory accumulatorHttpClientFactory, IApplicationLogger<Program> forwardedCallLogger, CancellationToken requestAborted) =>
-        CallOrderAccumulatorOrdersRoute(ordersDeletionHttpRequest, accumulatorHttpClientFactory, forwardedCallLogger, OrdersDeletionCommunicationMessage, requestAborted, async accumulatorClient =>
-        {
-            using var accumulatorOrdersDeletionResponse = await accumulatorClient.DeleteAsync("/api/orders", requestAborted);
-            return accumulatorOrdersDeletionResponse.StatusCode == HttpStatusCode.NoContent
-                ? Results.NoContent()
-                : RespondOrderAccumulatorUnavailable(forwardedCallLogger, ordersDeletionHttpRequest, OrdersDeletionCommunicationMessage);
-        });
-
-    private static async Task<IResult> CallOrderAccumulatorOrdersRoute(HttpRequest forwardedHttpRequest, IHttpClientFactory accumulatorHttpClientFactory,
-        IApplicationLogger<Program> forwardedCallLogger, string communicationErrorMessage, CancellationToken requestAborted, Func<HttpClient, Task<IResult>> accumulatorOrdersCall)
-    {
-        var accumulatorClient = accumulatorHttpClientFactory.CreateClient(AccumulatorHttpClientName);
-        try
-        {
-            return await accumulatorOrdersCall(accumulatorClient);
-        }
-        catch (HttpRequestException)
-        {
-            return RespondOrderAccumulatorUnavailable(forwardedCallLogger, forwardedHttpRequest, communicationErrorMessage);
-        }
-        catch (TaskCanceledException) when (!requestAborted.IsCancellationRequested)
-        {
-            // Cancelamento sem pedido de quem chamou é o timeout de 5 s do HttpClient.
-            return RespondOrderAccumulatorUnavailable(forwardedCallLogger, forwardedHttpRequest, communicationErrorMessage);
-        }
-    }
-
-    // Each 503 of a route that forwards to the OrderAccumulator has exactly one log: a Warning, because the
-    // OrderAccumulator being down or slow is an expected error. The 503 of POST /api/orders is logged where the
-    // order is sent, inside the order span (FixOrderClient).
-    private static IResult RespondOrderAccumulatorUnavailable(IApplicationLogger<Program> forwardedCallLogger, HttpRequest forwardedHttpRequest, string communicationErrorMessage)
-    {
-        forwardedCallLogger.LogWarning("The OrderAccumulator did not answer the forwarded call.",
-            new { ErrorCode = CommunicationErrorCode, Method = forwardedHttpRequest.Method, Route = (forwardedHttpRequest.HttpContext.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText });
-        return BuildOrderAccumulatorCommunicationErrorResponse(communicationErrorMessage);
-    }
-
-    private static IResult BuildOrderAccumulatorCommunicationErrorResponse(string communicationErrorMessage) =>
-        Results.Json(new { status = CommunicationErrorCode, message = communicationErrorMessage },
-            statusCode: StatusCodes.Status503ServiceUnavailable);
-
-    private static object BuildOrderResponseBody(string orderStatus, SentOrderResult sentOrderResult, OrderToSend sentOrder, string orderMessage) => new
-    {
-        status = orderStatus,
-        clOrdId = sentOrderResult.ClOrdId,
-        orderId = sentOrderResult.OrderId,
-        execId = sentOrderResult.ExecId,
-        symbol = sentOrder.Symbol,
-        side = sentOrder.Side == OrderSide.Buy ? OrderRequestFormatValidator.BuyOrderSideJsonCode : OrderRequestFormatValidator.SellOrderSideJsonCode,
-        quantity = sentOrder.Quantity,
-        price = sentOrder.Price,
-        message = orderMessage
-    };
+    private static OrderResponse ConvertToOrderResponse(SentOrderResult sentOrderResult, OrderToSend sentOrder) => new(
+        sentOrderResult.Status == SentOrderStatus.Accepted ? "accepted" : "rejected",
+        sentOrderResult.ClOrdId,
+        sentOrderResult.OrderId,
+        sentOrderResult.ExecId,
+        sentOrder.Symbol,
+        sentOrder.Side == OrderSide.Buy ? OrderRequestFormatValidator.BuyOrderSideJsonCode : OrderRequestFormatValidator.SellOrderSideJsonCode,
+        sentOrder.Quantity,
+        sentOrder.Price);
 
     // Quantity and price arrive as raw text so the format check can answer "abc" with a message.
     private static async Task<(string? Symbol, string? Side, string? Quantity, string? Price)> ReadRawOrderFields(HttpRequest orderHttpRequest)
@@ -182,7 +92,8 @@ public static class OrderGeneratorApiEndpoints
         }
         catch (JsonException)
         {
-            // A body that is not JSON becomes an empty order: the format check reports what each field is missing.
+            // A body that is not JSON becomes an empty order: the format check answers the 400 with what each field is
+            // missing, and that 400 has its log line like any other.
             return default;
         }
 
@@ -212,3 +123,7 @@ public static class OrderGeneratorApiEndpoints
         };
     }
 }
+
+// "data" of the answer of POST /api/orders: the fields the contract promises, with the side as "buy" or "sell".
+public sealed record OrderResponse(
+    string Status, string ClOrdId, string? OrderId, string? ExecId, string Symbol, string Side, decimal Quantity, decimal Price);

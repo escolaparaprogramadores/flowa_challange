@@ -67,10 +67,10 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     [Fact]
     public async Task Ordem_aceita_sai_como_35_D_e_volta_como_35_8_com_o_mesmo_ClOrdID()
     {
-        var acceptedOrder = await PostOrderAsync("PETR4", "buy", 100, 10.50m);
+        var (acceptedOrder, acceptedOrderMessage) = await PostOrderReadingTheMessageAsync("PETR4", "buy", 100, 10.50m);
 
         Assert.Equal("accepted", acceptedOrder.GetProperty("status").GetString());
-        Assert.Equal("Ordem aceita.", acceptedOrder.GetProperty("message").GetString());
+        Assert.Equal("Ordem aceita.", acceptedOrderMessage);
         var clOrdId = acceptedOrder.GetProperty("clOrdId").GetString()!;
         Assert.Matches("^[0-9a-f]{32}$", clOrdId);
 
@@ -166,10 +166,10 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         var firstVIIA4Sale = await PostOrderAsync("VIIA4", "sell", 99999, 999.99m);
         Assert.Equal("accepted", firstVIIA4Sale.GetProperty("status").GetString());
 
-        var secondVIIA4Sale = await PostOrderAsync("VIIA4", "sell", 99999, 999.99m);
+        var (secondVIIA4Sale, secondVIIA4SaleMessage) = await PostOrderReadingTheMessageAsync("VIIA4", "sell", 99999, 999.99m);
         const string expectedLimitRejectionText = "Ordem rejeitada: a exposição de VIIA4 passaria do limite de 100.000.000,00.";
         Assert.Equal("rejected", secondVIIA4Sale.GetProperty("status").GetString());
-        Assert.Equal(expectedLimitRejectionText, secondVIIA4Sale.GetProperty("message").GetString());
+        Assert.Equal(expectedLimitRejectionText, secondVIIA4SaleMessage);
 
         var clOrdId = secondVIIA4Sale.GetProperty("clOrdId").GetString()!;
         var executionReport = await FindSingleFixMessageAsync("orderaccumulator", "8", clOrdId, senderCompId: "ORDERACCUMULATOR");
@@ -186,12 +186,12 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     [Fact]
     public async Task Order_with_invalid_fields_goes_by_fix_and_comes_back_rejected_with_the_reasons()
     {
-        var invalidOrder = await PostOrderAsync("ITUB4", "buy", 100000, 1000m);
+        var (invalidOrder, invalidOrderMessage) = await PostOrderReadingTheMessageAsync("ITUB4", "buy", 100000, 1000m);
 
         const string expectedFieldRejectionText =
             "Símbolo inválido. Use PETR4, VALE3 ou VIIA4. A quantidade deve ser menor que 100.000. O preço deve ser menor que 1.000,00.";
         Assert.Equal("rejected", invalidOrder.GetProperty("status").GetString());
-        Assert.Equal(expectedFieldRejectionText, invalidOrder.GetProperty("message").GetString());
+        Assert.Equal(expectedFieldRejectionText, invalidOrderMessage);
 
         var clOrdId = invalidOrder.GetProperty("clOrdId").GetString()!;
         var newOrderSingle = await FindSingleFixMessageAsync("ordergenerator", "D", clOrdId, senderCompId: "ORDERGENERATOR");
@@ -208,20 +208,21 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
 
     // Decision 24: what a NewOrderSingle cannot carry stops at the OrderGenerator with a 400 and the reason.
     [Theory]
-    [InlineData("""{"symbol":"PETR4","side":"buy","quantity":100}""", "price", "Informe o preço.")]
-    [InlineData("""{"symbol":"PETR4","side":"buy","quantity":"abc","price":10.50}""", "quantity", "A quantidade deve ser um número inteiro.")]
-    [InlineData("""{"symbol":"PETR4","side":"compra","quantity":100,"price":10.50}""", "side", "Lado inválido. Use compra ou venda.")]
-    public async Task Order_that_does_not_fit_fix_gets_400_with_the_reason(string orderJson, string expectedOrderField, string expectedOrderFieldMessage)
+    [InlineData("""{"symbol":"PETR4","side":"buy","quantity":100}""", "Informe o preço.")]
+    [InlineData("""{"symbol":"PETR4","side":"buy","quantity":"abc","price":10.50}""", "A quantidade deve ser um número inteiro.")]
+    [InlineData("""{"symbol":"PETR4","side":"compra","quantity":100,"price":10.50}""", "Lado inválido. Use compra ou venda.")]
+    public async Task Order_that_does_not_fit_fix_gets_400_problem_with_the_reason(string orderJson, string expectedOrderFieldMessage)
     {
         using var badFormatResponse = await composeUnderTest.OrderGeneratorHttp.PostAsync(
             "/api/orders", new StringContent(orderJson, System.Text.Encoding.UTF8, "application/json"));
 
         Assert.Equal(HttpStatusCode.BadRequest, badFormatResponse.StatusCode);
-        var validationErrorBody = await badFormatResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("validation_error", validationErrorBody.GetProperty("status").GetString());
-        var orderFieldError = Assert.Single(validationErrorBody.GetProperty("errors").EnumerateArray());
-        Assert.Equal(expectedOrderField, orderFieldError.GetProperty("field").GetString());
-        Assert.Equal(expectedOrderFieldMessage, orderFieldError.GetProperty("message").GetString());
+        Assert.Equal("application/problem+json", badFormatResponse.Content.Headers.ContentType?.MediaType);
+        var invalidOrderProblem = await badFormatResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("urn:base-investimentos:problem:invalid-order", invalidOrderProblem.GetProperty("type").GetString());
+        Assert.Equal("A ordem tem campos inválidos.", invalidOrderProblem.GetProperty("detail").GetString());
+        Assert.Matches("^[0-9a-f]{32}$", invalidOrderProblem.GetProperty("traceId").GetString());
+        Assert.Equal([expectedOrderFieldMessage], invalidOrderProblem.GetProperty("errors").EnumerateArray().Select(orderFieldMessage => orderFieldMessage.GetString()));
     }
 
     [Fact]
@@ -236,7 +237,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
 
         using var exposuresResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/exposures");
         Assert.Equal(HttpStatusCode.OK, exposuresResponse.StatusCode);
-        var exposuresBody = await exposuresResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var exposuresBody = ReadSuccessData(await exposuresResponse.Content.ReadFromJsonAsync<JsonElement>());
         Assert.Equal(100000000.00m, exposuresBody.GetProperty("limit").GetDecimal());
         var exposureSymbols = exposuresBody.GetProperty("exposures").EnumerateArray()
             .Select(symbolExposureRow => symbolExposureRow.GetProperty("symbol").GetString()!)
@@ -289,9 +290,166 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(new[] { $"volume:{ComposeFixture.ComposeProjectName}_pgdata->/var/lib/postgresql/data" }, postgresContainer.VolumeMounts);
     }
 
+    // RF-10/CA-11 with the real Datadog tracer of the image, not a test listener: with the OrderAccumulator paused the
+    // order goes out by FIX and gets no ExecutionReport. The 503 answers the ClOrdID (tag 11 of the NewOrderSingle the
+    // OrderGenerator sent) as traceId, and the one log line of the error carries that same id, in its TraceId and in
+    // the dd_trace_id the tracer injects.
+    [Fact]
+    public async Task Order_without_answer_in_5_seconds_answers_and_logs_its_clordid_as_trace_id_with_the_real_tracer()
+    {
+        JsonElement unansweredOrderProblem;
+        await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "pause", "orderaccumulator");
+        try
+        {
+            using var unansweredOrderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync(
+                "/api/orders", new { symbol = "PETR4", side = "buy", quantity = 1, price = 0.01m });
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, unansweredOrderResponse.StatusCode);
+            Assert.Equal("application/problem+json", unansweredOrderResponse.Content.Headers.ContentType?.MediaType);
+            unansweredOrderProblem = await unansweredOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
+        }
+        finally
+        {
+            await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "unpause", "orderaccumulator");
+        }
+
+        const string expectedProblemType = "urn:base-investimentos:problem:execution-report-timeout";
+        Assert.Equal(expectedProblemType, unansweredOrderProblem.GetProperty("type").GetString());
+        var unansweredOrderTraceId = unansweredOrderProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", unansweredOrderTraceId);
+        await FindSingleFixMessageAsync("ordergenerator", "D", unansweredOrderTraceId, senderCompId: "ORDERGENERATOR");
+        var unansweredOrderErrorLine = Assert.Single(await ReadServiceJsonLogLinesAsync("ordergenerator"),
+            serviceLogLine => serviceLogLine.LogLevel is "Warning" or "Error" && serviceLogLine.ReadLogField("ErrorCode") == expectedProblemType);
+        Assert.Equal(("Warning", "Expected error in request."), (unansweredOrderErrorLine.LogLevel, unansweredOrderErrorLine.Message));
+        Assert.Equal(unansweredOrderTraceId, unansweredOrderErrorLine.TraceId);
+        Assert.Equal(unansweredOrderTraceId, unansweredOrderErrorLine.ReadLogField("dd_trace_id"));
+    }
+
+    // RF-04/CA-5 with the real Datadog tracer, for errors that are not of an order: the traceId of the answer is the
+    // trace the Datadog sees, the same TraceId and dd_trace_id of the one log line of the error. The ASP.NET request
+    // Activity has another id, which the support would not find in the APM.
+    [Theory]
+    [InlineData("/api/nada", HttpStatusCode.NotFound, "urn:base-investimentos:problem:not-found")]
+    [InlineData("/api/orders?page=0", HttpStatusCode.BadRequest, "urn:base-investimentos:problem:invalid-page")]
+    public async Task Api_error_answers_and_logs_the_trace_id_of_the_real_tracer(string apiPath, HttpStatusCode expectedHttpStatus, string expectedProblemType)
+    {
+        using var apiErrorResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync(apiPath);
+        var apiErrorTraceId = await ReadProblemTraceIdAsync(apiErrorResponse, expectedHttpStatus, expectedProblemType);
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", apiErrorTraceId, "Warning", "Expected error in request.", expectedProblemType);
+    }
+
+    // The exception path of the GlobalErrorHandler, outside an order: with the OrderAccumulator paused the 5 s of the
+    // HttpClient run out and GET /api/exposures answers 503.
+    [Fact]
+    public async Task OrderGenerator_503_without_orderaccumulator_answers_and_logs_the_trace_id_of_the_real_tracer()
+    {
+        const string expectedProblemType = "urn:base-investimentos:problem:order-accumulator-unavailable";
+        string unavailableTraceId;
+        await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "pause", "orderaccumulator");
+        try
+        {
+            using var unavailableResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/exposures");
+            unavailableTraceId = await ReadProblemTraceIdAsync(unavailableResponse, HttpStatusCode.ServiceUnavailable, expectedProblemType);
+        }
+        finally
+        {
+            await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "unpause", "orderaccumulator");
+        }
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", unavailableTraceId, "Warning", "Expected error in request.", expectedProblemType);
+    }
+
+    // The OrderAccumulator port is not open on the host: the request leaves from inside its container. The 400 of the
+    // page comes from the problem writer, without exception.
+    [Fact]
+    public async Task OrderAccumulator_400_answers_and_logs_the_trace_id_of_the_real_tracer()
+    {
+        const string expectedProblemType = "urn:base-investimentos:problem:invalid-page";
+        var (invalidPageStatus, invalidPageProblem) = await RequestOrderAccumulatorFromInsideItsContainerAsync("/api/orders?page=0");
+        Assert.Equal(400, invalidPageStatus);
+        Assert.Equal(expectedProblemType, invalidPageProblem.GetProperty("type").GetString());
+        var invalidPageTraceId = invalidPageProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", invalidPageTraceId);
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("orderaccumulator", invalidPageTraceId, "Warning", "Expected error in request.", expectedProblemType);
+    }
+
+    // The exception path of the OrderAccumulator GlobalErrorHandler: with the Postgres stopped the page read fails and
+    // the 500 leaves one Error line in the trace the answer carries.
+    [Fact]
+    public async Task OrderAccumulator_500_without_postgres_answers_and_logs_the_trace_id_of_the_real_tracer()
+    {
+        const string expectedProblemType = "urn:base-investimentos:problem:internal-error";
+        int ordersPageStatus;
+        JsonElement ordersPageProblem;
+        await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "stop", "postgres");
+        try
+        {
+            (ordersPageStatus, ordersPageProblem) = await RequestOrderAccumulatorFromInsideItsContainerAsync("/api/orders?page=1");
+        }
+        finally
+        {
+            await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(2), "up", "-d", "--wait", "postgres");
+            await WaitForOrdersPageToAnswerAsync();
+        }
+
+        Assert.Equal(500, ordersPageStatus);
+        Assert.Equal(expectedProblemType, ordersPageProblem.GetProperty("type").GetString());
+        var ordersPageTraceId = ordersPageProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", ordersPageTraceId);
+
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("orderaccumulator", ordersPageTraceId, "Error", "Unexpected application error.", expectedProblemType);
+    }
+
+    private static async Task<string> ReadProblemTraceIdAsync(HttpResponseMessage apiErrorResponse, HttpStatusCode expectedHttpStatus, string expectedProblemType)
+    {
+        Assert.Equal(expectedHttpStatus, apiErrorResponse.StatusCode);
+        Assert.Equal("application/problem+json", apiErrorResponse.Content.Headers.ContentType?.MediaType);
+        var apiErrorProblem = await apiErrorResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(expectedProblemType, apiErrorProblem.GetProperty("type").GetString());
+        var apiErrorTraceId = apiErrorProblem.GetProperty("traceId").GetString()!;
+        Assert.Matches("^[0-9a-f]{32}$", apiErrorTraceId);
+        return apiErrorTraceId;
+    }
+
+    // Exactly one Warning or Error in the trace of the answer, and the tracer injected that same trace as dd_trace_id.
+    private async Task AssertSingleErrorLineCarriesTheTraceIdAsync(
+        string serviceName, string apiErrorTraceId, string expectedLogLevel, string expectedLogMessage, string expectedProblemType)
+    {
+        var apiErrorLine = Assert.Single(await ReadServiceJsonLogLinesAsync(serviceName),
+            serviceLogLine => serviceLogLine.LogLevel is "Warning" or "Error" && serviceLogLine.TraceId == apiErrorTraceId);
+        Assert.Equal((expectedLogLevel, expectedLogMessage, expectedProblemType),
+            (apiErrorLine.LogLevel, apiErrorLine.Message, apiErrorLine.ReadLogField("ErrorCode")));
+        Assert.Equal(apiErrorTraceId, apiErrorLine.ReadLogField("dd_trace_id"));
+    }
+
+    // The aspnet image has no curl: the GET goes by the /dev/tcp of bash, to the 8081 of the OrderAccumulator.
+    private async Task<(int HttpStatus, JsonElement Body)> RequestOrderAccumulatorFromInsideItsContainerAsync(string pathAndQuery)
+    {
+        var rawHttpResponse = await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "bash", "-c",
+            $"exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET {pathAndQuery} HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && cat <&3");
+        var httpStatus = int.Parse(rawHttpResponse.Split(' ', 3)[1]);
+        using var bodyDocument = JsonDocument.Parse(rawHttpResponse[rawHttpResponse.IndexOf('{')..]);
+        return (httpStatus, bodyDocument.RootElement.Clone());
+    }
+
+    // The tests after this one send orders, which the OrderAccumulator stores in the Postgres.
+    private async Task WaitForOrdersPageToAnswerAsync()
+    {
+        var ordersPageDeadline = DateTime.UtcNow.AddMinutes(1);
+        while (DateTime.UtcNow < ordersPageDeadline)
+        {
+            using var ordersPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=1");
+            if (ordersPageResponse.StatusCode == HttpStatusCode.OK)
+                return;
+            await Task.Delay(500);
+        }
+        throw new TimeoutException("a página de ordens não voltou a responder 200 em 1 minuto depois de religar o Postgres");
+    }
+
     private async Task<decimal> ReadSymbolExposureAsync(string symbol)
     {
-        var exposuresBody = await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures");
+        var exposuresBody = ReadSuccessData(await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures"));
         var symbolExposureRow = Assert.Single(exposuresBody.GetProperty("exposures").EnumerateArray(),
             exposureRowOfSymbol => exposureRowOfSymbol.GetProperty("symbol").GetString() == symbol);
         return symbolExposureRow.GetProperty("exposure").GetDecimal();
@@ -306,16 +464,28 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         orderHttpRequest.Headers.Add("traceparent", callerTraceParent);
         using var createOrderResponse = await composeUnderTest.OrderGeneratorHttp.SendAsync(orderHttpRequest);
         Assert.Equal(HttpStatusCode.OK, createOrderResponse.StatusCode);
-        var orderResponse = await createOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var orderResponse = ReadSuccessData(await createOrderResponse.Content.ReadFromJsonAsync<JsonElement>());
         Assert.Equal("accepted", orderResponse.GetProperty("status").GetString());
         return orderResponse;
     }
 
-    private async Task<JsonElement> PostOrderAsync(string symbol, string side, int quantity, decimal price)
+    private async Task<JsonElement> PostOrderAsync(string symbol, string side, int quantity, decimal price) =>
+        (await PostOrderReadingTheMessageAsync(symbol, side, quantity, price)).Order;
+
+    // The answer of an order is a DataMessage: the order is its "data" and the text the screen shows is its "message".
+    private async Task<(JsonElement Order, string OrderMessage)> PostOrderReadingTheMessageAsync(string symbol, string side, int quantity, decimal price)
     {
         using var createOrderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync("/api/orders", new { symbol, side, quantity, price });
         Assert.Equal(HttpStatusCode.OK, createOrderResponse.StatusCode);
-        return await createOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var orderDataMessage = await createOrderResponse.Content.ReadFromJsonAsync<JsonElement>();
+        return (ReadSuccessData(orderDataMessage), orderDataMessage.GetProperty("message").GetString()!);
+    }
+
+    private static JsonElement ReadSuccessData(JsonElement successDataMessage)
+    {
+        Assert.True(successDataMessage.GetProperty("success").GetBoolean());
+        Assert.Equal("Ok", successDataMessage.GetProperty("status").GetString());
+        return successDataMessage.GetProperty("data");
     }
 
     private async Task<FixMessage> FindSingleFixMessageAsync(string serviceName, string fixMsgType, string clOrdId, string senderCompId)

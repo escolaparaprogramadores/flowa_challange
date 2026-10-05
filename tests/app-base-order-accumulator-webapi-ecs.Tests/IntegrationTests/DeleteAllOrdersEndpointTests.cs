@@ -66,7 +66,7 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         var orderAccumulatorClient = orderAccumulatorTestApp.CreateClient();
 
         await orderAccumulatorClient.DeleteAsync("/api/orders");
-        var exposuresJson = JsonDocument.Parse(await orderAccumulatorClient.GetStringAsync("/api/exposures")).RootElement;
+        var exposuresJson = JsonDocument.Parse(await orderAccumulatorClient.GetStringAsync("/api/exposures")).RootElement.GetProperty("data");
 
         Assert.Equal(
             [("PETR4", 0m, 100_000_000m), ("VALE3", 0m, 100_000_000m), ("VIIA4", 0m, 100_000_000m)],

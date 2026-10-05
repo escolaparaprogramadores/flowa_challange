@@ -16,17 +16,12 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
 {
     public static readonly TimeSpan ExecutionReportTimeout = TimeSpan.FromSeconds(5);
 
-    private const string CommunicationErrorCode = "communication_error";
-    private const string UnexpectedErrorCode = "error";
-
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Message>> _ordersAwaitingExecutionReport = new();
     private readonly SocketInitiator _fixSocketInitiator;
-    private readonly IApplicationLogger<FixOrderClient> _orderSendingLogger;
     private SessionID? _initiatorSessionId;
 
-    public FixOrderClient(IConfiguration orderGeneratorConfiguration, FixSessionLogFactory fixSessionLogFactory, IApplicationLogger<FixOrderClient> orderSendingLogger)
+    public FixOrderClient(IConfiguration orderGeneratorConfiguration, FixSessionLogFactory fixSessionLogFactory)
     {
-        _orderSendingLogger = orderSendingLogger;
         _fixSocketInitiator = new SocketInitiator(
             this, new MemoryStoreFactory(), LoadInitiatorSessionSettings(orderGeneratorConfiguration), fixSessionLogFactory, null);
     }
@@ -35,34 +30,13 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
 
     public async Task<SentOrderResult> SendOrderAsync(OrderToSend orderToSend)
     {
-        // The span opens before the ClOrdID because the ClOrdID is its trace id; the order logs run inside it.
+        // The span opens before the ClOrdID because the ClOrdID is its trace id; the order logs run inside it. A failed
+        // order is logged once, by the GlobalErrorHandler, in the request span that is the parent of this one.
         using var orderSending = FixOrderTraceProvider.StartOrderSending();
         var clOrdId = FixOrderTraceProvider.CreateClOrdId(orderSending);
 
-        var sentOrderResult = await SendNewOrderSingleAndWaitForExecutionReportAsync(
+        return await SendNewOrderSingleAndWaitForExecutionReportAsync(
             clOrdId, orderToSend, FixOrderTraceProvider.GetTraceParentOfOrderSending(orderSending));
-        LogOrderSendingFailure(sentOrderResult.Status);
-        return sentOrderResult;
-    }
-
-    // One log per failed order: no answer from the OrderAccumulator is an expected error (the 503), an
-    // ExecutionReport that is neither New nor Rejected is unexpected (the 500).
-    private void LogOrderSendingFailure(SentOrderStatus sentOrderStatus)
-    {
-        switch (sentOrderStatus)
-        {
-            case SentOrderStatus.NoLoggedOnSession:
-                _orderSendingLogger.LogWarning("Order not sent: the FIX session is not logged on.", new { ErrorCode = CommunicationErrorCode });
-                break;
-            case SentOrderStatus.ExecutionReportTimeout:
-                _orderSendingLogger.LogWarning("No ExecutionReport for the order within 5 seconds.", new { ErrorCode = CommunicationErrorCode });
-                break;
-            case SentOrderStatus.UnexpectedExecutionReport:
-                _orderSendingLogger.LogError(
-                    new InvalidOperationException("The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected."),
-                    "Unexpected ExecutionReport for the order.", new { ErrorCode = UnexpectedErrorCode });
-                break;
-        }
     }
 
     private async Task<SentOrderResult> SendNewOrderSingleAndWaitForExecutionReportAsync(string clOrdId, OrderToSend orderToSend, string? orderSendingTraceParent)
@@ -81,11 +55,14 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
             if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, orderToSend, orderSendingTraceParent), initiatorSessionId))
                 return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
-            return ToSentOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
-        }
-        catch (TimeoutException)
-        {
-            return new SentOrderResult(SentOrderStatus.ExecutionReportTimeout, clOrdId);
+            // No answer in 5 s is an expected outcome, not an error: it becomes a status here and the 503 at the edge.
+            using var executionReportDeadline = new CancellationTokenSource();
+            var executionReportOrDeadlineFinishedFirst = await Task.WhenAny(executionReportWaiter.Task, Task.Delay(ExecutionReportTimeout, executionReportDeadline.Token));
+            if (executionReportOrDeadlineFinishedFirst != executionReportWaiter.Task)
+                return new SentOrderResult(SentOrderStatus.ExecutionReportTimeout, clOrdId);
+
+            await executionReportDeadline.CancelAsync();
+            return ToSentOrderResult(clOrdId, await executionReportWaiter.Task);
         }
         finally
         {

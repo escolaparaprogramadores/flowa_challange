@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -13,11 +14,12 @@ namespace Base.OrderGenerator.Tests;
 // GET e DELETE /api/orders só repassam ao OrderAccumulator (CA-21, CA-22, CA-29, CA-33, CA-34, CA-35, CA-42).
 public sealed class OrdersProxyTests : IDisposable
 {
-    private const string OrdersPageCommunicationMessage = "Não foi possível ler as ordens no OrderAccumulator. Tente de novo em instantes.";
-    private const string OrdersDeletionCommunicationMessage = "Não foi possível apagar as ordens no OrderAccumulator. Tente de novo em instantes.";
+    private const string OrderAccumulatorUnavailableMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
+    private const string AccumulatorOrdersPageMessage = "Página de ordens lida.";
     private const string BoletaTestIndexHtml = "<!doctype html><title>boleta-de-teste</title>";
-    private const string InvalidPageJson = """
-        {"status":"validation_error","message":"Página inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}
+    private const string AccumulatorTraceId = "0af7651916cd43dd8448eb211c80319c";
+    private const string InvalidPageProblemJson = $$"""
+        {"type":"urn:base-investimentos:problem:invalid-page","title":"Dados inválidos","status":400,"detail":"Página inválida.","instance":"/api/orders","traceId":"{{AccumulatorTraceId}}","success":false,"statusResultado":"InvalidInput","errors":["A página deve ser um número inteiro de 1 a 1000."]}
         """;
 
     private readonly string _temporaryWebRoot = Directory.CreateTempSubdirectory("flowa-wwwroot-").FullName;
@@ -35,18 +37,18 @@ public sealed class OrdersProxyTests : IDisposable
         {
             var pageAskedToAccumulator = int.Parse(ordersHttpContext.Request.Query["page"]!);
             ordersHttpContext.Response.ContentType = "application/json";
-            await ordersHttpContext.Response.WriteAsync(BuildAccumulatorOrdersPageJson(pageAskedToAccumulator, totalOrders: 12,
+            await ordersHttpContext.Response.WriteAsync(BuildAccumulatorOrdersPageDataMessageJson(pageAskedToAccumulator, totalOrders: 12,
                 pageAskedToAccumulator == 1 ? [12, 11, 10, 9, 8, 7, 6, 5, 4, 3] : [2, 1]));
         });
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
-        var ordersPageResponse = await orderGeneratorClient.GetAsync($"/api/orders?page={requestedOrdersPage}");
+        var ordersPageDataMessage = await OrderApiTests.ReadSuccessDataMessageAsync(await orderGeneratorClient.GetAsync($"/api/orders?page={requestedOrdersPage}"));
 
-        Assert.Equal(HttpStatusCode.OK, ordersPageResponse.StatusCode);
-        Assert.Equal("application/json", ordersPageResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(BuildAccumulatorOrdersPageJson(requestedOrdersPage, 12, orderNumbersNewestFirst), await ordersPageResponse.Content.ReadAsStringAsync());
-        var ordersPageResponseJson = await OrderApiTests.ReadOrderGeneratorResponseJson(ordersPageResponse);
+        // CA-4: the "data" of the OrderAccumulator goes on as it came, in one envelope.
+        Assert.Equal(AccumulatorOrdersPageMessage, ordersPageDataMessage.GetProperty("message").GetString());
+        Assert.Equal(BuildAccumulatorOrdersPageJson(requestedOrdersPage, 12, orderNumbersNewestFirst), ordersPageDataMessage.GetProperty("data").GetRawText());
+        var ordersPageResponseJson = ordersPageDataMessage.GetProperty("data");
         Assert.Equal(requestedOrdersPage, ordersPageResponseJson.GetProperty("page").GetInt32());
         Assert.Equal(12, ordersPageResponseJson.GetProperty("total").GetInt32());
         Assert.Equal(orderNumbersNewestFirst.Select(orderNumber => $"order-{orderNumber}"),
@@ -59,23 +61,46 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("-1")]
     [InlineData("1001")]
     [InlineData("abc")]
-    public async Task InvalidOrdersPage_ReturnsAccumulator400WithSameBody(string invalidOrdersPage)
+    public async Task InvalidOrdersPage_ReturnsTheAccumulator400AsTheSameProblem(string invalidOrdersPage)
+    {
+        // The fake OrderAccumulator starts before the capture: its own console log is plain text, not the JSON of the app.
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(WriteInvalidPageProblem);
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        JsonElement invalidPageProblem;
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            invalidPageProblem = await OrderApiTests.ReadProblemDetailsAsync(
+                await orderGeneratorClient.GetAsync($"/api/orders?page={invalidOrdersPage}"), HttpStatusCode.BadRequest);
+        }
+
+        // CA-6: the OrderGenerator logs its own 400 once, with its own trace id (not the one of the OrderAccumulator).
+        OrderLogTests.AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
+            "urn:base-investimentos:problem:invalid-page", "GET", "/api/orders", invalidPageProblem.GetProperty("traceId").GetString());
+        Assert.NotEqual(AccumulatorTraceId, invalidPageProblem.GetProperty("traceId").GetString());
+        Assert.Equal("urn:base-investimentos:problem:invalid-page", invalidPageProblem.GetProperty("type").GetString());
+        Assert.Equal("Dados inválidos", invalidPageProblem.GetProperty("title").GetString());
+        Assert.Equal("Página inválida.", invalidPageProblem.GetProperty("detail").GetString());
+        Assert.Equal("InvalidInput", invalidPageProblem.GetProperty("statusResultado").GetString());
+        Assert.Equal(["A página deve ser um número inteiro de 1 a 1000."], OrderApiTests.ReadProblemErrorMessages(invalidPageProblem));
+        Assert.Equal([$"GET ?page={invalidOrdersPage}"], fakeAccumulator.ReceivedOrdersRequests);
+    }
+
+    // The 400 of an OrderAccumulator of the version before (validation_error body, not problem+json) is not the
+    // contract: 503 instead of a 500.
+    [Fact]
+    public async Task InvalidOrdersPage_WithoutProblemJson_Becomes503()
     {
         await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
             ordersHttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
             ordersHttpContext.Response.ContentType = "application/json";
-            await ordersHttpContext.Response.WriteAsync(InvalidPageJson);
+            await ordersHttpContext.Response.WriteAsync("""{"status":"validation_error","message":"Página inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}""");
         });
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
-        var invalidPageResponse = await orderGeneratorClient.GetAsync($"/api/orders?page={invalidOrdersPage}");
-
-        Assert.Equal(HttpStatusCode.BadRequest, invalidPageResponse.StatusCode);
-        Assert.Equal("application/json", invalidPageResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(InvalidPageJson, await invalidPageResponse.Content.ReadAsStringAsync());
-        Assert.Equal([$"GET ?page={invalidOrdersPage}"], fakeAccumulator.ReceivedOrdersRequests);
+        await AssertOrdersCommunicationError(await orderGeneratorClient.GetAsync("/api/orders?page=0"));
     }
 
     [Theory]
@@ -86,11 +111,7 @@ public sealed class OrdersProxyTests : IDisposable
     [InlineData("/api/orders", "GET ")]
     public async Task OnlyOrdersPage_ReachesAccumulatorUnchanged(string ordersPagePathAskedByClient, string expectedAccumulatorOrdersRequest)
     {
-        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
-        {
-            ordersHttpContext.Response.ContentType = "application/json";
-            await ordersHttpContext.Response.WriteAsync(BuildAccumulatorOrdersPageJson(1, 0, []));
-        });
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(AnswerOrdersPageOrDeletion);
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
@@ -119,9 +140,9 @@ public sealed class OrdersProxyTests : IDisposable
     }
 
     [Theory]
-    [InlineData("GET", OrdersPageCommunicationMessage)]
-    [InlineData("DELETE", OrdersDeletionCommunicationMessage)]
-    public async Task OrdersRoutes_WhenAccumulatorIsDown_Return503InPortuguese(string ordersHttpMethod, string expectedCommunicationMessage)
+    [InlineData("GET")]
+    [InlineData("DELETE")]
+    public async Task OrdersRoutes_WhenAccumulatorIsDown_Return503InPortuguese(string ordersHttpMethod)
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}");
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
@@ -130,14 +151,14 @@ public sealed class OrdersProxyTests : IDisposable
         var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), "/api/orders?page=1"));
         apiResponseClock.Stop();
 
-        await AssertOrdersCommunicationError(ordersResponse, expectedCommunicationMessage);
+        await AssertOrdersCommunicationError(ordersResponse);
         Assert.True(apiResponseClock.Elapsed < TimeSpan.FromSeconds(5), $"levou {apiResponseClock.Elapsed}");
     }
 
     [Theory]
-    [InlineData("GET", OrdersPageCommunicationMessage)]
-    [InlineData("DELETE", OrdersDeletionCommunicationMessage)]
-    public async Task OrdersRoutes_WhenAccumulatorTimesOutAfter5Seconds_Return503(string ordersHttpMethod, string expectedCommunicationMessage)
+    [InlineData("GET")]
+    [InlineData("DELETE")]
+    public async Task OrdersRoutes_WhenAccumulatorTimesOutAfter5Seconds_Return503(string ordersHttpMethod)
     {
         await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
             await Task.Delay(TimeSpan.FromSeconds(8), ordersHttpContext.RequestAborted));
@@ -148,19 +169,18 @@ public sealed class OrdersProxyTests : IDisposable
         var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), "/api/orders?page=1"));
         apiResponseClock.Stop();
 
-        await AssertOrdersCommunicationError(ordersResponse, expectedCommunicationMessage);
+        await AssertOrdersCommunicationError(ordersResponse);
         Assert.InRange(apiResponseClock.Elapsed, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6.5));
     }
 
     [Theory]
-    [InlineData("GET", StatusCodes.Status500InternalServerError, OrdersPageCommunicationMessage, "GET ?page=1")]
-    [InlineData("GET", StatusCodes.Status404NotFound, OrdersPageCommunicationMessage, "GET ?page=1")]
-    [InlineData("GET", StatusCodes.Status204NoContent, OrdersPageCommunicationMessage, "GET ?page=1")]
-    [InlineData("DELETE", StatusCodes.Status500InternalServerError, OrdersDeletionCommunicationMessage, "DELETE ")]
-    [InlineData("DELETE", StatusCodes.Status200OK, OrdersDeletionCommunicationMessage, "DELETE ")]
-    [InlineData("DELETE", StatusCodes.Status400BadRequest, OrdersDeletionCommunicationMessage, "DELETE ")]
-    public async Task UnexpectedAccumulatorStatusOnOrdersRoutes_Becomes503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedCommunicationMessage,
-        string expectedAccumulatorOrdersRequest)
+    [InlineData("GET", StatusCodes.Status500InternalServerError, "GET ?page=1")]
+    [InlineData("GET", StatusCodes.Status404NotFound, "GET ?page=1")]
+    [InlineData("GET", StatusCodes.Status204NoContent, "GET ?page=1")]
+    [InlineData("DELETE", StatusCodes.Status500InternalServerError, "DELETE ")]
+    [InlineData("DELETE", StatusCodes.Status200OK, "DELETE ")]
+    [InlineData("DELETE", StatusCodes.Status400BadRequest, "DELETE ")]
+    public async Task UnexpectedAccumulatorStatusOnOrdersRoutes_Becomes503(string ordersHttpMethod, int unexpectedAccumulatorStatus, string expectedAccumulatorOrdersRequest)
     {
         await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
@@ -173,7 +193,7 @@ public sealed class OrdersProxyTests : IDisposable
 
         var ordersResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(ordersHttpMethod), "/api/orders?page=1"));
 
-        await AssertOrdersCommunicationError(ordersResponse, expectedCommunicationMessage);
+        await AssertOrdersCommunicationError(ordersResponse);
         Assert.DoesNotContain("detalhe-do-accumulator-que-nao-pode-vazar", await ordersResponse.Content.ReadAsStringAsync());
         // O 503 veio da resposta do accumulator, numa chamada só: sem nova tentativa, nem no apagar.
         Assert.Equal([expectedAccumulatorOrdersRequest], fakeAccumulator.ReceivedOrdersRequests);
@@ -251,9 +271,7 @@ public sealed class OrdersProxyTests : IDisposable
         {
             if (ordersHttpContext.Request.Query["page"] == "abc")
             {
-                ordersHttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                ordersHttpContext.Response.ContentType = "application/json";
-                await ordersHttpContext.Response.WriteAsync(InvalidPageJson);
+                await WriteInvalidPageProblem(ordersHttpContext);
                 return;
             }
             await AnswerOrdersPageOrDeletion(ordersHttpContext);
@@ -288,8 +306,18 @@ public sealed class OrdersProxyTests : IDisposable
             return;
         }
         ordersHttpContext.Response.ContentType = "application/json";
-        await ordersHttpContext.Response.WriteAsync(BuildAccumulatorOrdersPageJson(1, 0, []));
+        await ordersHttpContext.Response.WriteAsync(BuildAccumulatorOrdersPageDataMessageJson(1, 0, []));
     }
+
+    private static async Task WriteInvalidPageProblem(HttpContext ordersHttpContext)
+    {
+        ordersHttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+        ordersHttpContext.Response.ContentType = "application/problem+json";
+        await ordersHttpContext.Response.WriteAsync(InvalidPageProblemJson);
+    }
+
+    private static string BuildAccumulatorOrdersPageDataMessageJson(int ordersPage, int totalOrders, int[] orderNumbersNewestFirst) =>
+        $$"""{"success":true,"status":"Ok","message":"{{AccumulatorOrdersPageMessage}}","data":{{BuildAccumulatorOrdersPageJson(ordersPage, totalOrders, orderNumbersNewestFirst)}},"errors":[],"errorCode":null}""";
 
     private static string BuildAccumulatorOrdersPageJson(int ordersPage, int totalOrders, int[] orderNumbersNewestFirst) =>
         $$"""{"page":{{ordersPage}},"pageSize":10,"total":{{totalOrders}},"orders":[{{string.Join(",", orderNumbersNewestFirst.Select(BuildAccumulatorListedOrderJson))}}]}""";
@@ -297,12 +325,14 @@ public sealed class OrdersProxyTests : IDisposable
     private static string BuildAccumulatorListedOrderJson(int orderNumber) =>
         $$"""{"receivedAt":"2026-10-04T12:{{orderNumber:00}}:00Z","status":"accepted","symbol":"PETR4","side":"buy","quantity":100,"price":10.5,"orderId":"order-{{orderNumber}}","clOrdId":"cl-{{orderNumber}}"}""";
 
-    private static async Task AssertOrdersCommunicationError(HttpResponseMessage ordersResponse, string expectedCommunicationMessage)
+    private static async Task AssertOrdersCommunicationError(HttpResponseMessage ordersResponse)
     {
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, ordersResponse.StatusCode);
-        var communicationErrorResponse = await OrderApiTests.ReadOrderGeneratorResponseJson(ordersResponse);
-        Assert.Equal("communication_error", communicationErrorResponse.GetProperty("status").GetString());
-        Assert.Equal(expectedCommunicationMessage, communicationErrorResponse.GetProperty("message").GetString());
+        var unavailableProblem = await OrderApiTests.ReadProblemDetailsAsync(ordersResponse, HttpStatusCode.ServiceUnavailable);
+        Assert.Equal("urn:base-investimentos:problem:order-accumulator-unavailable", unavailableProblem.GetProperty("type").GetString());
+        Assert.Equal("Serviço indisponível", unavailableProblem.GetProperty("title").GetString());
+        Assert.Equal(OrderAccumulatorUnavailableMessage, unavailableProblem.GetProperty("detail").GetString());
+        Assert.Equal("ServiceUnavailable", unavailableProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(unavailableProblem.GetProperty("errors").EnumerateArray());
     }
 
     private static async Task<FakeOrdersAccumulator> StartFakeOrdersAccumulator(RequestDelegate accumulatorOrdersHandler)

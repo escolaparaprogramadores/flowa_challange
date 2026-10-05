@@ -25,7 +25,7 @@ async function apagarTodasAsOrdensNoServidor(paginaDaBoleta: Page) {
 async function lerPrimeiraPaginaNoServidor(paginaDaBoleta: Page): Promise<PaginaDeOrdensNoServidor> {
   const respostaDaLista = await paginaDaBoleta.request.get(ROTA_DAS_ORDENS + '?page=1');
   expect(respostaDaLista.status()).toBe(200);
-  return (await respostaDaLista.json()) as PaginaDeOrdensNoServidor;
+  return ((await respostaDaLista.json()) as { data: PaginaDeOrdensNoServidor }).data;
 }
 
 async function enviarOrdemPelaBoleta(paginaDaBoleta: Page, ordemDaBoleta: OrdemDaBoleta): Promise<{ clOrdId: string; status: string }> {
@@ -35,7 +35,7 @@ async function enviarOrdemPelaBoleta(paginaDaBoleta: Page, ordemDaBoleta: OrdemD
   const respostaDaCriacao = paginaDaBoleta.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
   const releituraDaLista = paginaDaBoleta.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'GET' && new URL(respostaHttp.url()).pathname === ROTA_DAS_ORDENS);
   await paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ }).click();
-  const corpoDaCriacao = (await (await respostaDaCriacao).json()) as { clOrdId: string; status: string };
+  const corpoDaCriacao = ((await (await respostaDaCriacao).json()) as { data: { clOrdId: string; status: string } }).data;
   // RF-07 e CA-41: depois do envio a tela relê só a página 1.
   expect(new URL((await releituraDaLista).url()).search).toBe('?page=1');
   await expect(paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
@@ -150,8 +150,8 @@ test('CA-15: erro de preenchimento (400) aparece na faixa vermelha com os erros 
   await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, (criacaoDaOrdem) =>
     criacaoDaOrdem.fulfill({
       status: 400,
-      contentType: 'application/json',
-      body: JSON.stringify({ status: 'validation_error', message: 'A ordem tem campos inválidos.', errors: [{ field: 'price', message: 'O preço deve ser múltiplo de 0,01.' }] }),
+      contentType: 'application/problem+json',
+      body: JSON.stringify({ type: 'urn:base-investimentos:problem:invalid-order', title: 'Dados inválidos', status: 400, detail: 'A ordem tem campos inválidos.', success: false, statusResultado: 'InvalidInput', errors: ['O preço deve ser múltiplo de 0,01.'] }),
     }),
   );
   await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '10', preco: '10,00' });
@@ -190,7 +190,7 @@ test('CA-15: sem comunicação com o servidor (503) a faixa mostra a mensagem e 
   await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '1', preco: '10,00' });
   const totalAntes = (await lerPrimeiraPaginaNoServidor(page)).total;
   await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, (criacaoDaOrdem) =>
-    criacaoDaOrdem.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator.' }) }),
+    criacaoDaOrdem.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }) }),
   );
   await enviarOrdemPelaBoleta(page, { lado: 'Compra', quantidade: '10', preco: '10,00' });
   const faixaDaFalha = cartaoCompraVenda(page).getByTestId('faixa-da-falha-no-envio');
@@ -296,7 +296,7 @@ async function gravarListaCheiaDeOrdensLargas(paginaDaBoleta: Page) {
   for (const ordemDaSemente of ordensDaSemente) {
     const ordemGravada = await paginaDaBoleta.request.post(ROTA_DE_CRIACAO_DE_ORDEM, { data: { ...ordemDaSemente, quantity: 99_999, price: 999.99 } });
     expect(ordemGravada.status()).toBe(200);
-    situacoesGravadas.push(((await ordemGravada.json()) as { status: string }).status);
+    situacoesGravadas.push(((await ordemGravada.json()) as { data: { status: string } }).data.status);
   }
   expect(situacoesGravadas.at(-1)).toBe('rejected');
 }
@@ -412,7 +412,7 @@ test.describe('lista cheia de ordens largas', () => {
 test('ASSUMI-01: se a lista não puder ser lida, o cartão avisa o erro no lugar da tabela, sem o vazio', async ({ page }) => {
   // Só a leitura da lista falha; o corpo é o 503 do contrato. A boleta e a exposição seguem reais.
   await page.route('**' + ROTA_DAS_ORDENS + '?page=1', (leituraDaLista) =>
-    leituraDaLista.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator.' }) }),
+    leituraDaLista.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }) }),
   );
   await page.goto('/');
   const avisoDeErro = cartaoCompraVenda(page).getByRole('alert');
@@ -444,7 +444,7 @@ test('ASSUMI-03: ordem gravada sem símbolo e sem lado (rejeição vinda direto 
     leituraDaLista.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ page: 1, pageSize: 10, total: 1, orders: [{ receivedAt: '2026-10-04T23:30:00.123456Z', status: 'rejected', symbol: null, side: null, quantity: 5, price: 1.1, orderId: 'a'.repeat(32), clOrdId: 'b'.repeat(32) }] }),
+      body: JSON.stringify({ success: true, status: 'Ok', message: 'Página de ordens lida.', data: { page: 1, pageSize: 10, total: 1, orders: [{ receivedAt: '2026-10-04T23:30:00.123456Z', status: 'rejected', symbol: null, side: null, quantity: 5, price: 1.1, orderId: 'a'.repeat(32), clOrdId: 'b'.repeat(32) }] }, errors: [], errorCode: null }),
     }),
   );
   await page.setViewportSize({ width: 1440, height: 900 });
