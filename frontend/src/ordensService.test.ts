@@ -19,10 +19,17 @@ function buildSuccessDataMessage(responseData: unknown, successMessage: string) 
   return { success: true, status: 'Ok', message: successMessage, data: responseData, errors: [], errorCode: null };
 }
 
-function simulateServerAnsweringWithProblem(problemHttpStatus: number, problemDetail: string, problemErrors: string[] = []) {
+// The type, title and statusResultado the server really writes for each status (contracts.md, section 1).
+const problemOfEachStatus: Record<number, { type: string; title: string; statusResultado: string }> = {
+  400: { type: 'urn:base-investimentos:problem:invalid-order', title: 'Dados inválidos', statusResultado: 'InvalidInput' },
+  500: { type: 'urn:base-investimentos:problem:internal-error', title: 'Erro interno', statusResultado: 'InternalError' },
+  503: { type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', statusResultado: 'ServiceUnavailable' },
+};
+
+function simulateServerAnsweringWithProblem(problemHttpStatus: 400 | 500 | 503, problemDetail: string, problemErrors: string[] = []) {
   const apiProblem = {
-    type: 'urn:base-investimentos:problem:test', title: 'Título do problema', status: problemHttpStatus, detail: problemDetail,
-    instance: '/api/orders', traceId: '0af7651916cd43dd8448eb211c80319c', success: false, statusResultado: 'InvalidInput', errors: problemErrors,
+    ...problemOfEachStatus[problemHttpStatus], status: problemHttpStatus, detail: problemDetail,
+    instance: '/api/orders', traceId: '0af7651916cd43dd8448eb211c80319c', success: false, errors: problemErrors,
   };
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(apiProblem), {
     status: problemHttpStatus, headers: { 'Content-Type': 'application/problem+json' },

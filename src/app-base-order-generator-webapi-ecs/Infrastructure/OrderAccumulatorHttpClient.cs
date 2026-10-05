@@ -43,21 +43,39 @@ public sealed class OrderAccumulatorHttpClient(HttpClient orderAccumulatorHttpCl
                 $"The OrderAccumulator answered {(int)orderAccumulatorResponse.StatusCode} instead of {(int)expectedHttpStatus}.", null, orderAccumulatorResponse.StatusCode);
     }
 
+    // A 200 outside the DataMessage contract (an OrderAccumulator of the version before, during a rolling deploy, or a
+    // page that is not JSON) means the route was not answered as promised: the same 503 as any other unanswered call.
     private static async Task<DataMessage<JsonElement>> ReadSuccessMessageAsync(HttpResponseMessage successResponse, CancellationToken cancellationToken)
     {
+        if (successResponse.Content.Headers.ContentType?.MediaType != "application/json")
+            throw new HttpRequestException("The OrderAccumulator answered 200 without a JSON body.", null, successResponse.StatusCode);
+
         using var successBody = await JsonDocument.ParseAsync(await successResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var successMessage = successBody.RootElement;
-        return DataMessage<JsonElement>.CreateSuccessMessage(successMessage.GetProperty("data").Clone(), successMessage.GetProperty("message").GetString()!);
+        if (successMessage.ValueKind != JsonValueKind.Object
+            || !successMessage.TryGetProperty("data", out var successData)
+            || !successMessage.TryGetProperty("message", out var successText) || successText.ValueKind != JsonValueKind.String)
+            throw new HttpRequestException("The OrderAccumulator answered 200 outside the DataMessage contract.", null, successResponse.StatusCode);
+
+        return DataMessage<JsonElement>.CreateSuccessMessage(successData.Clone(), successText.GetString()!);
     }
 
     // The 400 of the OrderAccumulator is a problem+json: its detail, errors and code become the same error here.
     private static async Task<DataMessage<JsonElement>> ReadInvalidInputMessageAsync(HttpResponseMessage invalidInputResponse, CancellationToken cancellationToken)
     {
+        if (invalidInputResponse.Content.Headers.ContentType?.MediaType != "application/problem+json")
+            throw new HttpRequestException("The OrderAccumulator answered 400 without a problem+json body.", null, invalidInputResponse.StatusCode);
+
         using var problemBody = await JsonDocument.ParseAsync(await invalidInputResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var invalidInputProblem = problemBody.RootElement;
-        var problemType = invalidInputProblem.GetProperty("type").GetString()!;
-        var problemErrorMessages = invalidInputProblem.GetProperty("errors").EnumerateArray().Select(problemError => problemError.GetString()!).ToList();
+        if (!invalidInputProblem.TryGetProperty("type", out var problemTypeElement) || problemTypeElement.ValueKind != JsonValueKind.String
+            || !invalidInputProblem.TryGetProperty("detail", out var problemDetail) || problemDetail.ValueKind != JsonValueKind.String
+            || !invalidInputProblem.TryGetProperty("errors", out var problemErrors) || problemErrors.ValueKind != JsonValueKind.Array)
+            throw new HttpRequestException("The OrderAccumulator answered 400 outside the problem+json contract.", null, invalidInputResponse.StatusCode);
+
+        var problemType = problemTypeElement.GetString()!;
+        var problemErrorMessages = problemErrors.EnumerateArray().Select(problemError => problemError.GetString() ?? string.Empty).ToList();
         return DataMessage<JsonElement>.CreateErrorMessage(
-            invalidInputProblem.GetProperty("detail").GetString()!, ResultStatus.InvalidInput, problemErrorMessages, problemType[(problemType.LastIndexOf(':') + 1)..]);
+            problemDetail.GetString()!, ResultStatus.InvalidInput, problemErrorMessages, problemType[(problemType.LastIndexOf(':') + 1)..]);
     }
 }

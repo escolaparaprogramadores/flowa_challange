@@ -74,6 +74,24 @@ public sealed class ExposureProxyTests
         Assert.InRange(apiResponseClock.Elapsed, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6.5));
     }
 
+    // An OrderAccumulator of the version before (body without the envelope, during a rolling deploy) or a page that
+    // is not JSON did not answer the route as promised: the same 503, never a 500.
+    [Theory]
+    [InlineData("application/json", AccumulatorExposuresDataJson)]
+    [InlineData("text/html", "<html>Bad Gateway</html>")]
+    public async Task Accumulator_200_outside_the_data_message_becomes_503(string accumulatorContentType, string accumulatorBody)
+    {
+        await using var fakeAccumulator = await StartFakeAccumulator(async exposuresHttpContext =>
+        {
+            exposuresHttpContext.Response.ContentType = accumulatorContentType;
+            await exposuresHttpContext.Response.WriteAsync(accumulatorBody);
+        });
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+
+        await AssertExposureError(await orderGeneratorClient.GetAsync("/api/exposures"));
+    }
+
     [Fact]
     public async Task Accumulator_com_erro_500_vira_503()
     {

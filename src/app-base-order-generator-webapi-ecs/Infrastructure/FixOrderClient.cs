@@ -55,11 +55,14 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
             if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, orderToSend, orderSendingTraceParent), initiatorSessionId))
                 return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
-            return ToSentOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
-        }
-        catch (TimeoutException)
-        {
-            return new SentOrderResult(SentOrderStatus.ExecutionReportTimeout, clOrdId);
+            // No answer in 5 s is an expected outcome, not an error: it becomes a status here and the 503 at the edge.
+            using var executionReportDeadline = new CancellationTokenSource();
+            var firstToFinish = await Task.WhenAny(executionReportWaiter.Task, Task.Delay(ExecutionReportTimeout, executionReportDeadline.Token));
+            if (firstToFinish != executionReportWaiter.Task)
+                return new SentOrderResult(SentOrderStatus.ExecutionReportTimeout, clOrdId);
+
+            await executionReportDeadline.CancelAsync();
+            return ToSentOrderResult(clOrdId, await executionReportWaiter.Task);
         }
         finally
         {

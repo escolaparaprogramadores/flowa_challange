@@ -77,6 +77,23 @@ public sealed class OrdersProxyTests : IDisposable
         Assert.Equal([$"GET ?page={invalidOrdersPage}"], fakeAccumulator.ReceivedOrdersRequests);
     }
 
+    // The 400 of an OrderAccumulator of the version before (validation_error body, not problem+json) is not the
+    // contract: 503 instead of a 500.
+    [Fact]
+    public async Task InvalidOrdersPage_WithoutProblemJson_Becomes503()
+    {
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
+        {
+            ordersHttpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            ordersHttpContext.Response.ContentType = "application/json";
+            await ordersHttpContext.Response.WriteAsync("""{"status":"validation_error","message":"Página inválida.","errors":[{"field":"page","message":"A página deve ser um número inteiro de 1 a 1000."}]}""");
+        });
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+
+        await AssertOrdersCommunicationError(await orderGeneratorClient.GetAsync("/api/orders?page=0"));
+    }
+
     [Theory]
     [InlineData("/api/orders?page=2&pageSize=500", "GET ?page=2")]
     [InlineData("/api/orders?pageSize=500&page=3&symbol=PETR4", "GET ?page=3")]
