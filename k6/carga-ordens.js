@@ -2,7 +2,7 @@
 // It sends accepted orders, orders rejected for an invalid field and orders rejected for crossing the
 // exposure limit on every symbol, and leaves each symbol's exposure where it was before the run.
 import http from 'k6/http';
-import exec from 'k6/execution';
+import execution from 'k6/execution';
 import { check } from 'k6';
 import { Counter, Gauge, Trend } from 'k6/metrics';
 
@@ -43,7 +43,7 @@ const metricNameFor = (prefix, symbol) => `${prefix}_${symbol.toLowerCase()}`;
 
 const orderCountersBySymbolAndKind = Object.fromEntries(FLOWA_SYMBOLS.map((symbol) => [
   symbol,
-  Object.fromEntries(ORDER_OUTCOME_KINDS.map((kind) => [kind, new Counter(metricNameFor(`orders_${kind}`, symbol))])),
+  Object.fromEntries(ORDER_OUTCOME_KINDS.map((outcomeKind) => [outcomeKind, new Counter(metricNameFor(`orders_${outcomeKind}`, symbol))])),
 ]));
 const exposureAfterBySymbol = Object.fromEntries(FLOWA_SYMBOLS.map((symbol) => [symbol, new Gauge(metricNameFor('exposure_after', symbol))]));
 const exposureDeltaCentsBySymbol = Object.fromEntries(FLOWA_SYMBOLS.map((symbol) => [symbol, new Gauge(metricNameFor('exposure_delta_cents', symbol))]));
@@ -54,7 +54,7 @@ const unbalancedOrders = new Counter('orders_left_unbalanced');
 const restoredExposureSymbols = new Counter('exposure_restored_symbols');
 
 const orderCountThresholds = Object.fromEntries(FLOWA_SYMBOLS.flatMap((symbol) =>
-  ORDER_OUTCOME_KINDS.map((kind) => [metricNameFor(`orders_${kind}`, symbol), ['count>0']])));
+  ORDER_OUTCOME_KINDS.map((outcomeKind) => [metricNameFor(`orders_${outcomeKind}`, symbol), ['count>0']])));
 
 export const options = {
   scenarios: {
@@ -108,7 +108,24 @@ function readExposureBySymbol(requestName) {
     .map((symbolExposure) => [symbolExposure.symbol, symbolExposure.exposure]));
 }
 
-function sendOrder(order) {
+function buildPairOrder(symbol, side) {
+  return { symbol, side, quantity: PAIR_ORDER_QUANTITY, price: PAIR_ORDER_PRICE };
+}
+
+function buildInvalidQuantityOrder(symbol) {
+  return { symbol, side: 'buy', quantity: INVALID_ORDER_QUANTITY, price: PAIR_ORDER_PRICE };
+}
+
+function buildLimitFillOrder(symbol, side) {
+  return { symbol, side, quantity: LIMIT_FILL_ORDER_QUANTITY, price: LIMIT_FILL_ORDER_PRICE };
+}
+
+function oppositeSideOf(side) {
+  return side === 'buy' ? 'sell' : 'buy';
+}
+
+// Returns the order result the API put in data, or null fields when the answer is not 200.
+function postOrder(order) {
   const orderResponse = http.post(
     `${API_URL}/api/orders`,
     JSON.stringify(order),
@@ -117,16 +134,26 @@ function sendOrder(order) {
   ordersSent.add(1);
   orderLatency.add(orderResponse.timings.duration);
   check(orderResponse, { 'order answered with 200': (answeredOrder) => answeredOrder.status === 200 });
-
-  const orderOutcome = orderResponse.status === 200
+  return orderResponse.status === 200
     ? { status: orderResponse.json('data.status'), message: orderResponse.json('data.message') }
     : { status: null, message: null };
-  if (orderOutcome.status === 'accepted') orderCountersBySymbolAndKind[order.symbol].accepted.add(1);
-  return orderOutcome;
 }
 
-function oppositeSideOf(side) {
-  return side === 'buy' ? 'sell' : 'buy';
+function classifyOrderOutcome(order, orderOutcome) {
+  if (orderOutcome.status === 'accepted') return 'accepted';
+  if (orderOutcome.status === 'rejected' && orderOutcome.message === INVALID_QUANTITY_REJECTION_REASON) return 'rejected_invalid_field';
+  if (orderOutcome.status === 'rejected' && orderOutcome.message === limitRejectionReasonFor(order.symbol)) return 'rejected_limit';
+  return 'unclassified';
+}
+
+function countOrderOutcome(symbol, outcomeKind) {
+  if (ORDER_OUTCOME_KINDS.includes(outcomeKind)) orderCountersBySymbolAndKind[symbol][outcomeKind].add(1);
+}
+
+function sendOrderAndCountOutcome(order) {
+  const outcomeKind = classifyOrderOutcome(order, postOrder(order));
+  countOrderOutcome(order.symbol, outcomeKind);
+  return outcomeKind;
 }
 
 export function setup() {
@@ -138,7 +165,7 @@ export function setup() {
 
   // Every threshold metric gets a zero sample, so a kind that never happens fails instead of being skipped.
   for (const symbol of FLOWA_SYMBOLS) {
-    for (const kind of ORDER_OUTCOME_KINDS) orderCountersBySymbolAndKind[symbol][kind].add(0);
+    for (const outcomeKind of ORDER_OUTCOME_KINDS) orderCountersBySymbolAndKind[symbol][outcomeKind].add(0);
   }
   unexpectedOrderOutcomes.add(0);
   restoredExposureSymbols.add(0);
@@ -152,17 +179,14 @@ export function setup() {
 
 // Both legs in the same iteration: the closing leg only goes out if the opening one was accepted.
 export function sendBalancedPair(loadContext) {
-  const pairSymbol = FLOWA_SYMBOLS[exec.scenario.iterationInTest % FLOWA_SYMBOLS.length];
+  const pairSymbol = FLOWA_SYMBOLS[execution.scenario.iterationInTest % FLOWA_SYMBOLS.length];
   const openingSide = loadContext.pairFirstSideBySymbol[pairSymbol];
-  const pairOrder = { symbol: pairSymbol, quantity: PAIR_ORDER_QUANTITY, price: PAIR_ORDER_PRICE };
 
-  const openingOutcome = sendOrder({ ...pairOrder, side: openingSide });
-  if (openingOutcome.status !== 'accepted') {
+  if (sendOrderAndCountOutcome(buildPairOrder(pairSymbol, openingSide)) !== 'accepted') {
     unexpectedOrderOutcomes.add(1);
     return;
   }
-  const closingOutcome = sendOrder({ ...pairOrder, side: oppositeSideOf(openingSide) });
-  if (closingOutcome.status !== 'accepted') {
+  if (sendOrderAndCountOutcome(buildPairOrder(pairSymbol, oppositeSideOf(openingSide))) !== 'accepted') {
     unexpectedOrderOutcomes.add(1);
     unbalancedOrders.add(1);
   }
@@ -170,12 +194,7 @@ export function sendBalancedPair(loadContext) {
 
 export function sendInvalidFieldOrders() {
   for (const symbol of FLOWA_SYMBOLS) {
-    const invalidOrderOutcome = sendOrder({ symbol, side: 'buy', quantity: INVALID_ORDER_QUANTITY, price: PAIR_ORDER_PRICE });
-    if (invalidOrderOutcome.status === 'rejected' && invalidOrderOutcome.message === INVALID_QUANTITY_REJECTION_REASON) {
-      orderCountersBySymbolAndKind[symbol].rejected_invalid_field.add(1);
-    } else {
-      unexpectedOrderOutcomes.add(1);
-    }
+    if (sendOrderAndCountOutcome(buildInvalidQuantityOrder(symbol)) !== 'rejected_invalid_field') unexpectedOrderOutcomes.add(1);
   }
 }
 
@@ -185,16 +204,14 @@ export function sendLimitOverflowOrders() {
   const currentExposureBySymbol = readExposureBySymbol('exposure_before_limit_round');
   for (const symbol of FLOWA_SYMBOLS) {
     const fillSide = currentExposureBySymbol[symbol] >= 0 ? 'buy' : 'sell';
-    const fillOrder = { symbol, quantity: LIMIT_FILL_ORDER_QUANTITY, price: LIMIT_FILL_ORDER_PRICE };
     let acceptedFillOrders = 0;
     let hasCrossedLimit = false;
 
     for (let fillAttempt = 0; fillAttempt < MAX_LIMIT_FILL_ATTEMPTS && !hasCrossedLimit; fillAttempt += 1) {
-      const fillOutcome = sendOrder({ ...fillOrder, side: fillSide });
-      if (fillOutcome.status === 'accepted') {
+      const fillOutcomeKind = sendOrderAndCountOutcome(buildLimitFillOrder(symbol, fillSide));
+      if (fillOutcomeKind === 'accepted') {
         acceptedFillOrders += 1;
-      } else if (fillOutcome.status === 'rejected' && fillOutcome.message === limitRejectionReasonFor(symbol)) {
-        orderCountersBySymbolAndKind[symbol].rejected_limit.add(1);
+      } else if (fillOutcomeKind === 'rejected_limit') {
         hasCrossedLimit = true;
       } else {
         break;
@@ -203,8 +220,7 @@ export function sendLimitOverflowOrders() {
     if (!hasCrossedLimit) unexpectedOrderOutcomes.add(1);
 
     for (let unwindIndex = 0; unwindIndex < acceptedFillOrders; unwindIndex += 1) {
-      const unwindOutcome = sendOrder({ ...fillOrder, side: oppositeSideOf(fillSide) });
-      if (unwindOutcome.status !== 'accepted') {
+      if (sendOrderAndCountOutcome(buildLimitFillOrder(symbol, oppositeSideOf(fillSide))) !== 'accepted') {
         unexpectedOrderOutcomes.add(1);
         unbalancedOrders.add(1);
       }
@@ -223,10 +239,10 @@ export function teardown(loadContext) {
   }
 }
 
-function readMetricStat(testResult, metricName, statName) {
+function readMetricStatistic(testResult, metricName, statisticName) {
   const testMetric = testResult.metrics[metricName];
-  const metricStat = testMetric && testMetric.values ? testMetric.values[statName] : undefined;
-  return typeof metricStat === 'number' ? metricStat : 0;
+  const metricStatistic = testMetric && testMetric.values ? testMetric.values[statisticName] : undefined;
+  return typeof metricStatistic === 'number' ? metricStatistic : 0;
 }
 
 function formatMilliseconds(milliseconds) {
@@ -236,9 +252,9 @@ function formatMilliseconds(milliseconds) {
 export function handleSummary(testResult) {
   const testMinutes = testResult.state.testRunDurationMs / 60000;
   // Requests per minute count only orders; the exposure and version reads are left out.
-  const totalOrdersSent = readMetricStat(testResult, 'orders_sent', 'count');
+  const totalOrdersSent = readMetricStatistic(testResult, 'orders_sent', 'count');
   // Same metric the error threshold judges.
-  const errorRate = readMetricStat(testResult, 'http_req_failed', 'rate');
+  const errorRate = readMetricStatistic(testResult, 'http_req_failed', 'rate');
   const exposureBeforeBySymbol = testResult.setup_data ? testResult.setup_data.exposureBeforeBySymbol : {};
 
   const loadSummary = {
@@ -247,28 +263,28 @@ export function handleSummary(testResult) {
     commit: testResult.setup_data ? testResult.setup_data.runningCommit : null,
     durationSeconds: Math.round(testResult.state.testRunDurationMs / 1000),
     orderLatencyMs: {
-      p80: readMetricStat(testResult, 'order_latency', 'p(80)'),
-      p90: readMetricStat(testResult, 'order_latency', 'p(90)'),
-      p95: readMetricStat(testResult, 'order_latency', 'p(95)'),
-      p99: readMetricStat(testResult, 'order_latency', 'p(99)'),
+      p80: readMetricStatistic(testResult, 'order_latency', 'p(80)'),
+      p90: readMetricStatistic(testResult, 'order_latency', 'p(90)'),
+      p95: readMetricStatistic(testResult, 'order_latency', 'p(95)'),
+      p99: readMetricStatistic(testResult, 'order_latency', 'p(99)'),
     },
     orderRequests: totalOrdersSent,
     orderRequestsPerMinute: testMinutes > 0 ? totalOrdersSent / testMinutes : 0,
     errorRate,
     errorRateBelowLimit: errorRate < 0.01,
     ordersBySymbol: Object.fromEntries(FLOWA_SYMBOLS.map((symbol) => [symbol, {
-      accepted: readMetricStat(testResult, metricNameFor('orders_accepted', symbol), 'count'),
-      rejectedInvalidField: readMetricStat(testResult, metricNameFor('orders_rejected_invalid_field', symbol), 'count'),
-      rejectedLimit: readMetricStat(testResult, metricNameFor('orders_rejected_limit', symbol), 'count'),
+      accepted: readMetricStatistic(testResult, metricNameFor('orders_accepted', symbol), 'count'),
+      rejectedInvalidField: readMetricStatistic(testResult, metricNameFor('orders_rejected_invalid_field', symbol), 'count'),
+      rejectedLimit: readMetricStatistic(testResult, metricNameFor('orders_rejected_limit', symbol), 'count'),
     }])),
-    unexpectedOutcomes: readMetricStat(testResult, 'orders_unexpected_outcome', 'count'),
-    ordersLeftUnbalanced: readMetricStat(testResult, 'orders_left_unbalanced', 'count'),
+    unexpectedOutcomes: readMetricStatistic(testResult, 'orders_unexpected_outcome', 'count'),
+    ordersLeftUnbalanced: readMetricStatistic(testResult, 'orders_left_unbalanced', 'count'),
     exposureBySymbol: Object.fromEntries(FLOWA_SYMBOLS.map((symbol) => [symbol, {
       before: exposureBeforeBySymbol[symbol],
-      after: readMetricStat(testResult, metricNameFor('exposure_after', symbol), 'value'),
-      deltaCents: readMetricStat(testResult, metricNameFor('exposure_delta_cents', symbol), 'value'),
+      after: readMetricStatistic(testResult, metricNameFor('exposure_after', symbol), 'value'),
+      deltaCents: readMetricStatistic(testResult, metricNameFor('exposure_delta_cents', symbol), 'value'),
     }])),
-    exposureRestoredSymbols: readMetricStat(testResult, 'exposure_restored_symbols', 'count'),
+    exposureRestoredSymbols: readMetricStatistic(testResult, 'exposure_restored_symbols', 'count'),
   };
 
   const latencyPercentiles = loadSummary.orderLatencyMs;
