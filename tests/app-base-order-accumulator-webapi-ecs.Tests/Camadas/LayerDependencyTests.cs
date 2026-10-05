@@ -8,14 +8,11 @@ namespace Base.OrderAccumulator.Tests;
 
 // Each layer is a folder and a namespace inside one .csproj, so the compiler does not stop a wrong
 // dependency: this test does, written as the list of what MAY come in (dotnet-clean-architecture.md).
-// Flowa.Shared is allowed in Domain and Application until F2 deletes that project and moves the
-// field rule into this Domain (spec base-inv-estrutura, ASSUMI-01).
 public sealed class LayerDependencyTests
 {
     private const string RootNamespace = "Base.OrderAccumulator";
     private const string ProjectFolderName = "app-base-order-accumulator-webapi-ecs";
     private const string BaseClassLibraryNamespace = "System";
-    private const string SharedOrderRulesNamespace = "Flowa.Shared";
 
     private static readonly Assembly OrderAccumulatorAssembly = typeof(Order).Assembly;
     private static readonly string[] LayerNames = ["Entrypoint", "Application", "Domain", "Infrastructure", "Commons"];
@@ -23,7 +20,7 @@ public sealed class LayerDependencyTests
     [Fact]
     public void Domain_depends_only_on_the_base_class_library_and_itself()
     {
-        AssertLayerOnlyDependsOn("Domain", BaseClassLibraryNamespace, LayerNamespace("Domain"), SharedOrderRulesNamespace);
+        AssertLayerOnlyDependsOn("Domain", BaseClassLibraryNamespace, LayerNamespace("Domain"));
     }
 
     [Fact]
@@ -36,8 +33,7 @@ public sealed class LayerDependencyTests
     public void Application_depends_only_on_the_base_class_library_domain_commons_and_itself()
     {
         AssertLayerOnlyDependsOn(
-            "Application", BaseClassLibraryNamespace, LayerNamespace("Domain"), LayerNamespace("Commons"), LayerNamespace("Application"),
-            SharedOrderRulesNamespace);
+            "Application", BaseClassLibraryNamespace, LayerNamespace("Domain"), LayerNamespace("Commons"), LayerNamespace("Application"));
     }
 
     [Fact]
@@ -108,7 +104,7 @@ public sealed class LayerDependencyTests
     public void Domain_allow_list_rejects_the_infrastructure_that_uses_an_external_library()
     {
         var infrastructureCheckedAgainstTheDomainList = TypesOfLayer("Infrastructure").Should()
-            .OnlyHaveDependenciesOn(BaseClassLibraryNamespace, LayerNamespace("Domain"), SharedOrderRulesNamespace).GetResult();
+            .OnlyHaveDependenciesOn(BaseClassLibraryNamespace, LayerNamespace("Domain")).GetResult();
 
         Assert.False(infrastructureCheckedAgainstTheDomainList.IsSuccessful);
         Assert.Contains("Base.OrderAccumulator.Infrastructure.Persistence.OrderRepository", infrastructureCheckedAgainstTheDomainList.FailingTypeNames ?? []);

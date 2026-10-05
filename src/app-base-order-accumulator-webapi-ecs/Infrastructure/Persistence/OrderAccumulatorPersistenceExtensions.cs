@@ -4,7 +4,6 @@ using Base.OrderAccumulator.Commons;
 using Base.OrderAccumulator.Domain.Exposures;
 using Base.OrderAccumulator.Domain.Orders;
 using Dapper;
-using Flowa.Shared;
 using Npgsql;
 
 namespace Base.OrderAccumulator.Infrastructure.Persistence;
@@ -43,7 +42,7 @@ public static class OrderAccumulatorPersistenceExtensions
         await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(LockSchemaSql, transaction: orderDatabaseTransaction, cancellationToken: cancellationToken));
         await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(ReadOrderAccumulatorSchema(), transaction: orderDatabaseTransaction, cancellationToken: cancellationToken));
         await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
-            SeedExposuresSql, new { Symbols = OrderRules.AllowedOrderSymbols.ToArray() }, orderDatabaseTransaction, cancellationToken: cancellationToken));
+            SeedExposuresSql, new { Symbols = OrderFieldRule.AllowedOrderSymbols.ToArray() }, orderDatabaseTransaction, cancellationToken: cancellationToken));
         await orderDatabaseTransaction.CommitAsync(cancellationToken);
     }
 

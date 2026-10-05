@@ -2,8 +2,7 @@ using System.Collections.Concurrent;
 using Base.OrderGenerator.Application.Orders.SendOrder;
 using Base.OrderGenerator.Commons;
 using Base.OrderGenerator.Domain.Orders;
-using Flowa.Shared;
-using Flowa.Shared.Fix;
+using Base.OrderGenerator.Infrastructure.Fix;
 using QuickFix;
 using QuickFix.Fields;
 using QuickFix.Logger;
@@ -31,7 +30,7 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
 
     internal int OrdersAwaitingExecutionReportCount => _ordersAwaitingExecutionReport.Count;
 
-    public async Task<SentOrderResult> SendOrderAsync(ValidOrder order)
+    public async Task<SentOrderResult> SendOrderAsync(OrderToSend orderToSend)
     {
         var clOrdId = Guid.NewGuid().ToString("N");
         using var orderSending = FixOrderTraceProvider.StartOrderSending();
@@ -47,7 +46,7 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
         _ordersAwaitingExecutionReport[clOrdId] = executionReportWaiter;
         try
         {
-            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order, FixOrderTraceProvider.GetTraceParentOfOrderSending(orderSending)), initiatorSessionId))
+            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, orderToSend, FixOrderTraceProvider.GetTraceParentOfOrderSending(orderSending)), initiatorSessionId))
                 return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
             return ToSentOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
@@ -82,16 +81,16 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
         return initiatorSettings;
     }
 
-    private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, ValidOrder order, string? orderSendingTraceParent)
+    private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, OrderToSend orderToSend, string? orderSendingTraceParent)
     {
         var newOrderSingle = new QuickFix.FIX44.NewOrderSingle(
             new ClOrdID(clOrdId),
-            new Symbol(order.OrderSymbol),
-            new FixSide(order.OrderSide.ToFixOrderSide()),
+            new Symbol(orderToSend.Symbol),
+            new FixSide(orderToSend.Side == OrderSide.Buy ? FixSide.BUY : FixSide.SELL),
             new TransactTime(DateTime.UtcNow),
             new OrdType(OrdType.LIMIT));
-        newOrderSingle.Set(new OrderQty(order.OrderQuantity));
-        newOrderSingle.Set(new Price(order.OrderPrice));
+        newOrderSingle.Set(new OrderQty(orderToSend.Quantity));
+        newOrderSingle.Set(new Price(orderToSend.Price));
         if (orderSendingTraceParent is not null)
             newOrderSingle.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, orderSendingTraceParent));
         return newOrderSingle;

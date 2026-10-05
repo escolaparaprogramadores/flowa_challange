@@ -7,7 +7,6 @@ using Base.OrderAccumulator.Domain.Exposures;
 using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
-using Flowa.Shared;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Base.OrderAccumulator.Tests;
@@ -62,7 +61,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var repeatedOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(invalidOrder);
 
         Assert.False(firstOrderDecision.Accepted);
-        Assert.Equal($"{OrderMessages.OrderSymbolInvalidMessage} {OrderMessages.OrderQuantityNotIntegerMessage}", firstOrderDecision.RejectReason);
+        Assert.Equal($"{OrderFieldMessages.OrderSymbolInvalidMessage} {OrderFieldMessages.OrderQuantityNotIntegerMessage}", firstOrderDecision.RejectReason);
         Assert.Equal(firstOrderDecision with { IsRepeat = true }, repeatedOrderDecision);
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync(invalidOrder.ClOrdId));
         Assert.Equal(
@@ -90,7 +89,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
                 new StoredOrderInDatabase(acceptedOrderDecision.ClOrdId, acceptedOrderDecision.OrderId, acceptedOrderDecision.ExecId,
                     "VIIA4", "1", 100m, 2.50m, true, null),
                 new StoredOrderInDatabase(rejectedOrderDecision.ClOrdId, rejectedOrderDecision.OrderId, rejectedOrderDecision.ExecId,
-                    "VIIA4", "2", 1m, 1_000.00m, false, OrderMessages.OrderPriceTooLargeMessage)
+                    "VIIA4", "2", 1m, 1_000.00m, false, OrderFieldMessages.OrderPriceTooLargeMessage)
             ],
             storedOrders);
     }

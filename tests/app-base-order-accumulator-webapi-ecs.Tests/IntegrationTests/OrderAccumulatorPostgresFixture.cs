@@ -4,7 +4,6 @@ using Base.OrderAccumulator.Domain.Exposures;
 using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
-using Flowa.Shared;
 using Npgsql;
 using Testcontainers.PostgreSql;
 

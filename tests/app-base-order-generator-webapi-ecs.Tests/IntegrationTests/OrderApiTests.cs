@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Flowa.Shared;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using QuickFix.Fields;
@@ -45,48 +44,85 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         _loggedOnOrderGenerator.FixAcceptor.ResetToAcceptEveryOrder();
     }
 
-    public static TheoryData<string, string, string> InvalidOrders => new()
+    // Decision 24: what a NewOrderSingle cannot carry stops at the door with a 400.
+    public static TheoryData<string, string, string> OrdersThatDoNotFitFix => new()
     {
-        // CA-1
-        { """{"symbol":"XPTO3","side":"buy","quantity":100,"price":10.50}""", OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolInvalidMessage },
-        { """{"symbol":"petr4","side":"buy","quantity":100,"price":10.50}""", OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolInvalidMessage },
-        { """{"side":"buy","quantity":100,"price":10.50}""", OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolRequiredMessage },
-        // CA-2
-        { """{"symbol":"PETR4","side":"compra","quantity":100,"price":10.50}""", OrderFields.OrderSideFieldName, OrderMessages.OrderSideInvalidMessage },
-        { """{"symbol":"PETR4","side":"BUY","quantity":100,"price":10.50}""", OrderFields.OrderSideFieldName, OrderMessages.OrderSideInvalidMessage },
-        { """{"symbol":"PETR4","quantity":100,"price":10.50}""", OrderFields.OrderSideFieldName, OrderMessages.OrderSideRequiredMessage },
-        // CA-3
-        { """{"symbol":"PETR4","side":"buy","quantity":0,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotPositiveMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":-1,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotPositiveMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":1.5,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotIntegerMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":"abc","price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityNotIntegerMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":100000,"price":10.50}""", OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityTooLargeMessage },
-        // CA-4
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":0}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotPositiveMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":-1}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotPositiveMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":1000}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceTooLargeMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.005}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceOffTickMessage },
-        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":"abc"}""", OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceNotNumberMessage },
+        { """{"side":"buy","quantity":100,"price":10.50}""", "symbol", "Informe o símbolo." },
+        { """{"symbol":"PE\u0001TR4","side":"buy","quantity":100,"price":10.50}""", "symbol", "O símbolo não pode ter caractere de controle." },
+        { """{"symbol":"PETR4","side":"compra","quantity":100,"price":10.50}""", "side", "Lado inválido. Use compra ou venda." },
+        { """{"symbol":"PETR4","side":"BUY","quantity":100,"price":10.50}""", "side", "Lado inválido. Use compra ou venda." },
+        { """{"symbol":"PETR4","quantity":100,"price":10.50}""", "side", "Informe o lado da ordem." },
+        { """{"symbol":"PETR4","side":"buy","quantity":"abc","price":10.50}""", "quantity", "A quantidade deve ser um número inteiro." },
+        { """{"symbol":"PETR4","side":"buy","quantity":1e3,"price":10.50}""", "quantity", "A quantidade deve ser um número inteiro." },
+        { """{"symbol":"PETR4","side":"buy","price":10.50}""", "quantity", "Informe a quantidade." },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":"abc"}""", "price", "O preço deve ser um número." },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.0000000000000000000000000001}""", "price", "O preço deve ser um número." },
+        { """{"symbol":"PETR4","side":"buy","quantity":100}""", "price", "Informe o preço." },
     };
 
     [Theory]
-    [MemberData(nameof(InvalidOrders))]
-    public async Task Campo_invalido_responde_400_em_portugues_e_nao_envia_FIX(string invalidOrderJson, string expectedOrderFieldName, string expectedOrderFieldErrorMessage)
+    [MemberData(nameof(OrdersThatDoNotFitFix))]
+    public async Task Order_that_does_not_fit_fix_gets_400_in_portuguese_and_sends_nothing(
+        string orderJson, string expectedOrderFieldName, string expectedOrderFieldFormatMessage)
     {
-        var invalidOrderHttpResponse = await PostOrderJson(invalidOrderJson);
+        var badFormatHttpResponse = await PostOrderJson(orderJson);
 
-        Assert.Equal(HttpStatusCode.BadRequest, invalidOrderHttpResponse.StatusCode);
-        var validationErrorResponse = await ReadOrderGeneratorResponseJson(invalidOrderHttpResponse);
+        Assert.Equal(HttpStatusCode.BadRequest, badFormatHttpResponse.StatusCode);
+        var validationErrorResponse = await ReadOrderGeneratorResponseJson(badFormatHttpResponse);
         Assert.Equal("validation_error", validationErrorResponse.GetProperty("status").GetString());
         Assert.Equal("A ordem tem campos inválidos.", validationErrorResponse.GetProperty("message").GetString());
         var orderFieldError = Assert.Single(validationErrorResponse.GetProperty("errors").EnumerateArray());
         Assert.Equal(expectedOrderFieldName, orderFieldError.GetProperty("field").GetString());
-        Assert.Equal(expectedOrderFieldErrorMessage, orderFieldError.GetProperty("message").GetString());
+        Assert.Equal(expectedOrderFieldFormatMessage, orderFieldError.GetProperty("message").GetString());
         await AssertOnlySentinelReachedAcceptor();
     }
 
+    // Decisions 12 and 13: the field rule belongs to the OrderAccumulator, so these orders go out by FIX
+    // exactly as typed and the answer is whatever came back in the ExecutionReport.
+    public static TheoryData<string, string, char, decimal, decimal> OrdersWithFieldsOnlyTheAccumulatorJudges => new()
+    {
+        { """{"symbol":"XPTO3","side":"buy","quantity":100,"price":10.50}""", "XPTO3", '1', 100m, 10.50m },
+        { """{"symbol":"petr4","side":"buy","quantity":100,"price":10.50}""", "petr4", '1', 100m, 10.50m },
+        { """{"symbol":"PETR4","side":"buy","quantity":0,"price":10.50}""", "PETR4", '1', 0m, 10.50m },
+        { """{"symbol":"PETR4","side":"buy","quantity":-1,"price":10.50}""", "PETR4", '1', -1m, 10.50m },
+        { """{"symbol":"PETR4","side":"buy","quantity":1.5,"price":10.50}""", "PETR4", '1', 1.5m, 10.50m },
+        { """{"symbol":"PETR4","side":"sell","quantity":100000,"price":10.50}""", "PETR4", '2', 100000m, 10.50m },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":0}""", "PETR4", '1', 100m, 0m },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":-1}""", "PETR4", '1', 100m, -1m },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":1000}""", "PETR4", '1', 100m, 1000m },
+        { """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.005}""", "PETR4", '1', 100m, 10.005m },
+        { """{"symbol":"ITUB4","side":"buy","quantity":100000,"price":1000}""", "ITUB4", '1', 100000m, 1000m },
+    };
+
+    [Theory]
+    [MemberData(nameof(OrdersWithFieldsOnlyTheAccumulatorJudges))]
+    public async Task Order_with_invalid_field_goes_by_fix_and_returns_the_accumulator_rejection(
+        string orderJson, string expectedSymbol, char expectedSideFixCode, decimal expectedQuantity, decimal expectedPrice)
+    {
+        const string accumulatorRejectionText = "Texto da tag 58 vindo do OrderAccumulator.";
+        _loggedOnOrderGenerator.FixAcceptor.ExecutionReportResponder = receivedOrder =>
+            _loggedOnOrderGenerator.FixAcceptor.BuildRejectedExecutionReport(receivedOrder, accumulatorRejectionText);
+
+        var orderHttpResponse = await PostOrderJson(orderJson);
+
+        var sentNewOrderSingle = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
+        Assert.Equal(expectedSymbol, sentNewOrderSingle.GetString(Tags.Symbol));
+        Assert.Equal(expectedSideFixCode, sentNewOrderSingle.GetChar(Tags.Side));
+        Assert.Equal(expectedQuantity, sentNewOrderSingle.GetDecimal(Tags.OrderQty));
+        Assert.Equal(expectedPrice, sentNewOrderSingle.GetDecimal(Tags.Price));
+        Assert.Equal(HttpStatusCode.OK, orderHttpResponse.StatusCode);
+        var rejectedResponse = await ReadOrderGeneratorResponseJson(orderHttpResponse);
+        Assert.Equal("rejected", rejectedResponse.GetProperty("status").GetString());
+        Assert.Equal(accumulatorRejectionText, rejectedResponse.GetProperty("message").GetString());
+        Assert.Equal(sentNewOrderSingle.GetString(Tags.ClOrdID), rejectedResponse.GetProperty("clOrdId").GetString());
+        Assert.Equal(expectedSymbol, rejectedResponse.GetProperty("symbol").GetString());
+        Assert.Equal(expectedQuantity, rejectedResponse.GetProperty("quantity").GetDecimal());
+        Assert.Equal(expectedPrice, rejectedResponse.GetProperty("price").GetDecimal());
+        AssertAnswersItsOwnExecutionReport(rejectedResponse);
+    }
+
     [Fact]
-    public async Task Corpo_que_nao_e_JSON_responde_400_com_os_quatro_campos_obrigatorios()
+    public async Task Body_that_is_not_json_gets_400_with_the_four_required_fields()
     {
         var notJsonHttpResponse = await PostOrderJson("isto não é json");
 
@@ -96,10 +132,10 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
             .ToList();
         Assert.Equal(
             [
-                (OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolRequiredMessage),
-                (OrderFields.OrderSideFieldName, OrderMessages.OrderSideRequiredMessage),
-                (OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityRequiredMessage),
-                (OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceRequiredMessage)
+                ("symbol", "Informe o símbolo."),
+                ("side", "Informe o lado da ordem."),
+                ("quantity", "Informe a quantidade."),
+                ("price", "Informe o preço.")
             ],
             orderFieldErrors);
         await AssertOnlySentinelReachedAcceptor();
@@ -110,7 +146,7 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     [InlineData("42")]
     [InlineData("null")]
     [InlineData("""{"symbol":null,"side":null,"quantity":null,"price":null}""")]
-    public async Task JSON_sem_os_campos_da_ordem_responde_400_com_os_quatro_campos_obrigatorios(string orderJsonWithoutFields)
+    public async Task Json_without_the_order_fields_gets_400_with_the_four_required_fields(string orderJsonWithoutFields)
     {
         var emptyOrderHttpResponse = await PostOrderJson(orderJsonWithoutFields);
 
@@ -120,10 +156,10 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
             .ToList();
         Assert.Equal(
             [
-                (OrderFields.OrderSymbolFieldName, OrderMessages.OrderSymbolRequiredMessage),
-                (OrderFields.OrderSideFieldName, OrderMessages.OrderSideRequiredMessage),
-                (OrderFields.OrderQuantityFieldName, OrderMessages.OrderQuantityRequiredMessage),
-                (OrderFields.OrderPriceFieldName, OrderMessages.OrderPriceRequiredMessage)
+                ("symbol", "Informe o símbolo."),
+                ("side", "Informe o lado da ordem."),
+                ("quantity", "Informe a quantidade."),
+                ("price", "Informe o preço.")
             ],
             orderFieldErrors);
         await AssertOnlySentinelReachedAcceptor();

@@ -10,7 +10,6 @@ using Base.OrderAccumulator.Entrypoint.Workers;
 using Base.OrderAccumulator.Infrastructure.Metrics;
 using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
-using Flowa.Shared;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;

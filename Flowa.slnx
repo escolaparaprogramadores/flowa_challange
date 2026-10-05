@@ -1,12 +1,10 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/Flowa.Shared/Flowa.Shared.csproj" />
     <Project Path="src/app-base-order-accumulator-webapi-ecs/OrderAccumulator.csproj" />
     <Project Path="src/app-base-order-generator-webapi-ecs/OrderGenerator.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Base.IntegrationTests/Base.IntegrationTests.csproj" />
-    <Project Path="tests/Flowa.Shared.Tests/Flowa.Shared.Tests.csproj" />
     <Project Path="tests/app-base-order-accumulator-webapi-ecs.Tests/OrderAccumulator.Tests.csproj" />
     <Project Path="tests/app-base-order-generator-webapi-ecs.Tests/OrderGenerator.Tests.csproj" />
   </Folder>

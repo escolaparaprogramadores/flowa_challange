@@ -4,7 +4,6 @@ using Base.OrderAccumulator.Commons;
 using Base.OrderAccumulator.Domain.Exposures;
 using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Infrastructure.Metrics;
-using Flowa.Shared;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit.Abstractions;
@@ -233,7 +232,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     private static List<IncomingOrder> NewOrdersMixingSymbolsAndSides(int orderCount, Random orderQuantityGenerator) =>
         Enumerable.Range(0, orderCount)
             .Select(orderNumber => TestOrders.NewIncomingOrder(
-                OrderRules.AllowedOrderSymbols[orderNumber % 3],
+                OrderFieldRule.AllowedOrderSymbols[orderNumber % 3],
                 orderNumber % 2 == 0 ? OrderSideCodes.BuyOrderSideFixCode : OrderSideCodes.SellOrderSideFixCode,
                 orderQuantityGenerator.Next(1, 1_000), 10.00m))
             .ToList();

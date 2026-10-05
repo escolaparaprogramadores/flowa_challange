@@ -1,5 +1,5 @@
 using Base.OrderAccumulator.Domain.Exposures;
-using Flowa.Shared;
+using Base.OrderAccumulator.Domain.Orders;
 
 namespace Base.OrderAccumulator.Tests;
 

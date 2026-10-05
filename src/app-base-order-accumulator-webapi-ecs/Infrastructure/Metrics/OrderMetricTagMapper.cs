@@ -1,4 +1,4 @@
-using Flowa.Shared;
+using Base.OrderAccumulator.Domain.Orders;
 
 namespace Base.OrderAccumulator.Infrastructure.Metrics;
 
@@ -7,10 +7,12 @@ namespace Base.OrderAccumulator.Infrastructure.Metrics;
 public static class OrderMetricTagMapper
 {
     public const string InvalidTagValue = "invalido";
+    public const string BuyOrderSideTagValue = "buy";
+    public const string SellOrderSideTagValue = "sell";
 
     public static string[] BuildOrderDecisionTags(string? orderSymbol, char orderSide)
     {
-        if (orderSymbol is null || !OrderRules.AllowedOrderSymbols.Contains(orderSymbol))
+        if (orderSymbol is null || !OrderFieldRule.AllowedOrderSymbols.Contains(orderSymbol))
             return [$"symbol:{InvalidTagValue}", $"side:{InvalidTagValue}"];
 
         return [$"symbol:{orderSymbol}", $"side:{ToOrderSideTagValue(orderSide)}"];
@@ -20,8 +22,8 @@ public static class OrderMetricTagMapper
 
     private static string ToOrderSideTagValue(char orderSide) => orderSide switch
     {
-        OrderSideCodes.BuyOrderSideFixCode => OrderSideCodes.BuyOrderSideJsonCode,
-        OrderSideCodes.SellOrderSideFixCode => OrderSideCodes.SellOrderSideJsonCode,
+        OrderSideCodes.BuyOrderSideFixCode => BuyOrderSideTagValue,
+        OrderSideCodes.SellOrderSideFixCode => SellOrderSideTagValue,
         _ => InvalidTagValue
     };
 }

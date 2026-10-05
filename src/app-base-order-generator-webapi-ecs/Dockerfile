@@ -28,10 +28,8 @@ RUN case "$TARGETARCH" in \
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY Directory.Build.props ./
-COPY src/Flowa.Shared/Flowa.Shared.csproj src/Flowa.Shared/
 COPY src/app-base-order-generator-webapi-ecs/OrderGenerator.csproj src/app-base-order-generator-webapi-ecs/
 RUN dotnet restore src/app-base-order-generator-webapi-ecs/OrderGenerator.csproj
-COPY src/Flowa.Shared/ src/Flowa.Shared/
 COPY src/app-base-order-generator-webapi-ecs/ src/app-base-order-generator-webapi-ecs/
 COPY --from=front /repo/src/app-base-order-generator-webapi-ecs/wwwroot/ src/app-base-order-generator-webapi-ecs/wwwroot/
 # Os apps só sobem com o commit gravado no build (rota /version). O build precisa do .git no contexto:
