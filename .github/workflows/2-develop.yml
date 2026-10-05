@@ -281,26 +281,26 @@ jobs:
           # them); only they and the log collector's task roles may be created, and those roles may only be
           # removed when Datadog is switched off. Anything else stops the run here, before apply. The plan JSON
           # stays on the runner. New resources in infra/ must be added to these lists.
-          terraform show -json tfplan > "$RUNNER_TEMP/plano-do-deploy.json"
+          terraform show -json tfplan > "$RUNNER_TEMP/deploy-plan.json"
           jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
-            | "plano: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/plano-do-deploy.json"
-          task_definitions_que_podem_ser_trocadas='["aws_ecs_task_definition.tarefa_do_order_generator",
+            | "plan: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/deploy-plan.json"
+          replaceable_task_definitions='["aws_ecs_task_definition.tarefa_do_order_generator",
             "aws_ecs_task_definition.tarefa_do_order_accumulator"]'
-          roles_do_coletor_de_logs='["aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"generator\"]",
+          log_collector_roles='["aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"generator\"]",
             "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"accumulator\"]",
             "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"generator\"]",
             "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"accumulator\"]"]'
-          mudancas_fora_do_permitido=$(jq -r --arg datadog_ligado "$AGENTE_DATADOG_LIGADO" \
-            --argjson trocaveis "$task_definitions_que_podem_ser_trocadas" --argjson do_coletor "$roles_do_coletor_de_logs" \
-            '($trocaveis + (if $datadog_ligado == "true" then [] else $do_coletor end)) as $apagaveis
-            | ($trocaveis + $do_coletor) as $criaveis
+          disallowed_plan_changes=$(jq -r --arg datadog_enabled "$AGENTE_DATADOG_LIGADO" \
+            --argjson replaceable "$replaceable_task_definitions" --argjson collector_roles "$log_collector_roles" \
+            '($replaceable + (if $datadog_enabled == "true" then [] else $collector_roles end)) as $deletable
+            | ($replaceable + $collector_roles) as $creatable
             | .resource_changes[]
-            | select(((.change.actions | index("delete")) and (.address | IN($apagaveis[]) | not))
-              or ((.change.actions | index("create")) and (.address | IN($criaveis[]) | not)))
-            | "\(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/plano-do-deploy.json")
-          if [ -n "$mudancas_fora_do_permitido" ]; then
-            echo "o plan destrói, troca ou cria recurso fora do permitido; o apply não roda:" >&2
-            echo "$mudancas_fora_do_permitido" >&2
+            | select(((.change.actions | index("delete")) and (.address | IN($deletable[]) | not))
+              or ((.change.actions | index("create")) and (.address | IN($creatable[]) | not)))
+            | "\(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/deploy-plan.json")
+          if [ -n "$disallowed_plan_changes" ]; then
+            echo "the plan destroys, replaces or creates a resource outside the allowed list; apply will not run:" >&2
+            echo "$disallowed_plan_changes" >&2
             exit 1
           fi
 
