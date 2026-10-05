@@ -13,6 +13,11 @@ type OrdemDoTeste = { simbolo: string; lado: 'Compra' | 'Venda'; quantidade: str
 
 type OrdemCriadaNoServidor = { status: string; message: string; clOrdId: string };
 
+// The answer of POST /api/orders is a DataMessage: the order is its "data" and the text of the screen is its "message".
+function readCreatedOrderFromDataMessage(orderDataMessage: { message: string; data: { status: string; clOrdId: string } }): OrdemCriadaNoServidor {
+  return { ...orderDataMessage.data, message: orderDataMessage.message };
+}
+
 // Devolve o corpo do POST e só termina depois que a lista foi lida de novo, já com a ordem enviada.
 async function enviarOrdemPelaBoleta(paginaDaBoleta: Page, ordemDoTeste: OrdemDoTeste): Promise<OrdemCriadaNoServidor> {
   await paginaDaBoleta.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: ordemDoTeste.simbolo, exact: true }).click();
@@ -22,7 +27,7 @@ async function enviarOrdemPelaBoleta(paginaDaBoleta: Page, ordemDoTeste: OrdemDo
   const respostaDaCriacaoDaOrdem = paginaDaBoleta.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
   const releituraDaLista = paginaDaBoleta.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'GET' && new URL(respostaHttp.url()).pathname === ROTA_DAS_ORDENS);
   await paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ }).click();
-  const ordemCriada = (await (await respostaDaCriacaoDaOrdem).json()) as OrdemCriadaNoServidor;
+  const ordemCriada = readCreatedOrderFromDataMessage(await (await respostaDaCriacaoDaOrdem).json());
   await releituraDaLista;
   await expect(paginaDaBoleta.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
   return ordemCriada;
@@ -33,7 +38,7 @@ type ExposicaoNoServidor = { symbol: string; exposure: number; remaining: number
 async function lerExposicaoNoServidor(paginaDaBoleta: Page, simboloDaExposicao: string): Promise<ExposicaoNoServidor> {
   const respostaDasExposicoes = await paginaDaBoleta.request.get(ROTA_DAS_EXPOSICOES);
   expect(respostaDasExposicoes.status()).toBe(200);
-  const corpoDasExposicoes = (await respostaDasExposicoes.json()) as { exposures: ExposicaoNoServidor[] };
+  const corpoDasExposicoes = ((await respostaDasExposicoes.json()) as { data: { exposures: ExposicaoNoServidor[] } }).data;
   const exposicaoDoSimbolo = corpoDasExposicoes.exposures.find((exposicaoDoSimbolo) => exposicaoDoSimbolo.symbol === simboloDaExposicao);
   if (!exposicaoDoSimbolo) throw new Error('Símbolo ' + simboloDaExposicao + ' ausente em /api/exposures');
   return exposicaoDoSimbolo;
@@ -141,7 +146,7 @@ test('RF-24: enquanto a ordem viaja, o envio fica desabilitado e mostra "Enviand
   await page.getByRole('button', { name: 'Enviar ordem de compra' }).click();
   const botaoDuranteOEnvio = page.getByRole('button', { name: 'Enviando…' });
   await expect(botaoDuranteOEnvio).toBeDisabled();
-  const ordemCriada = (await (await respostaDaCriacaoDaOrdem).json()) as OrdemCriadaNoServidor;
+  const ordemCriada = readCreatedOrderFromDataMessage(await (await respostaDaCriacaoDaOrdem).json());
   await expect(celulaDaOrdemNoTopo(page, 'identificador-do-envio')).toHaveText(ordemCriada.clOrdId);
   await expect(seloDaOrdemNoTopo(page)).toHaveText('Aceita');
   await expect(page.getByRole('button', { name: 'Enviar ordem de compra' })).toBeEnabled();
@@ -214,12 +219,8 @@ test('RF-25 e CA-15: o 400 de validação do servidor aparece na faixa de Compra
   await page.route('**' + ROTA_DE_CRIACAO_DE_ORDEM, (criacaoDaOrdem) =>
     criacaoDaOrdem.fulfill({
       status: 400,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        status: 'validation_error',
-        message: 'A ordem tem campos inválidos.',
-        errors: [{ field: 'price', message: 'O preço deve ser múltiplo de 0,01.' }],
-      }),
+      contentType: 'application/problem+json',
+      body: JSON.stringify({ type: 'urn:base-investimentos:problem:invalid-order', title: 'Dados inválidos', status: 400, detail: 'A ordem tem campos inválidos.', success: false, statusResultado: 'InvalidInput', errors: ['O preço deve ser múltiplo de 0,01.'] }),
     }),
   );
   await page.getByLabel(/^Quantidade de/).fill('10');

@@ -14,6 +14,21 @@ function simularServidorRespondendoComJson(statusHttpDaResposta: number, corpoDa
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(corpoDaResposta), { status: statusHttpDaResposta })));
 }
 
+// docs/contracts/contracts.md: success is a DataMessage, every error is a problem+json.
+function buildSuccessDataMessage(responseData: unknown, successMessage: string) {
+  return { success: true, status: 'Ok', message: successMessage, data: responseData, errors: [], errorCode: null };
+}
+
+function simulateServerAnsweringWithProblem(problemHttpStatus: number, problemDetail: string, problemErrors: string[] = []) {
+  const apiProblem = {
+    type: 'urn:base-investimentos:problem:test', title: 'Título do problema', status: problemHttpStatus, detail: problemDetail,
+    instance: '/api/orders', traceId: '0af7651916cd43dd8448eb211c80319c', success: false, statusResultado: 'InvalidInput', errors: problemErrors,
+  };
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(apiProblem), {
+    status: problemHttpStatus, headers: { 'Content-Type': 'application/problem+json' },
+  })));
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -30,12 +45,28 @@ describe('enviarOrdem', () => {
     expect(JSON.parse(String(opcoesDaChamada.body))).toEqual({ symbol: 'PETR4', side: 'sell', quantity: 100, price: 10.5 });
   });
 
-  it('RF-25: traduz o 400 de validação do servidor nas mensagens de cada campo', async () => {
-    simularServidorRespondendoComJson(400, {
-      status: 'validation_error',
-      message: 'A ordem tem campos inválidos.',
-      errors: [{ field: 'price', message: 'O preço deve ser múltiplo de 0,01.' }],
+  it('CA-4: converte o DataMessage da ordem aceita para a tela, com a mensagem do servidor', async () => {
+    simularServidorRespondendoComJson(200, buildSuccessDataMessage(
+      { status: 'accepted', clOrdId: 'envio-1', orderId: 'ordem-1', execId: 'exec-1', symbol: 'PETR4', side: 'sell', quantity: 100, price: 10.5 },
+      'Ordem aceita.'));
+    expect(await enviarOrdem(ordemDeCompra)).toEqual({
+      situacao: 'aceita', mensagemDoServidor: 'Ordem aceita.', clOrdId: 'envio-1', orderId: 'ordem-1',
+      simbolo: 'PETR4', lado: 'Venda', quantidade: 100, precoEmReais: 10.5,
     });
+  });
+
+  it('CA-4: ordem rejeitada é sucesso do DataMessage e traz o texto da tag 58', async () => {
+    simularServidorRespondendoComJson(200, buildSuccessDataMessage(
+      { status: 'rejected', clOrdId: 'envio-2', orderId: 'ordem-2', execId: 'exec-2', symbol: 'VIIA4', side: 'buy', quantity: 99_999, price: 999.99 },
+      'Ordem rejeitada: a exposição de VIIA4 passaria do limite de 100.000.000,00.'));
+    expect(await enviarOrdem(ordemDeCompra)).toEqual({
+      situacao: 'rejeitada', mensagemDoServidor: 'Ordem rejeitada: a exposição de VIIA4 passaria do limite de 100.000.000,00.',
+      clOrdId: 'envio-2', orderId: 'ordem-2', simbolo: 'VIIA4', lado: 'Compra', quantidade: 99_999, precoEmReais: 999.99,
+    });
+  });
+
+  it('RF-25 e CA-5: traduz o 400 problem+json do servidor nas mensagens de cada campo', async () => {
+    simulateServerAnsweringWithProblem(400, 'A ordem tem campos inválidos.', ['O preço deve ser múltiplo de 0,01.']);
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'invalida',
       mensagemDoServidor: 'A ordem tem campos inválidos.',
@@ -44,7 +75,7 @@ describe('enviarOrdem', () => {
   });
 
   it('RF-23: 503 do servidor vira "ordem não confirmada", sem o nome do serviço interno', async () => {
-    simularServidorRespondendoComJson(503, { status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.' });
+    simulateServerAnsweringWithProblem(503, 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.');
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
@@ -68,7 +99,7 @@ describe('enviarOrdem', () => {
   });
 
   it('RF-23: 500 do contrato vira "erro inesperado", porque o servidor respondeu', async () => {
-    simularServidorRespondendoComJson(500, { status: 'error', message: 'Erro inesperado ao processar a ordem.' });
+    simulateServerAnsweringWithProblem(500, 'Aconteceu um erro inesperado. Informe o traceId ao suporte.');
     expect(await enviarOrdem(ordemDeCompra)).toEqual({
       situacao: 'falha-de-comunicacao',
       mensagemDoServidor: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
@@ -116,12 +147,13 @@ describe('enviarOrdem', () => {
 
 describe('lerExposicoes', () => {
   it('converte o corpo do contrato para a tela, na ordem recebida', async () => {
-    simularServidorRespondendoComJson(200, { limit: 100_000_000, exposures: [{ symbol: 'PETR4', exposure: -500, remaining: 99_999_500 }] });
+    simularServidorRespondendoComJson(200, buildSuccessDataMessage(
+      { limit: 100_000_000, exposures: [{ symbol: 'PETR4', exposure: -500, remaining: 99_999_500 }] }, 'Exposição dos símbolos lida.'));
     expect(await lerExposicoes()).toEqual([{ simbolo: 'PETR4', exposicao: -500, restanteAteOLimite: 99_999_500 }]);
   });
 
   it('RF-32: 503 do servidor vira erro claro, sem o nome do serviço interno', async () => {
-    simularServidorRespondendoComJson(503, { status: 'communication_error', message: 'Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.' });
+    simulateServerAnsweringWithProblem(503, 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.');
     await expect(lerExposicoes()).rejects.toThrow('Não foi possível ler a exposição agora. Tente de novo em instantes.');
   });
 });
@@ -138,7 +170,8 @@ describe('listarOrdens', () => {
   };
 
   it('CA-41: lê só a página pedida, com uma chamada GET em /api/orders?page=<n>', async () => {
-    const servidorSimuladoDaLista = vi.fn(async () => new Response(JSON.stringify(paginaDoContrato), { status: 200 }));
+    const servidorSimuladoDaLista = vi.fn(async () =>
+      new Response(JSON.stringify(buildSuccessDataMessage(paginaDoContrato, 'Página de ordens lida.')), { status: 200 }));
     vi.stubGlobal('fetch', servidorSimuladoDaLista);
     await listarOrdens(1);
     expect(servidorSimuladoDaLista).toHaveBeenCalledTimes(1);
@@ -148,7 +181,7 @@ describe('listarOrdens', () => {
   });
 
   it('CA-11: converte o corpo do contrato para a tela, na ordem recebida, com lado e símbolo nulos como null', async () => {
-    simularServidorRespondendoComJson(200, paginaDoContrato);
+    simularServidorRespondendoComJson(200, buildSuccessDataMessage(paginaDoContrato, 'Página de ordens lida.'));
     expect(await listarOrdens(1)).toEqual({
       pagina: 1,
       totalDeOrdens: 2,
@@ -160,23 +193,27 @@ describe('listarOrdens', () => {
   });
 
   it('CA-11: "sell" vira Venda', async () => {
-    simularServidorRespondendoComJson(200, { ...paginaDoContrato, total: 1, orders: [{ ...paginaDoContrato.orders[0], side: 'sell' }] });
+    simularServidorRespondendoComJson(200, buildSuccessDataMessage(
+      { ...paginaDoContrato, total: 1, orders: [{ ...paginaDoContrato.orders[0], side: 'sell' }] }, 'Página de ordens lida.'));
     expect((await listarOrdens(1)).ordens[0].lado).toBe('Venda');
   });
 
   it('CA-14: banco vazio volta total 0 e nenhuma ordem', async () => {
-    simularServidorRespondendoComJson(200, { page: 1, pageSize: 10, total: 0, orders: [] });
+    simularServidorRespondendoComJson(200, buildSuccessDataMessage({ page: 1, pageSize: 10, total: 0, orders: [] }, 'Página de ordens lida.'));
     expect(await listarOrdens(1)).toEqual({ pagina: 1, totalDeOrdens: 0, ordens: [] });
   });
 
-  it('ASSUMI-01: 400, 503 e corpo fora do contrato viram a mensagem de lista indisponível', async () => {
-    for (const [statusHttp, corpoDaResposta] of [
-      [400, { status: 'validation_error', message: 'Página inválida.', errors: [{ field: 'page', message: 'A página deve ser de 1 a 1000.' }] }],
-      [503, { status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator.' }],
-      [200, { status: 'ok' }],
-    ] as const) {
-      simularServidorRespondendoComJson(statusHttp, corpoDaResposta);
-      await expect(listarOrdens(1), `status ${statusHttp}`).rejects.toThrow('Não foi possível ler as ordens agora. Tente de novo em instantes.');
+  it('ASSUMI-01: 400 e 503 problem+json viram a mensagem de lista indisponível', async () => {
+    for (const [problemHttpStatus, problemDetail] of [[400, 'Página inválida.'], [503, 'Não foi possível falar com o OrderAccumulator.']] as const) {
+      simulateServerAnsweringWithProblem(problemHttpStatus, problemDetail);
+      await expect(listarOrdens(1), `status ${problemHttpStatus}`).rejects.toThrow('Não foi possível ler as ordens agora. Tente de novo em instantes.');
+    }
+  });
+
+  it('ASSUMI-01: 200 com corpo fora do DataMessage vira a mensagem de lista indisponível', async () => {
+    for (const responseBodyOutsideTheContract of [{ status: 'ok' }, paginaDoContrato]) {
+      simularServidorRespondendoComJson(200, responseBodyOutsideTheContract);
+      await expect(listarOrdens(1)).rejects.toThrow('Não foi possível ler as ordens agora. Tente de novo em instantes.');
     }
   });
 
@@ -205,12 +242,12 @@ describe('apagarTodasAsOrdens', () => {
   });
 
   it('400 do servidor também lança o erro de apagamento, sem repassar o corpo cru', async () => {
-    simularServidorRespondendoComJson(400, { status: 'validation_error', message: 'Pedido inválido.', errors: [] });
+    simulateServerAnsweringWithProblem(400, 'Pedido inválido.');
     await expect(apagarTodasAsOrdens()).rejects.toThrow('Não foi possível apagar as ordens agora. Tente de novo em instantes.');
   });
 
   it('503 do servidor lança erro com mensagem clara, sem o nome do serviço interno', async () => {
-    simularServidorRespondendoComJson(503, { status: 'communication_error', message: 'Não foi possível falar com o OrderAccumulator.' });
+    simulateServerAnsweringWithProblem(503, 'Não foi possível falar com o OrderAccumulator.');
     await expect(apagarTodasAsOrdens()).rejects.toThrow('Não foi possível apagar as ordens agora. Tente de novo em instantes.');
   });
 

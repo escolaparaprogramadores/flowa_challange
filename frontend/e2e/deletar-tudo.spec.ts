@@ -30,20 +30,20 @@ async function criarOrdensDeCompraPelaApi(paginaDaBoleta: Page) {
   for (const ordemDeCompra of ORDENS_DE_COMPRA_DO_TESTE) {
     const respostaDaCriacao = await paginaDaBoleta.request.post(ROTA_DE_CRIACAO_DE_ORDEM, { data: ordemDeCompra });
     expect(respostaDaCriacao.status()).toBe(200);
-    expect(((await respostaDaCriacao.json()) as { status: string }).status).toBe('accepted');
+    expect(((await respostaDaCriacao.json()) as { data: { status: string } }).data.status).toBe('accepted');
   }
 }
 
 async function contarOrdensNoServidor(paginaDaBoleta: Page) {
   const respostaDaLista = await paginaDaBoleta.request.get(ROTA_DAS_ORDENS + '?page=1');
   expect(respostaDaLista.status()).toBe(200);
-  return ((await respostaDaLista.json()) as { total: number }).total;
+  return ((await respostaDaLista.json()) as { data: { total: number } }).data.total;
 }
 
 async function lerExposicoesNoServidor(paginaDaBoleta: Page) {
   const respostaDasExposicoes = await paginaDaBoleta.request.get(ROTA_DAS_EXPOSICOES);
   expect(respostaDasExposicoes.status()).toBe(200);
-  return ((await respostaDasExposicoes.json()) as { exposures: ExposicaoNoServidor[] }).exposures;
+  return ((await respostaDasExposicoes.json()) as { data: { exposures: ExposicaoNoServidor[] } }).data.exposures;
 }
 
 // Com a página em 90%, o navegador arredonda a medida calculada (38px vira 37.9861px); a tolerância é de cinco centésimos de pixel.
@@ -262,7 +262,7 @@ test('CA-45: com 503 sem apagar no servidor, a tela relê lista e exposição an
   const exposicoesAntes = await lerExposicoesNaTela(page);
   await page.route((enderecoDaChamada) => enderecoDaChamada.pathname === ROTA_DAS_ORDENS, async (rotaInterceptada) => {
     if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
-    await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
+    await rotaInterceptada.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }) });
   });
   const controleDasReleituras = await segurarReleiturasDepoisDoApagar(page);
 
@@ -286,7 +286,7 @@ test('CA-45: com 503 depois de o servidor apagar (prazo do OrderGenerator), a re
     if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
     const respostaDoServidor = await rotaInterceptada.fetch();
     expect(respostaDoServidor.status()).toBe(204);
-    await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
+    await rotaInterceptada.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }) });
   });
   const controleDasReleituras = await segurarReleiturasDepoisDoApagar(page);
 
@@ -313,7 +313,7 @@ test('ASSUMI-04: com a tela na página 2, o 503 no apagar relê a própria pági
   await expect(localizarLinhasDaListaDeOrdens(page)).toHaveCount(3);
   await page.route((enderecoDaChamada) => enderecoDaChamada.pathname === ROTA_DAS_ORDENS, async (rotaInterceptada) => {
     if (rotaInterceptada.request().method() !== 'DELETE') return rotaInterceptada.fallback();
-    await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
+    await rotaInterceptada.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }) });
   });
   const controleDasReleituras = await segurarReleiturasDepoisDoApagar(page);
 

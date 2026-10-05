@@ -42,7 +42,7 @@ async function criarOrdensPelaApi(paginaDaBoleta: Page, quantidadeDeOrdens: numb
 async function lerPaginaNoServidor(paginaDaBoleta: Page, numeroDaPagina: number): Promise<PaginaDeOrdensNoServidor> {
   const respostaDaLista = await paginaDaBoleta.request.get(`${ROTA_DAS_ORDENS}?page=${numeroDaPagina}`);
   expect(respostaDaLista.status()).toBe(200);
-  return (await respostaDaLista.json()) as PaginaDeOrdensNoServidor;
+  return ((await respostaDaLista.json()) as { data: PaginaDeOrdensNoServidor }).data;
 }
 
 function requisicaoPedeListaDeOrdens(requisicaoHttp: Request) {
@@ -113,6 +113,11 @@ async function conferirLinhasIguaisAoServidor(paginaDaBoleta: Page, numeroDaPagi
   await expect(localizarLinhasDaLista(paginaDaBoleta).locator('td[data-coluna="identificador-do-envio"]')).toHaveText(
     paginaNoServidor.orders.map((ordemNoServidor) => ordemNoServidor.clOrdId),
   );
+}
+
+// GET /api/orders answers a DataMessage; the simulated page goes in its "data".
+function wrapInSuccessDataMessage(ordersPage: PaginaDeOrdensNoServidor) {
+  return { success: true, status: 'Ok', message: 'Página de ordens lida.', data: ordersPage, errors: [], errorCode: null };
 }
 
 function montarPaginaSimuladaDeOrdens(paginaDevolvida: number, totalDeOrdens: number): PaginaDeOrdensNoServidor {
@@ -341,7 +346,7 @@ for (const larguraEstreita of [375, 520, 640]) {
         if (rotaDaListagem.request().method() !== 'GET') return rotaDaListagem.fallback();
         const paginaPedida = Number(new URL(rotaDaListagem.request().url()).searchParams.get('page'));
         if (paginaPedida === 2) await respostaDaPagina2Liberada;
-        await rotaDaListagem.fulfill({ json: montarPaginaSimuladaDeOrdens(paginaPedida, 25_000) });
+        await rotaDaListagem.fulfill({ json: wrapInSuccessDataMessage(montarPaginaSimuladaDeOrdens(paginaPedida, 25_000)) });
       },
     );
     await abrirTelaEEsperarPrimeiraPagina(page);
@@ -369,7 +374,7 @@ test('erro ao trocar de página mostra o aviso da lista no cartão e tira a pagi
   await abrirTelaEEsperarPrimeiraPagina(page);
   await page.route(
     (urlPedida) => urlPedida.pathname === ROTA_DAS_ORDENS && urlPedida.searchParams.get('page') === '2',
-    (rotaDaPagina2) => rotaDaPagina2.fulfill({ status: 503, json: { status: 'communication_error', message: 'Accumulator indisponível.' } }),
+    (rotaDaPagina2) => rotaDaPagina2.fulfill({ status: 503, contentType: 'application/problem+json', body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }) }),
   );
 
   await irParaPaginaPeloBotao(page, localizarBotaoDaPagina(page, 2), 2);
@@ -488,7 +493,7 @@ test('CA-38: enviar uma ordem estando na página 2 volta a lista para a página 
   const respostaDaCriacao = page.waitForResponse((respostaHttp) => respostaHttp.request().method() === 'POST' && new URL(respostaHttp.url()).pathname === ROTA_DE_CRIACAO_DE_ORDEM);
   const leituraDaPrimeiraPagina = esperarLeituraDaPagina(page, 1);
   await page.getByRole('button', { name: /^Enviar ordem/ }).click();
-  const corpoDaCriacao = (await (await respostaDaCriacao).json()) as { clOrdId: string };
+  const corpoDaCriacao = ((await (await respostaDaCriacao).json()) as { data: { clOrdId: string } }).data;
   await leituraDaPrimeiraPagina;
 
   await conferirPaginaAtual(page, 1);
@@ -510,7 +515,7 @@ test('CA-41: a tela pede ao servidor só a página que mostra, sempre com o núm
 
   const respostaDaPrimeiraPagina = esperarLeituraDaPagina(page, 1);
   await page.goto('/');
-  const corpoDaPrimeiraPagina = (await (await respostaDaPrimeiraPagina).json()) as PaginaDeOrdensNoServidor;
+  const corpoDaPrimeiraPagina = ((await (await respostaDaPrimeiraPagina).json()) as { data: PaginaDeOrdensNoServidor }).data;
   await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 1–10 de 25 ordens');
   expect(corpoDaPrimeiraPagina.orders).toHaveLength(10);
   expect(corpoDaPrimeiraPagina.total).toBe(25);
@@ -529,7 +534,7 @@ test('CA-42: com mais de 10.000 ordens a paginação para na página 1000 e most
     async (rotaInterceptada) => {
       if (rotaInterceptada.request().method() !== 'GET') return rotaInterceptada.fallback();
       const paginaPedida = Number(new URL(rotaInterceptada.request().url()).searchParams.get('page'));
-      await rotaInterceptada.fulfill({ json: montarPaginaSimuladaDeOrdens(paginaPedida, TOTAL_ACIMA_DO_TETO) });
+      await rotaInterceptada.fulfill({ json: wrapInSuccessDataMessage(montarPaginaSimuladaDeOrdens(paginaPedida, TOTAL_ACIMA_DO_TETO)) });
     },
   );
 
@@ -600,7 +605,7 @@ for (const larguraDaJanela of [375, 860, 1440, 1920]) {
     await page.route(
       (urlPedida) => urlPedida.pathname === ROTA_DAS_ORDENS,
       (rotaDaListagem) =>
-        rotaDaListagem.request().method() === 'GET' ? rotaDaListagem.fulfill({ json: montarPaginaSimuladaDeOrdens(500, 25_000) }) : rotaDaListagem.fallback(),
+        rotaDaListagem.request().method() === 'GET' ? rotaDaListagem.fulfill({ json: wrapInSuccessDataMessage(montarPaginaSimuladaDeOrdens(500, 25_000)) }) : rotaDaListagem.fallback(),
     );
     await abrirTelaEEsperarPrimeiraPagina(page);
     await conferirFileiraDaPaginacao(page, ['‹', '1', '…', '499', '500', '501', '…', '1000', '›']);
