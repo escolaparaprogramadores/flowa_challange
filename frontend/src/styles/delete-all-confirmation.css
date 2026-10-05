@@ -1,0 +1,55 @@
+/* "Deletar tudo" and its confirmation dialog (mockup 03). Mockup measures in CSS; the page opens at 90%. */
+:root {
+  --color-danger-border: rgba(255, 164, 151, 0.38);
+  --color-danger-background-hover: rgba(255, 138, 122, 0.2);
+  --color-dialog-backdrop: rgba(4, 10, 11, 0.62);
+  --shadow-dialog: 0 24px 64px rgba(0, 0, 0, 0.55);
+  --font-size-dialog-title: 20px;
+  --radius-small-button: 10px;
+  --radius-dialog-icon: 12px;
+}
+
+.delete-all-button {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  height: 38px; padding: 0 var(--space-3-5);
+  background: var(--color-danger-background); color: var(--color-danger-text);
+  border: 1px solid var(--color-danger-border); border-radius: var(--radius-small-button);
+  font-size: var(--font-size-label); font-weight: 700; white-space: nowrap;
+  transition: background var(--transition);
+}
+.delete-all-button:hover { background: var(--color-danger-background-hover); }
+.delete-all-button svg { width: 15px; height: 15px; flex: none; }
+
+.confirmation-dialog {
+  width: min(440px, calc(100vw - var(--space-10)));
+  padding: 0; margin: auto;
+  background: var(--color-card); color: var(--color-text);
+  border: 1px solid var(--color-border); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-dialog);
+}
+.confirmation-dialog::backdrop { background: var(--color-dialog-backdrop); backdrop-filter: blur(6px); }
+.confirmation-dialog-content { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-5); }
+.confirmation-dialog-icon {
+  display: grid; place-items: center; width: 48px; height: 48px;
+  background: var(--color-danger-background); color: var(--color-danger-text); border-radius: var(--radius-dialog-icon);
+}
+.confirmation-dialog-icon svg { width: 22px; height: 22px; }
+.confirmation-dialog-title {
+  margin: var(--space-1) 0 0; font-family: var(--font-display); font-size: var(--font-size-dialog-title);
+  font-weight: 700; letter-spacing: var(--letter-spacing-title); color: var(--color-text);
+}
+.confirmation-dialog-text { margin: 0; font-size: var(--font-size-body-small); line-height: 1.6; color: var(--color-text-secondary); }
+.confirmation-dialog-error { margin: 0; font-size: var(--font-size-label); font-weight: 700; line-height: 1.4; color: var(--color-danger-text); }
+.confirmation-dialog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2-5); margin-top: var(--space-2); }
+.confirmation-dialog-cancel,
+.confirmation-dialog-delete {
+  height: var(--height-button); border-radius: var(--radius-button);
+  font-size: var(--font-size-body-small); font-weight: 700;
+  transition: background var(--transition), filter var(--transition);
+}
+.confirmation-dialog-cancel { background: var(--color-sunken); color: var(--color-text); border: 1px solid var(--color-border-strong); }
+.confirmation-dialog-cancel:hover:not(:disabled) { background: var(--color-hover); }
+.confirmation-dialog-delete { background: var(--color-sell); color: var(--color-text-on-sell); border: 1px solid transparent; }
+.confirmation-dialog-delete:hover:not(:disabled) { filter: brightness(1.06); }
+.confirmation-dialog-cancel:disabled,
+.confirmation-dialog-delete:disabled { cursor: progress; opacity: 0.7; }

@@ -1,0 +1,139 @@
+:root {
+  --font-size-table-header: 11px;
+  --letter-spacing-table-header: 0.06em;
+  --space-badge-horizontal: 11px;
+  --space-0-5: 2px;
+  --size-banner-icon: 18px;
+  --size-empty-list-icon: 32px;
+  --max-width-empty-list-text: 360px;
+}
+
+.order-list { grid-area: order-list; container-type: inline-size; }
+.order-list-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); min-height: var(--height-tab); }
+.order-list-header .card-title { margin-right: auto; }
+.order-list-notice { margin: 0; font-size: var(--font-size-body-small); line-height: 1.6; color: var(--color-text-muted); }
+.order-list-notice-error { color: var(--color-danger-text); font-weight: 700; }
+
+.order-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: var(--space-1-5) var(--space-badge-horizontal);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-caption);
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+.order-badge::before { content: ''; width: var(--size-status-dot); height: var(--size-status-dot); border-radius: var(--radius-pill); background: currentColor; }
+.order-badge-accepted { background: var(--color-success-background); color: var(--color-success-text); }
+.order-badge-rejected { background: var(--color-danger-background); color: var(--color-danger-text); }
+.order-badge-sending { background: var(--color-warning-background); color: var(--color-warning-text); }
+
+.send-failure-banner {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3-5) var(--space-4);
+  border: 1px solid var(--color-danger-text);
+  border-radius: var(--radius-tab);
+  background: var(--color-danger-background);
+  color: var(--color-danger-text);
+}
+.send-failure-banner-icon { flex: none; width: var(--size-banner-icon); height: var(--size-banner-icon); margin-top: var(--space-0-5); }
+.send-failure-banner-title { margin: 0; font-weight: 800; font-size: var(--font-size-body-small); }
+.send-failure-banner-message,
+.send-failure-banner-errors { margin: var(--space-1) 0 0; font-size: var(--font-size-body-small); line-height: 1.6; color: var(--color-text-secondary); }
+.send-failure-banner-errors { padding-left: var(--space-5); }
+
+.empty-order-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-12) var(--space-6);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-tab);
+  background: var(--color-sunken);
+  text-align: center;
+}
+.empty-order-list-icon { width: var(--size-empty-list-icon); height: var(--size-empty-list-icon); color: var(--color-text-label); }
+.empty-order-list p { margin: 0; max-width: var(--max-width-empty-list-text); font-size: var(--font-size-body-small); line-height: 1.6; color: var(--color-text-muted); }
+
+.order-table-frame { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-tab); background: var(--color-sunken); }
+.order-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-label); }
+.order-table th {
+  padding: var(--space-3) var(--space-2);
+  text-align: left;
+  font-size: var(--font-size-table-header);
+  font-weight: 700;
+  letter-spacing: var(--letter-spacing-table-header);
+  text-transform: uppercase;
+  color: var(--color-text-label);
+  background: var(--color-sunken);
+  white-space: nowrap;
+}
+.order-table td {
+  padding: var(--space-3) var(--space-2);
+  border-top: 1px solid var(--color-divider);
+  background: var(--color-card);
+  color: var(--color-text);
+  font-weight: 700;
+  white-space: nowrap;
+  vertical-align: middle;
+  transition: background var(--transition);
+}
+.order-table tbody tr:hover td { background: var(--color-hover); }
+.order-row-day, .order-row-time { display: block; }
+.order-row-time { margin-top: var(--space-0-5); font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-muted); }
+.order-row-code { font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-secondary); }
+
+/* Three ways to show the same list, by the width of the card itself (the page grid changes its width
+   without following the window):
+   - 1030 px or more (1440 px screens and up): the full mockup table, codes on a single line;
+   - 800 to 1029 px: the same table, one order per row, with both codes wrapping inside the cell;
+   - under 800 px: each order becomes a grid block, label above the value.
+   None of the three scrolls sideways or hides a field. */
+@container (max-width: 1029px) {
+  .order-table td.order-row-code { white-space: normal; overflow-wrap: anywhere; }
+}
+
+@container (max-width: 799px) {
+  /* Each field carries its own label (td::before); the table header steps aside. */
+  .order-table thead { display: none; }
+  .order-table, .order-table tbody { display: block; }
+  .order-table tr {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-2-5) var(--space-3);
+    padding: var(--space-3-5) var(--space-4);
+    border-top: 1px solid var(--color-divider);
+    background: var(--color-card);
+    transition: background var(--transition);
+  }
+  .order-table tbody tr:first-child { border-top: 0; }
+  .order-table tbody tr:hover { background: var(--color-hover); }
+  .order-table td {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    min-width: 0;
+    padding: 0;
+    border-top: 0;
+    background: transparent;
+  }
+  .order-table tbody tr:hover td { background: transparent; }
+  .order-table td::before {
+    content: attr(data-label);
+    font-size: var(--font-size-table-header);
+    font-weight: 700;
+    letter-spacing: var(--letter-spacing-table-header);
+    text-transform: uppercase;
+    color: var(--color-text-label);
+  }
+  .order-table td.order-row-code { grid-column: span 2; }
+}
+
+@container (max-width: 459px) {
+  .order-table tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
