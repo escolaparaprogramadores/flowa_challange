@@ -44,7 +44,7 @@ resource "aws_ecs_cluster" "cluster_dos_servicos_flowa" {
 }
 
 # Execution role: é o ECS quem a usa para puxar a imagem, escrever o log e ler o segredo. Os apps não
-# chamam a AWS, então não há task role.
+# chamam a AWS; a única task role (abaixo) é a do coletor de logs.
 resource "aws_iam_role" "role_de_execucao_dos_servicos_flowa" {
   for_each = local.nomes_dos_servicos_flowa
 
@@ -99,6 +99,44 @@ resource "aws_iam_role_policy" "permissoes_de_execucao_dos_servicos_flowa" {
   })
 }
 
+# Task role only for the log collector's CloudWatch output; the boundary does not allow creating log groups,
+# so it writes to the existing group of its own service.
+resource "aws_iam_role" "role_da_tarefa_dos_servicos_flowa" {
+  for_each = var.datadog_ligado ? local.nomes_dos_servicos_flowa : {}
+
+  name                 = "${each.value}-tarefa"
+  path                 = local.path_das_roles_dos_servicos_flowa
+  permissions_boundary = data.aws_iam_policy.boundary_das_roles_dos_servicos_flowa.arn
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "permissoes_da_tarefa_dos_servicos_flowa" {
+  for_each = aws_iam_role.role_da_tarefa_dos_servicos_flowa
+
+  name = "${local.nomes_dos_servicos_flowa[each.key]}-tarefa"
+  role = each.value.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+      Resource = [
+        aws_cloudwatch_log_group.logs_dos_servicos_flowa[each.key].arn,
+        "${aws_cloudwatch_log_group.logs_dos_servicos_flowa[each.key].arn}:*",
+      ]
+    }]
+  })
+}
+
 resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
   family                   = local.nomes_dos_servicos_flowa.generator
   requires_compatibilities = ["FARGATE"]
@@ -106,6 +144,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
   cpu                      = local.cpu_da_task_flowa
   memory                   = local.memoria_da_task_flowa
   execution_role_arn       = aws_iam_role.role_de_execucao_dos_servicos_flowa["generator"].arn
+  task_role_arn            = var.datadog_ligado ? aws_iam_role.role_da_tarefa_dos_servicos_flowa["generator"].arn : null
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -134,15 +173,8 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
       startPeriod = 30
     }
 
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = local.log_group_por_servico_flowa.generator
-        awslogs-region        = var.region
-        awslogs-stream-prefix = "app"
-      }
-    }
-  }], local.containers_do_agente_por_servico_flowa.generator))
+    logConfiguration = local.configuracao_de_log_do_app_por_servico_flowa.generator
+  }], local.containers_do_agente_por_servico_flowa.generator, local.containers_do_coletor_por_servico_flowa.generator))
 }
 
 resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
@@ -152,6 +184,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
   cpu                      = local.cpu_da_task_flowa
   memory                   = local.memoria_da_task_flowa
   execution_role_arn       = aws_iam_role.role_de_execucao_dos_servicos_flowa["accumulator"].arn
+  task_role_arn            = var.datadog_ligado ? aws_iam_role.role_da_tarefa_dos_servicos_flowa["accumulator"].arn : null
 
   runtime_platform {
     operating_system_family = "LINUX"
@@ -187,15 +220,8 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
       startPeriod = 30
     }
 
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = local.log_group_por_servico_flowa.accumulator
-        awslogs-region        = var.region
-        awslogs-stream-prefix = "app"
-      }
-    }
-  }], local.containers_do_agente_por_servico_flowa.accumulator))
+    logConfiguration = local.configuracao_de_log_do_app_por_servico_flowa.accumulator
+  }], local.containers_do_agente_por_servico_flowa.accumulator, local.containers_do_coletor_por_servico_flowa.accumulator))
 }
 
 # Registro A com TTL de 10 s: depois de um deploy o accumulator troca de IP, e o QuickFIX/n resolve o nome
@@ -280,7 +306,7 @@ resource "aws_ecs_service" "servico_do_order_accumulator" {
   }
 
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
-  depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]
+  depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa, aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa]
 }
 
 resource "aws_ecs_service" "servico_do_order_generator" {
@@ -320,5 +346,5 @@ resource "aws_ecs_service" "servico_do_order_generator" {
   }
 
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
-  depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa]
+  depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa, aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa]
 }

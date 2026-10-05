@@ -7,11 +7,12 @@ import '@fontsource/manrope/latin-500.css';
 import '@fontsource/manrope/latin-600.css';
 import '@fontsource/manrope/latin-700.css';
 import '@fontsource/manrope/latin-800.css';
-import './tema-base.css';
-import { PaginaDaBoletaEExposicao } from './App';
+import './styles/base-theme.css';
+import { OrderTicketPage } from './pages/OrderTicketPage';
 
+// The "raiz" id is read by tests/Base.IntegrationTests (ComposeTests), outside the screen code.
 createRoot(document.getElementById('raiz')!).render(
   <StrictMode>
-    <PaginaDaBoletaEExposicao />
+    <OrderTicketPage />
   </StrictMode>,
 );

@@ -1,6 +1,31 @@
-# Flowa — envio de ordens com FIX 4.4
+<div align="center">
 
-Duas aplicações em C# que conversam por FIX: o OrderGenerator manda ordens de compra e venda montadas
+<a href="#readme">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/logo-dark.svg">
+    <img src=".github/assets/logo-light.svg" alt="Base investimentos" width="449">
+  </picture>
+</a>
+
+<p>
+  <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-512BD4?style=for-the-badge&logo=dotnet&logoColor=white">
+  <img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black">
+  <img alt="PostgreSQL 17" src="https://img.shields.io/badge/PostgreSQL-17-4169E1?style=for-the-badge&logo=postgresql&logoColor=white">
+  <img alt="FIX 4.4" src="https://img.shields.io/badge/FIX-4.4-0F172A?style=for-the-badge">
+</p>
+
+<p>
+  <a href="#como-rodar-com-docker"><b>Como rodar</b></a> ·
+  <a href="#decisões"><b>Decisões</b></a> ·
+  <a href="#na-nuvem-aws"><b>Na nuvem</b></a> ·
+  <a href="#observabilidade"><b>Observabilidade</b></a>
+</p>
+
+</div>
+
+# Base investimentos
+
+Envio de ordens com FIX 4.4. Duas aplicações em C# que conversam por FIX: o OrderGenerator manda ordens de compra e venda montadas
 numa tela, e o OrderAccumulator aceita ou rejeita cada uma conforme o limite de exposição por ativo.
 
 Está no ar em https://h2asgc2sce.execute-api.us-east-1.amazonaws.com (veja [Na nuvem](#na-nuvem-aws)).
@@ -54,7 +79,7 @@ Depois o OrderAccumulator, num terminal (troque pela senha que você deu ao usu�
 export POSTGRES_PASSWORD=<senha do usuário flowa>
 ASPNETCORE_HTTP_PORTS=8081 Fix__AcceptorPort=9876 \
 ConnectionStrings__Flowa="Host=localhost;Port=5432;Database=flowa;Username=flowa;Password=$POSTGRES_PASSWORD" \
-dotnet run --no-launch-profile --project src/OrderAccumulator
+dotnet run --no-launch-profile --project src/app-base-order-accumulator-webapi-ecs
 ```
 
 E o OrderGenerator, em outro terminal:
@@ -62,7 +87,7 @@ E o OrderGenerator, em outro terminal:
 ```bash
 ASPNETCORE_HTTP_PORTS=8080 Fix__AcceptorHost=localhost Fix__AcceptorPort=9876 \
 OrderAccumulator__BaseUrl=http://localhost:8081 \
-dotnet run --no-launch-profile --project src/OrderGenerator
+dotnet run --no-launch-profile --project src/app-base-order-generator-webapi-ecs
 ```
 
 A página abre em http://localhost:8080. O `--no-launch-profile` faz o app usar as portas das
@@ -75,8 +100,8 @@ Os testes do .NET precisam do .NET 10 SDK e do Docker de pé, porque os do Order
 PostgreSQL de verdade com Testcontainers:
 
 ```bash
-dotnet build Flowa.sln
-dotnet test Flowa.sln --filter "Category!=Integration"
+dotnet build Flowa.slnx
+dotnet test Flowa.slnx --filter "Category!=Integration"
 ```
 
 Os testes de integração sobem o compose inteiro em projetos separados (portas 18080 e 18093). Eles
@@ -84,7 +109,7 @@ conferem a ida e volta FIX entre os containers e a religação depois de recriar
 deles clona o repositório, então também precisa do `git`:
 
 ```bash
-dotnet test tests/Flowa.IntegrationTests/Flowa.IntegrationTests.csproj
+dotnet test tests/Base.IntegrationTests/Base.IntegrationTests.csproj
 ```
 
 Na tela, dentro de `frontend/`: `npm test` roda os testes de unidade. Para o teste de ponta a ponta,
@@ -102,10 +127,11 @@ isso, sem travar.
 a das vendas aceitas, então pode ficar negativa. Uma ordem só é aceita se a exposição depois dela
 ficar, em valor absoluto, até R$ 100.000.000,00. A borda exata é aceita: o enunciado fala em não passar
 do limite, e chegar a 100 milhões não passa. Um centavo acima é rejeitado. As duas bordas têm teste
-(`tests/OrderAccumulator.Tests/ExposureRulesTests.cs`).
+(`tests/app-base-order-accumulator-webapi-ecs.Tests/IntegrationTests/ExposureRulesTests.cs`).
 
 **Concorrência resolvida no banco.** A exposição só muda num `UPDATE` que testa o limite na própria
-cláusula `WHERE` (`src/OrderAccumulator/Persistence/PostgresOrderProcessor.cs`). Se a ordem não couber,
+cláusula `WHERE`
+(`src/app-base-order-accumulator-webapi-ecs/Infrastructure/Persistence/ExposureRepository.cs`). Se a ordem não couber,
 nenhuma linha muda e ela é rejeitada. Como o PostgreSQL trava a linha durante o `UPDATE`, duas ordens
 ao mesmo tempo no mesmo ativo não conseguem passar juntas do limite. Isso não depende de lock em
 memória e continuaria valendo com mais de uma instância. Há um teste com 200 ordens simultâneas,
@@ -118,9 +144,19 @@ a concorrência do jeito acima. As tabelas são criadas na subida, com `IF NOT E
 vezes, a segunda não mexe na exposição: o OrderAccumulator devolve o mesmo `ExecutionReport` da
 primeira vez, com o mesmo resultado e o mesmo motivo.
 
-**Uma regra de campo só.** Símbolo, lado, quantidade e preço são validados pelo mesmo código
-(`src/Flowa.Shared`) nas duas pontas: o OrderGenerator recusa antes de mandar, e o OrderAccumulator
-confere de novo o que chega pelo FIX.
+**Ordem aceita entra inteira na exposição.** O enunciado fala em somar a "quantidade executada". Aqui
+nenhuma ordem é executada: o OrderAccumulator só aceita ou rejeita. A ordem aceita volta com
+`ExecType = New` (150=0), `CumQty` 0 e `LeavesQty` igual à quantidade, e mesmo assim a quantidade
+inteira entra na exposição no momento do aceite. Se a exposição esperasse uma execução, ela ficaria
+sempre em zero e o limite nunca barraria nada.
+
+**A regra de campo mora só no OrderAccumulator.** Símbolo, lado, quantidade e preço são validados pelo
+OrderAccumulator, no que chega pelo FIX
+(`src/app-base-order-accumulator-webapi-ecs/Domain/Orders/OrderFieldRule.cs`). Campo inválido volta como ordem rejeitada, com o motivo em
+português, igual a uma ordem rejeitada pelo limite. O que nem cabe numa ordem FIX (campo faltando, tipo
+errado, lado desconhecido) o OrderGenerator responde com erro 400, sem mandar nada. A tela mantém um
+aviso local que aparece antes do envio, só para avisar cedo: ele não é a proteção, e o OrderAccumulator
+valida mesmo que a tela seja burlada.
 
 ## Limitações conhecidas
 
@@ -141,14 +177,84 @@ confere de novo o que chega pelo FIX.
 ![Desenho da arquitetura local](docs/arquitetura/arquitetura-local.png)
 
 A tela é servida pelo próprio OrderGenerator. Quando você envia uma ordem, a tela chama
-`POST /api/orders`. O OrderGenerator confere os campos e, se estiverem certos, manda uma
-`NewOrderSingle` (35=D) por FIX para o OrderAccumulator. O OrderAccumulator aplica a regra do limite no
-PostgreSQL e responde com um `ExecutionReport` (35=8): `New` quando aceita, `Rejected` com o motivo
+`POST /api/orders`. O OrderGenerator só confere se o pedido tem o formato de uma ordem e manda uma
+`NewOrderSingle` (35=D) por FIX para o OrderAccumulator. O OrderAccumulator confere os campos, aplica a
+regra do limite no PostgreSQL e responde com um `ExecutionReport` (35=8): `New` quando aceita, `Rejected` com o motivo
 quando não aceita. O OrderGenerator devolve essa resposta para a tela.
 
 O painel de exposição chama `GET /api/exposures` no OrderGenerator, que só repassa a pergunta para o
 OrderAccumulator. A fonte do desenho fica em `docs/arquitetura/arquitetura-local.drawio` e o contrato
 entre as partes (rotas, mensagens FIX, portas) em `docs/contracts/contracts.md`.
+
+### Termos do negócio no código
+
+O texto deste README fala em português; o código usa os nomes em inglês abaixo.
+
+- **Ordem**: `Order`, no Domain do OrderAccumulator. A que chega pelo FIX é a `IncomingOrder`; a que o
+  OrderGenerator manda é a `OrderToSend`.
+- **Ativo**: o `Symbol` da ordem (PETR4, VALE3, VIIA4).
+- **Lado** (compra ou venda): `OrderSide`.
+- **Exposição de um ativo**: `SymbolExposure`.
+- **Limite de exposição**: `ExposureLimitPolicy`.
+- **Regra de campo**: `OrderFieldRule`.
+- **Resposta da ordem**: a mensagem FIX `ExecutionReport`.
+- **Número da ordem**: o `ClOrdID` do FIX, `ClOrdId` no código.
+
+### Como o código é organizado
+
+Cada app é um projeto .NET só (`OrderGenerator.csproj` e `OrderAccumulator.csproj`, na solução
+`Flowa.slnx`). As camadas são pastas, com o namespace igual à pasta (`Base.OrderAccumulator.Domain`, por
+exemplo):
+
+- **Entrypoint**: rotas HTTP, a sessão FIX do OrderAccumulator e a montagem das dependências. Recebe o
+  pedido, chama o caso de uso e responde.
+- **Application**: os casos de uso. Cada um só organiza o passo a passo, sem regra de negócio.
+- **Domain**: as regras do negócio: a ordem, a regra de campo, o limite de exposição. Não usa nenhuma
+  biblioteca de fora.
+- **Infrastructure**: PostgreSQL, cliente FIX, Datadog e log. Fora daqui, só o Entrypoint usa biblioteca
+  de fora: a QuickFIX/n na sessão FIX do OrderAccumulator e o Npgsql ao montar a conexão.
+- **Commons**: só contratos que as outras camadas usam, como a interface do log.
+
+As dependências só apontam para dentro: o Domain não conhece nenhuma outra camada. Um teste de cada app
+confere isso lendo o código compilado (`tests/*.Tests/Camadas/LayerDependencyTests.cs`).
+
+Dentro da Application há uma pasta por assunto do negócio, e cada fluxo é uma pasta com um caso de uso só.
+No OrderAccumulator as pastas `Orders` e `Exposures` têm o mesmo nome no Domain, onde ficam as regras. No
+OrderGenerator só `Orders` tem Domain: a exposição ali é só repassada do OrderAccumulator, sem regra.
+
+```
+src/app-base-order-accumulator-webapi-ecs/
+├─ Entrypoint/        rotas HTTP, sessão FIX (NewOrderSingleConsumer) e workers
+├─ Application/
+│  ├─ Orders/
+│  │  ├─ DecideIncomingOrder/   decide se a ordem que chegou pelo FIX é aceita
+│  │  ├─ ListOrders/            lista as ordens para a tela
+│  │  └─ DeleteAllOrders/       apaga as ordens e zera a exposição
+│  └─ Exposures/
+│     └─ GetExposures/          exposição de cada ativo para o painel
+├─ Domain/
+│  ├─ Orders/         Order, regra de campo, IOrderRepository
+│  └─ Exposures/      SymbolExposure, limite de exposição, IExposureRepository
+├─ Infrastructure/    Persistence, Fix, Metrics, Logging
+└─ Commons/
+
+src/app-base-order-generator-webapi-ecs/
+├─ Entrypoint/        rotas HTTP e a página
+├─ Application/
+│  ├─ Orders/
+│  │  ├─ SendOrder/         manda a ordem por FIX e devolve a resposta
+│  │  ├─ ListOrders/        repassa a lista de ordens do OrderAccumulator
+│  │  └─ DeleteAllOrders/   repassa o "apagar tudo" ao OrderAccumulator
+│  └─ Exposures/
+│     └─ GetExposures/      repassa a exposição de cada ativo
+├─ Domain/
+│  └─ Orders/         OrderToSend, SentOrderResult
+├─ Infrastructure/    cliente FIX, cliente HTTP do OrderAccumulator, rastro, log
+└─ Commons/
+```
+
+Cada agregado tem um repositório só: `IOrderRepository` e `IExposureRepository`, com a interface no Domain
+e o código do PostgreSQL na Infrastructure.
 
 ## Na nuvem (AWS)
 
@@ -167,7 +273,7 @@ Gateway aceita até 20 pedidos por segundo (rajada de 40); acima disso responde 
 **Como publica.** Os serviços, a rede, o banco, o ECR e os logs são criados pelo Terraform de `infra/`.
 A role que a esteira assume e o bucket do state vêm de uma base Terraform separada, fora deste
 repositório. Nada é criado pelo console. Quando um PR que muda código é mesclado em `develop`, o
-workflow `.github/workflows/2-develop-deploy.yml` roda o CI no mesmo commit e, com ele verde, constrói só a
+workflow `.github/workflows/2-develop.yml` roda o CI no mesmo commit e, com ele verde, constrói só a
 imagem do serviço que mudou, manda para o ECR e roda o `terraform apply`. Merge só de texto (`*.md` e
 `docs/`) não publica nada. O GitHub entra na AWS por OIDC, com uma credencial temporária, sem chave
 guardada no repositório. A fonte do desenho fica em `docs/arquitetura/arquitetura-aws.drawio`.
@@ -197,9 +303,9 @@ em `localhost:8126`, o OrderAccumulator manda também métricas em `localhost:81
 tudo ao Datadog por HTTPS. Uma ordem
 aparece como um rastro só, da tela até o OrderAccumulator: o OrderGenerator põe o contexto do rastro
 numa tag FIX própria da `NewOrderSingle`, a 5100 (`TraceParent`), e o OrderAccumulator continua o
-mesmo rastro (`src/Flowa.Shared/Fix/RastroDaOrdemFix.cs`). O OrderAccumulator conta
+mesmo rastro (`Infrastructure/Fix/FixOrderTraceProvider.cs` em cada app). O OrderAccumulator conta
 `flowa.ordens.aceitas` e `flowa.ordens.rejeitadas` por ativo e lado, e publica `flowa.exposicao` por
-ativo (`src/OrderAccumulator/Observabilidade/OrderMetrics.cs`). O ClOrdID não vira etiqueta, para o
+ativo (`src/app-base-order-accumulator-webapi-ecs/Infrastructure/Metrics/DatadogOrderMetricsAdapter.cs`). O ClOrdID não vira etiqueta, para o
 número de séries ficar pequeno.
 
 A esteira só põe o agente nas tasks quando o cofre do Datadog no Secrets Manager já tem a chave
@@ -214,18 +320,31 @@ plano contratado, os três painéis param de receber dado novo depois disso.
 
 ### Teste de carga
 
-O k6 (`k6/carga-ordens.js`) manda 15 ordens por segundo durante 5 minutos para a URL pública, abaixo
-do limite de 20 por segundo do API Gateway. As ordens vão em pares de compra e venda do mesmo ativo,
-quantidade e preço, para a exposição voltar perto de onde estava. O teste só reprova se a taxa de erro
-chegar a 1%. O commit é a versão do OrderGenerator no ar durante o teste.
+O k6 (`k6/carga-ordens.js`) manda cerca de 15 ordens por segundo durante 5 minutos, abaixo do limite
+de 20 por segundo do API Gateway. Em PETR4, VALE3 e VIIA4 ele provoca três resultados:
 
-| Data | Commit | Requisições por minuto | Taxa de erro | P80 | P90 | P95 | P99 |
-|---|---|---|---|---|---|---|---|
-| 2026-10-04 00:24 UTC | f6a268d | 899 | 0,00% | 79 ms | 90 ms | 101 ms | 146 ms |
+- **Aceitas:** pares de compra e venda do mesmo ativo, quantidade e preço, que se compensam.
+- **Rejeitadas por campo inválido:** quantidade 100000, que passa pelo FIX e volta rejeitada.
+- **Rejeitadas por limite:** ordens grandes enchem a exposição até a seguinte passar de
+  R$ 100.000.000,00 e voltar rejeitada. Depois o k6 desfaz o que a API aceitou, olhando a exposição real.
 
-Foram 4500 ordens, todas aceitas. O relatório completo está no
-[run do GitHub Actions](https://github.com/escolaparaprogramadores/flowa_challange/actions/runs/37164582295).
-Para rodar de novo: em Actions, escolha o workflow `k6-carga.yml` e clique em "Run workflow". O
-relatório fica como anexo do run.
+O teste reprova se faltar algum dos três resultados em algum ativo, se a exposição de algum ativo não
+voltar ao valor de antes, se o k6 não conseguir manter o ritmo ou se a taxa de erro chegar a 1%.
+
+Medição na máquina, contra o `docker compose` do commit 62979f4 (5 minutos, 4523 ordens):
+
+| Ativo | Aceitas | Rejeitadas por campo | Rejeitadas por limite | Exposição antes e depois |
+|---|---|---|---|---|
+| PETR4 | 1406 | 101 | 2 | igual |
+| VALE3 | 1404 | 101 | 2 | igual |
+| VIIA4 | 1404 | 101 | 2 | igual |
+
+| Requisições por minuto | Taxa de erro | P80 | P90 | P95 | P99 |
+|---|---|---|---|---|---|
+| 904 | 0,00% | 5 ms | 5 ms | 5 ms | 6 ms |
+
+Para rodar no ambiente dev: em Actions, escolha o workflow `k6-carga.yml` e clique em "Run workflow".
+Só rode quando ninguém mais estiver mandando ordens para dev, senão a exposição não fecha. O resumo
+aparece na página do run e fica como anexo. Na máquina: `k6 run -e FLOWA_URL=http://localhost:8080 k6/carga-ordens.js`.
 
 This is a challenge by [Coodesh](https://coodesh.com/)

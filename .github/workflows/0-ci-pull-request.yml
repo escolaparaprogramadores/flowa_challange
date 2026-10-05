@@ -1,0 +1,93 @@
+name: CI
+
+# Runs the build and every test on each PR to develop and main and on each push to main. On develop this CI
+# is called by the deploy pipeline (2-develop.yml), which only publishes with it green on the same commit.
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-e-testes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      # The screen comes before .NET: the Vite build writes src/app-base-order-generator-webapi-ecs/wwwroot, which the
+      # OrderGenerator page tests serve.
+      - name: Screen — install
+        working-directory: frontend
+        run: npm ci
+      - name: Screen — types and build
+        working-directory: frontend
+        run: npm run build
+      - name: Screen — unit tests
+        working-directory: frontend
+        run: npm test
+      - name: Screen — no raw values outside the theme (CA-23)
+        working-directory: frontend
+        run: node e2e/no-raw-values.mjs
+
+      # No filter: the tests with PostgreSQL in a container and the integration tests with the compose run too.
+      # Docker is the runner's own.
+      - run: dotnet build Flowa.slnx
+      - run: dotnet test Flowa.slnx --no-build -m:1
+
+  e2e-tela:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: Playwright — install
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start the compose
+        id: compose
+        run: docker compose up -d --build --wait --wait-timeout 180
+      # The OrderGenerator has no healthcheck in the compose, and an order only goes out after the FIX logon.
+      - name: Wait for the page and the FIX session
+        run: |
+          for page_and_fix_session_attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health > /dev/null 2>&1 &&
+               docker compose logs --no-color ordergenerator | tr '\001' '|' | grep -q '35=A|.*49=ORDERACCUMULATOR'; then
+              echo "page up and FIX session open"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "the page or the FIX session was not ready within 120 s" >&2
+          exit 1
+      - name: Screen E2E with everything up
+        working-directory: frontend
+        run: npx playwright test
+      # CA-19: the screen with the OrderAccumulator down. Runs even if the suite above fails.
+      - name: Stop the OrderAccumulator
+        if: ${{ !cancelled() && steps.compose.outcome == 'success' }}
+        run: docker compose stop orderaccumulator
+      - name: Screen E2E without the OrderAccumulator
+        if: ${{ !cancelled() && steps.compose.outcome == 'success' }}
+        working-directory: frontend
+        run: npx playwright test -c playwright.without-accumulator.config.ts
+      - name: App logs on failure
+        if: failure()
+        run: docker compose logs --no-color ordergenerator orderaccumulator
+      - name: Take the compose down
+        if: always()
+        run: docker compose down -v

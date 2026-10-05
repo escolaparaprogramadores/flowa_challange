@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Base.OrderGenerator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QuickFIXn.Core" Version="1.14.1" />
+    <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OrderGenerator.Tests" />
+  </ItemGroup>
+
+  <!-- The FIX session and the FIX 4.4 dictionary with tag 5100 sit next to the executable. -->
+  <ItemGroup>
+    <!-- The Vite build (F5) also goes to the output, so dotnet run and the plain build serve the page. -->
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="initiator.cfg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Infrastructure\Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
