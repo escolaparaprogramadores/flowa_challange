@@ -57,6 +57,18 @@ async function conferirMedidaEmPxDeCss(elementoDaTela: Locator, propriedadeCss: 
     .toBeCloseTo(medidaEsperadaEmPx, 1);
 }
 
+// Traços de IconeLixeira e IconeAlerta em Icones.tsx: o ícone certo se prova pelo desenho, não pela contagem de svg.
+const DESENHO_DO_ICONE_LIXEIRA = ['M4 7h16', 'M10 11v6M14 11v6', 'M6 7l1 13h10l1-13', 'M9 7V4h6v3'];
+const DESENHO_DO_ICONE_ALERTA = ['M10.3 3.9L2.4 17.5a2 2 0 001.7 3h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z', 'M12 9v4', 'M12 17h.01'];
+
+async function conferirDesenhoDoIcone(elementoComIcone: Locator, tracosEsperados: string[]) {
+  await expect(elementoComIcone.locator('svg')).toHaveCount(1);
+  await expect(elementoComIcone.locator('svg')).toBeVisible();
+  await expect(elementoComIcone.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+  const tracosDoIcone = await elementoComIcone.locator('svg path').evaluateAll((caminhosDoSvg) => caminhosDoSvg.map((caminhoDoSvg) => caminhoDoSvg.getAttribute('d')));
+  expect(tracosDoIcone).toEqual(tracosEsperados);
+}
+
 function ehChamadaDaApi(requisicaoDaTela: Request, metodoHttp: string, rotaDaApi: string) {
   return requisicaoDaTela.method() === metodoHttp && new URL(requisicaoDaTela.url()).pathname === rotaDaApi;
 }
@@ -131,7 +143,7 @@ test('CA-17: o botão vermelho com lixeira fica à direita no cabeçalho de Comp
   const botaoDoCabecalho = localizarBotaoDeletarTudoDoCabecalho(page);
   await expect(botaoDoCabecalho).toHaveCount(1);
   await expect(botaoDoCabecalho).toHaveText('Deletar tudo');
-  await expect(botaoDoCabecalho.locator('svg')).toHaveCount(1);
+  await conferirDesenhoDoIcone(botaoDoCabecalho, DESENHO_DO_ICONE_LIXEIRA);
   await conferirMedidaEmPxDeCss(botaoDoCabecalho, 'height', 38);
   await expect(botaoDoCabecalho).toHaveCSS('color', COR_CORAL);
   await expect(botaoDoCabecalho).toHaveCSS('border-top-color', COR_DA_BORDA_CORAL_TRANSLUCIDA);
@@ -158,7 +170,7 @@ test('CA-17: clicar abre a janela por cima, com fundo escurecido e borrado, íco
   await conferirMedidaEmPxDeCss(janela, 'width', 440);
   await conferirMedidaEmPxDeCss(janela, 'border-top-left-radius', 22);
   const quadradoDoIcone = janela.locator('.janela-confirmacao-icone');
-  await expect(quadradoDoIcone.locator('svg')).toHaveCount(1);
+  await conferirDesenhoDoIcone(quadradoDoIcone, DESENHO_DO_ICONE_ALERTA);
   await conferirMedidaEmPxDeCss(quadradoDoIcone, 'width', 48);
   await conferirMedidaEmPxDeCss(quadradoDoIcone, 'height', 48);
   await expect(quadradoDoIcone).toHaveCSS('color', COR_CORAL);
@@ -211,10 +223,15 @@ for (const caminhoParaFechar of ['botão Cancelar', 'tecla Esc', 'clique fora da
 test('CA-19 e CA-41: Deletar tudo na janela apaga o banco, relê só a página 1 e a exposição, e mostra a tela zerada sem recarregar', async ({ page }) => {
   await abrirTelaComAsOrdensDoTeste(page);
   await marcarPaginaSemRecarregar(page);
+  // A contagem começa no próprio DELETE: toda chamada à API depois dele entra, inclusive uma duplicada.
   const chamadasDepoisDoApagar: string[] = [];
-  let apagarJaRespondeu = false;
+  let apagarJaSaiu = false;
   page.on('request', (requisicaoDaTela) => {
-    if (apagarJaRespondeu && new URL(requisicaoDaTela.url()).pathname.startsWith('/api/')) {
+    if (ehChamadaDaApi(requisicaoDaTela, 'DELETE', ROTA_DAS_ORDENS)) {
+      apagarJaSaiu = true;
+      return;
+    }
+    if (apagarJaSaiu && new URL(requisicaoDaTela.url()).pathname.startsWith('/api/')) {
       const enderecoDaChamada = new URL(requisicaoDaTela.url());
       chamadasDepoisDoApagar.push(`${requisicaoDaTela.method()} ${enderecoDaChamada.pathname}${enderecoDaChamada.search}`);
     }
@@ -223,7 +240,6 @@ test('CA-19 e CA-41: Deletar tudo na janela apaga o banco, relê só a página 1
   const respostaDoApagar = page.waitForResponse((respostaHttp) => ehChamadaDaApi(respostaHttp.request(), 'DELETE', ROTA_DAS_ORDENS));
   await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
   expect((await respostaDoApagar).status()).toBe(204);
-  apagarJaRespondeu = true;
 
   await expect(localizarJanelaDeConfirmacao(page)).toHaveCount(0);
   await conferirTelaZerada(page);
@@ -268,11 +284,17 @@ test('CA-45: com 503 depois de o servidor apagar (prazo do OrderGenerator), a re
     expect(respostaDoServidor.status()).toBe(204);
     await rotaInterceptada.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ status: 'communication_error' }) });
   });
+  const controleDaReleituraDaLista = await segurarReleituraDaListaDepoisDoApagar(page);
 
   await localizarBotaoDeletarTudoDoCabecalho(page).click();
   await localizarJanelaDeConfirmacao(page).getByRole('button', { name: 'Deletar tudo' }).click();
+  await controleDaReleituraDaLista.releituraChegou;
+  // Enquanto a releitura não volta, o erro ainda não aparece.
+  await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveCount(0);
+  controleDaReleituraDaLista.liberarReleituraDaLista();
 
   await expect(localizarJanelaDeConfirmacao(page).getByRole('alert')).toHaveText(MENSAGEM_DE_ORDENS_NAO_APAGADAS);
+  expect(controleDaReleituraDaLista.exposicaoRelidaDepoisDoApagar()).toBe(true);
   await conferirTelaZerada(page);
   expect(await contarOrdensNoServidor(page)).toBe(0);
 });
@@ -327,6 +349,7 @@ test('RF-08: enquanto o apagar está no servidor, os dois botões da janela fica
   await expect(janela.getByRole('button', { name: 'Apagando…' })).toBeDisabled();
   await expect(janela.getByRole('button', { name: 'Cancelar' })).toBeDisabled();
   await expect(janela.getByRole('button', { name: 'Apagando…' })).toHaveCSS('opacity', '0.7');
+  await expect(janela.getByRole('button', { name: 'Cancelar' })).toHaveCSS('opacity', '0.7');
   // Dois Esc seguidos: no Chrome o segundo já não passa pelo "cancel" do <dialog>.
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
@@ -338,6 +361,30 @@ test('RF-08: enquanto o apagar está no servidor, os dois botões da janela fica
   await expect(janela).toHaveCount(0);
   await conferirTelaZerada(page);
   expect(quantidadeDeDeletes).toBe(1);
+});
+
+test('RNF-05: a janela é modal e o Tab nunca leva o foco a um controle fora dela', async ({ page }) => {
+  await abrirTelaComAsOrdensDoTeste(page);
+  await localizarBotaoDeletarTudoDoCabecalho(page).click();
+  const janela = localizarJanelaDeConfirmacao(page);
+  await expect(janela).toBeVisible();
+  expect(await janela.evaluate((janelaNaPagina) => janelaNaPagina.matches(':modal'))).toBe(true);
+  await expect(janela).toHaveAttribute('aria-labelledby', 'titulo-confirmacao-deletar');
+  const focosPorTab: string[] = [];
+  for (const teclaDeNavegacao of ['Tab', 'Tab', 'Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
+    await page.keyboard.press(teclaDeNavegacao);
+    // Fora dos controles da janela, o Chromium só deixa o foco ir para a própria barra do navegador (activeElement = body).
+    focosPorTab.push(
+      await page.evaluate(() => {
+        const elementoComFoco = document.activeElement;
+        if (!elementoComFoco || elementoComFoco === document.body) return 'barra do navegador';
+        return elementoComFoco.closest('dialog') ? `janela: ${elementoComFoco.textContent?.trim()}` : `FORA: ${elementoComFoco.outerHTML.slice(0, 80)}`;
+      }),
+    );
+  }
+  expect(focosPorTab.filter((focoDepoisDoTab) => focoDepoisDoTab.startsWith('FORA'))).toEqual([]);
+  expect(focosPorTab).toContain('janela: Cancelar');
+  expect(focosPorTab).toContain('janela: Deletar tudo');
 });
 
 test('ASSUMI-05: abrir a janela de novo depois de um erro começa sem a mensagem antiga', async ({ page }) => {
