@@ -2,7 +2,7 @@ import { DeleteAllConfirmation } from '../components/DeleteAllConfirmation';
 import { ExposureByAsset } from '../components/ExposureByAsset';
 import { OrderListCard } from '../components/OrderListCard';
 import { OrderTicket } from '../components/OrderTicket';
-import { Pagination } from '../components/Pagination';
+import { OrderListPagination } from '../components/OrderListPagination';
 import { TopBar } from '../components/TopBar';
 import { useOrdersAndExposures } from '../hooks/useOrdersAndExposures';
 import '../styles/order-ticket.css';
@@ -41,7 +41,7 @@ export function OrderTicketPage() {
           headerAction={<DeleteAllConfirmation onConfirmDeleteAll={deleteAllOrdersAndRefresh} />}
           footer={
             orderListState.status === 'ready' && (
-              <Pagination
+              <OrderListPagination
                 currentPage={orderListState.orderListPage.page}
                 totalOrders={orderListState.orderListPage.totalOrders}
                 ordersOnPage={orderListState.orderListPage.orders.length}

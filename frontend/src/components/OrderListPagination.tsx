@@ -2,7 +2,7 @@ import '../styles/pagination.css';
 import { countOrderListPages, listVisiblePages, ORDERS_PER_PAGE, PAGINATION_ELLIPSIS } from '../lib/pagination/visiblePages';
 import { formatOrderQuantity } from '../lib/order-validation/orderValidation';
 
-type PaginationProps = {
+type OrderListPaginationProps = {
   currentPage: number;
   totalOrders: number;
   ordersOnPage: number;
@@ -10,7 +10,7 @@ type PaginationProps = {
   onChoosePage: (chosenPage: number) => void;
 };
 
-export function Pagination({ currentPage, totalOrders, ordersOnPage, pageBeingLoaded, onChoosePage }: PaginationProps) {
+export function OrderListPagination({ currentPage, totalOrders, ordersOnPage, pageBeingLoaded, onChoosePage }: OrderListPaginationProps) {
   const totalPages = countOrderListPages(totalOrders);
   if (totalOrders <= ORDERS_PER_PAGE) return null;
 
