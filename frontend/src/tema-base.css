@@ -172,17 +172,6 @@ button { cursor: pointer; }
   min-width: 0;
 }
 .cartao-titulo { margin: 0; font-family: var(--fonte-display); font-weight: 600; font-size: var(--texto-cartao-titulo); }
-.resposta-vazia { margin: 0; color: var(--cor-texto-apagado); font-size: var(--texto-corpo-menor); line-height: 1.6; }
-.resposta-dados { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--espessura-divisor); background: var(--cor-borda); border: 1px solid var(--cor-borda); border-radius: var(--raio-aba); overflow: hidden; }
-.resposta-celula { background: var(--cor-afundado); padding: var(--espaco-3-5) var(--espaco-4); }
-.resposta-celula dt { font-size: var(--texto-legenda); font-weight: 600; color: var(--cor-texto-rotulo); }
-.resposta-celula dd { margin: var(--espaco-1-5) 0 0; font-weight: 700; font-size: var(--texto-corpo); overflow-wrap: anywhere; }
-.resposta-motivo { margin: 0; font-size: var(--texto-corpo-menor); line-height: 1.6; color: var(--cor-texto-secundario); }
-.status { align-self: flex-start; display: inline-flex; align-items: center; gap: var(--espaco-2); padding: var(--espaco-1-5) var(--espaco-3); border-radius: var(--raio-pill); font-size: var(--texto-legenda); font-weight: 800; }
-.status::before { content: ''; width: var(--tamanho-ponto-status); height: var(--tamanho-ponto-status); border-radius: var(--raio-pill); background: currentColor; }
-.status-aceita { background: var(--cor-sucesso-fundo); color: var(--cor-sucesso-texto); }
-.status-rejeitada, .status-erro { background: var(--cor-perigo-fundo); color: var(--cor-perigo-texto); }
-.status-enviando { background: var(--cor-aviso-fundo); color: var(--cor-aviso-texto); }
 /* Até 860 px, uma coluna só: ativos, depois Nova ordem, depois Compra/Venda. */
 @media (max-width: 860px) {
   .pagina { padding: 0 var(--espaco-4) var(--espaco-12); }

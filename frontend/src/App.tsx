@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Boleta } from './Boleta';
 import { CompraVenda, type EstadoDaListaDeOrdens, type FalhaNoEnvioDaOrdem } from './CompraVenda';
+import { ConfirmacaoDeletarTudo } from './ConfirmacaoDeletarTudo';
 import { ExposicaoPorAtivo, type EstadoDasExposicoes } from './ExposicaoPorAtivo';
 import { Paginacao } from './Paginacao';
 import { Topo } from './Topo';
 import './boleta.css';
 import './compra-venda.css';
+import './confirmacao.css';
 import { contarPaginasDaLista } from './lib/paginasVisiveis';
-import { enviarOrdem, lerExposicoes, listarOrdens, type OrdemParaEnviar } from './ordensService';
+import { apagarTodasAsOrdens, enviarOrdem, lerExposicoes, listarOrdens, type OrdemParaEnviar } from './ordensService';
 
 // Outra aba pode ter apagado ordens: a página além da última volta vazia com o total real,
 // e aí a tela pede a última página que ainda existe em vez de mostrar a lista como vazia.
@@ -74,6 +76,19 @@ export function PaginaDaBoletaEExposicao() {
     await Promise.all([atualizarExposicoes(), atualizarListaDeOrdens(1)]);
   }
 
+  async function aoConfirmarDeletarTudo() {
+    const paginaDaListaNaTela = estadoDaListaDeOrdens.situacao === 'pronto' ? estadoDaListaDeOrdens.paginaDeOrdens.pagina : 1;
+    try {
+      await apagarTodasAsOrdens();
+    } catch (falhaNoApagar) {
+      // O OrderGenerator responde 503 depois de 5 s, mas o OrderAccumulator termina de apagar mesmo assim:
+      // a tela relê o servidor antes de mostrar o erro, para não exibir ordens que já sumiram.
+      await Promise.all([atualizarExposicoes(), atualizarListaDeOrdens(paginaDaListaNaTela)]);
+      throw falhaNoApagar;
+    }
+    await Promise.all([atualizarExposicoes(), atualizarListaDeOrdens(1)]);
+  }
+
   return (
     <div className="pagina">
       <Topo />
@@ -91,6 +106,7 @@ export function PaginaDaBoletaEExposicao() {
           estadoDaListaDeOrdens={estadoDaListaDeOrdens}
           enviandoOrdem={enviandoOrdem}
           falhaNoUltimoEnvio={falhaNoUltimoEnvio}
+          acaoDoCabecalho={<ConfirmacaoDeletarTudo aoConfirmarDeletarTudo={aoConfirmarDeletarTudo} />}
           rodape={
             estadoDaListaDeOrdens.situacao === 'pronto' && (
               <Paginacao
