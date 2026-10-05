@@ -1,0 +1,183 @@
+/* Base theme: color, font, radius, spacing and font size live in :root.
+   The rules below only use var(--...); border and focus ring thickness are written in the rule itself. */
+:root {
+  color-scheme: dark;
+  --color-background: #081113;
+  --color-card: #0e1b1e;
+  --color-sunken: #0b1719;
+  --color-hover: #122427;
+  --color-border: #1c3034;
+  --color-divider: #172a2d;
+  --color-border-strong: #2e4b50;
+  --color-text: #e8efee;
+  --color-text-secondary: #c9d7d5;
+  --color-text-tertiary: #b9c8c6;
+  --color-text-muted: #9db0ae;
+  --color-text-label: #8fa3a1;
+  --color-accent: #4fe3b0;
+  --color-text-on-accent: #06201a;
+  --color-sell: #ffa497;
+  --color-text-on-sell: #2a0e0a;
+  --color-disabled-background: #1b2a2d;
+  --color-disabled-text: #9db0ae;
+  --color-success-background: rgba(79, 227, 176, 0.13);
+  --color-success-text: #6febc0;
+  --color-danger-background: rgba(255, 138, 122, 0.12);
+  --color-danger-text: #ffa497;
+  --color-warning-background: rgba(242, 184, 75, 0.14);
+  --color-warning-text: #f4c56a;
+  --font-display: 'Sora', system-ui, sans-serif;
+  --font-body: 'Manrope', system-ui, sans-serif;
+  --font-size-title: 34px;
+  --font-size-title-mobile: 28px;
+  --font-size-large-figure: 22px;
+  --font-size-logo: 21px;
+  --font-size-card-title: 18px;
+  --font-size-logo-suffix: 17px;
+  --font-size-body: 15px;
+  --font-size-body-small: 14px;
+  --font-size-label: 13px;
+  --font-size-caption: 12px;
+  --letter-spacing-logo: -0.8px;
+  --letter-spacing-title: -0.03em;
+  --divider-thickness: 1px;
+  --radius-card: 22px;
+  --radius-panel: 20px;
+  --radius-tab: 16px;
+  --radius-quantity-stepper: 14px;
+  --radius-button: 13px;
+  --radius-inner-tab: 11px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-1-5: 6px;
+  --space-2: 8px;
+  --space-2-5: 10px;
+  --space-3: 12px;
+  --space-3-5: 14px;
+  --space-4: 16px;
+  --space-4-5: 18px;
+  --space-5: 20px;
+  --space-5-5: 22px;
+  --space-6: 24px;
+  --space-6-5: 26px;
+  --space-7: 28px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-18: 72px;
+  --height-button: 46px;
+  --height-tab: 44px;
+  --height-quantity-stepper: 56px;
+  --size-status-dot: 7px;
+  --width-quantity-step: 52px;
+  --width-new-order-column: 400px;
+  --max-width-text: 620px;
+  --max-width-content: 1760px;
+  --transition: 180ms ease;
+  --page-scale: 0.9;
+  --shadow-card: 0 24px 50px rgba(0, 0, 0, 0.35);
+  --height-decorated-background: 900px;
+  --background-top-glow: radial-gradient(ellipse 60% 520px at 50% -140px, rgba(79, 227, 176, 0.11), transparent 70%);
+  --background-grid-lines: linear-gradient(to right, rgba(232, 239, 238, 0.035) 1px, transparent 1px), linear-gradient(to bottom, rgba(232, 239, 238, 0.035) 1px, transparent 1px);
+  --size-grid-cell: 56px 56px;
+  --mask-fade-down: linear-gradient(to bottom, #000 0, transparent 100%);
+  --font-size-asset-figure: 20px;
+  --size-asset-icon: 34px;
+  --radius-asset-icon: 10px;
+  --background-asset-card: linear-gradient(#0f1f22, #0e1b1e);
+  --height-limit-usage-bar: 6px;
+  --limit-usage-bar: linear-gradient(90deg, #2fc795, #4fe3b0);
+  --limit-usage-bar-near-limit: linear-gradient(90deg, #e9a73c, #f4c56a);
+}
+* { box-sizing: border-box; }
+/* The page opens at 90% without the person touching the browser zoom. Zoom breaks 100dvh and position: sticky:
+   do not use either of them in here. */
+html { zoom: var(--page-scale); scrollbar-color: var(--color-border-strong) var(--color-background); }
+body { margin: 0; background: var(--color-background); color: var(--color-text); font-family: var(--font-body); -webkit-font-smoothing: antialiased; }
+/* Green glow at the top and a thin grid that fades downwards; pinned to the top of the page, behind the content. */
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--height-decorated-background);
+  background-image: var(--background-top-glow), var(--background-grid-lines);
+  background-size: auto, var(--size-grid-cell), var(--size-grid-cell);
+  mask-image: var(--mask-fade-down);
+  pointer-events: none;
+  z-index: -1;
+}
+::selection { background: var(--color-accent); color: var(--color-text-on-accent); }
+button, input, select { font-family: inherit; }
+input { caret-color: var(--color-accent); }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.numeric { font-variant-numeric: tabular-nums; }
+.screen-reader-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.page { max-width: calc(var(--max-width-content) + 2 * var(--space-10)); margin: 0 auto; padding: 0 var(--space-10) var(--space-18); }
+.top-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-6); padding: var(--space-6) 0; border-bottom: var(--divider-thickness) solid var(--color-divider); }
+.page-header { margin-top: var(--space-10); }
+.logo { display: inline-flex; align-items: baseline; gap: var(--space-2); color: var(--color-text); }
+.logo-brand { font-family: var(--font-display); font-weight: 700; font-size: var(--font-size-logo); letter-spacing: var(--letter-spacing-logo); }
+.logo-suffix { font-family: var(--font-body); font-weight: 400; font-size: var(--font-size-logo-suffix); opacity: 0.8; }
+.page-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: var(--font-size-title); letter-spacing: var(--letter-spacing-title); }
+.page-subtitle { margin: var(--space-2-5) 0 0; color: var(--color-text-muted); font-size: var(--font-size-body); line-height: 1.6; max-width: var(--max-width-text); }
+.layout-grid {
+  margin-top: var(--space-7);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--width-new-order-column);
+  grid-template-areas: 'assets assets' 'order-list new-order';
+  gap: var(--space-4);
+}
+.exposure { grid-area: assets; }
+.response { grid-area: order-list; }
+.order-ticket { grid-area: new-order; }
+.panel { background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-panel); box-shadow: var(--shadow-card); overflow: hidden; min-width: 0; }
+/* Each asset is its own card; the section keeps the "panel" class only for the grid, without the panel look. */
+.exposure.panel { background: none; border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+.exposure-header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2) var(--space-4); margin-bottom: var(--space-3-5); }
+.exposure-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: var(--font-size-card-title); }
+.exposure-limit { margin: 0; font-size: var(--font-size-label); font-weight: 600; color: var(--color-text-label); }
+.exposure-list { margin: 0; padding: 0; list-style: none; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: var(--space-3-5); }
+.exposure-item { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; padding: var(--space-4-5) var(--space-5); background: var(--background-asset-card); border: 1px solid var(--color-border); border-radius: var(--radius-panel); box-shadow: var(--shadow-card); }
+.exposure-asset { display: flex; align-items: center; gap: var(--space-3); }
+.exposure-icon { display: inline-grid; place-items: center; flex: none; width: var(--size-asset-icon); height: var(--size-asset-icon); background: var(--color-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-asset-icon); color: var(--color-accent); }
+.exposure-icon svg { width: 16px; height: 16px; }
+.exposure-symbol { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: var(--font-size-body); }
+/* The two figures sit side by side; without room, "Falta até o limite" wraps as a whole, and no number breaks in the middle. */
+.exposure-figures { margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); }
+/* Labels on top and figures at the bottom of the same column: with line height 1, the 20 px and 15 px digits sit on the same baseline. */
+.exposure-figures > div { flex: 1 1 0; min-width: max-content; display: flex; flex-direction: column; gap: var(--space-1-5); }
+.exposure-figures dt { font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-label); white-space: nowrap; }
+.exposure-figures dd { margin: auto 0 0; font-family: var(--font-display); font-weight: 600; font-size: var(--font-size-body); line-height: 1; white-space: nowrap; }
+.exposure-figures .exposure-current { font-size: var(--font-size-asset-figure); }
+.limit-usage { display: flex; flex-direction: column; gap: var(--space-2); }
+.limit-usage-track { height: var(--height-limit-usage-bar); background: var(--color-divider); border-radius: var(--radius-pill); overflow: hidden; }
+.limit-usage-fill { display: block; height: 100%; background-image: var(--limit-usage-bar); border-radius: var(--radius-pill); }
+/* Non-zero exposure always shows on the bar, even when its share of the limit is under 1 px. */
+.limit-usage-fill.has-exposure { min-width: var(--height-limit-usage-bar); }
+.limit-usage-fill.near-limit { background-image: var(--limit-usage-bar-near-limit); }
+.limit-usage-caption { margin: 0; display: flex; justify-content: space-between; gap: var(--space-3); font-size: var(--font-size-caption); color: var(--color-text-label); }
+.limit-usage-caption .numeric { font-weight: 700; color: var(--color-text); }
+.limit-usage-caption .near-limit { color: var(--color-warning-text); }
+.exposure-notice { margin: 0; padding: var(--space-4) var(--space-5); background: var(--color-card); border: 1px solid var(--color-border); border-radius: var(--radius-panel); font-size: var(--font-size-label); color: var(--color-text-muted); line-height: 1.5; }
+.exposure-notice.error { color: var(--color-danger-text); font-weight: 700; }
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6) var(--space-6-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5-5);
+  min-width: 0;
+}
+.card-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: var(--font-size-card-title); }
+/* Up to 860 px, a single column: assets, then Nova ordem, then Compra/Venda. */
+@media (max-width: 860px) {
+  .page { padding: 0 var(--space-4) var(--space-12); }
+  .page-header { margin-top: var(--space-7); }
+  .page-title { font-size: var(--font-size-title-mobile); }
+  .layout-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'assets' 'new-order' 'order-list'; }
+  .exposure-list { grid-auto-flow: row; }
+  .card { padding: var(--space-5); }
+}
