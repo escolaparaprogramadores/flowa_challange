@@ -15,7 +15,7 @@ playwright-report/
 test-results/
 
 # Build do Vite servido pelo OrderGenerator (gerado)
-src/OrderGenerator/wwwroot/
+src/app-base-order-generator-webapi-ecs/wwwroot/
 
 # Editores e sistema
 .vs/

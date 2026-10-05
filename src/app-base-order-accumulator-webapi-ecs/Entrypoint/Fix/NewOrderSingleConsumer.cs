@@ -1,74 +1,82 @@
+using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+using Base.OrderAccumulator.Domain.Orders;
 using Flowa.Shared.Fix;
-using OrderAccumulator.Exposure;
-using QuickFix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
+using QuickFix;
 using Message = QuickFix.Message;
 
-namespace OrderAccumulator.Fix;
+namespace Base.OrderAccumulator.Entrypoint.Fix;
 
-// Recebe a NewOrderSingle, entrega ao processador da exposição e responde com o ExecutionReport.
-// A validação de campo (D-13), o limite e a ordem repetida (D-11) ficam no IOrderProcessor.
-public sealed class OrderFixApplication(IOrderProcessor orderProcessor, ILogger<OrderFixApplication> orderFixLogger)
+// Receives the NewOrderSingle, hands it to the order use case and answers with the ExecutionReport.
+// Field validation (D-13), the limit and the repeated order (D-11) live in DecideIncomingOrderUseCase.
+public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationScopeFactory, ILogger<NewOrderSingleConsumer> orderFixLogger)
     : MessageCracker, IApplication
 {
     public void FromApp(Message fixMessage, SessionID fixSessionId) => Crack(fixMessage, fixSessionId);
 
     public void OnMessage(NewOrderSingle newOrderSingle, SessionID fixSessionId)
     {
-        var traceParentRecebido = newOrderSingle.IsSetField(RastroDaOrdemFix.TagTraceParent)
-            ? newOrderSingle.GetString(RastroDaOrdemFix.TagTraceParent)
+        var receivedTraceParent = newOrderSingle.IsSetField(FixOrderTraceProvider.TraceParentTag)
+            ? newOrderSingle.GetString(FixOrderTraceProvider.TraceParentTag)
             : null;
-        using var recebimentoDaOrdem = RastroDaOrdemFix.IniciarRecebimentoDaOrdem(traceParentRecebido);
+        using var orderReceiving = FixOrderTraceProvider.StartOrderReceiving(receivedTraceParent);
 
         var incomingOrder = new IncomingOrder(
             newOrderSingle.ClOrdID.Value, newOrderSingle.Symbol.Value, newOrderSingle.Side.Value, newOrderSingle.OrderQty.Value, newOrderSingle.Price.Value);
 
-        // O QuickFIX chama cada sessão na sua própria thread e espera o retorno; esperar aqui
-        // mantém as respostas na mesma ordem das ordens recebidas.
-        OrderOutcome orderOutcome;
+        // QuickFIX calls each session on its own thread and waits for the return; waiting here
+        // keeps the answers in the same order as the received orders.
+        DecideIncomingOrderOutput orderDecision;
         try
         {
-            orderOutcome = orderProcessor.ProcessIncomingOrderAsync(incomingOrder).GetAwaiter().GetResult();
+            orderDecision = DecideIncomingOrderInOwnScopeAsync(incomingOrder).GetAwaiter().GetResult();
         }
-        catch (Exception orderProcessingException)
+        catch (Exception orderDecisionException)
         {
-            // Ponto único de erro desta entrada. Sem resposta, o OrderGenerator desiste em 5 s e mostra
-            // communication_error (contrato, seção 3). O processador grava numa transação só
-            // (PostgresOrderProcessor), então a falha não deixa ordem pela metade; a sessão FIX segue de pé.
-            orderFixLogger.LogError(orderProcessingException, "Falha ao processar a ordem {ClOrdId}; nenhum ExecutionReport enviado.", incomingOrder.ClOrdId);
+            // Single error point of this entry. Without an answer, the OrderGenerator gives up after 5 s and shows
+            // communication_error (contract, section 3). The use case stores in a single transaction
+            // (DecideIncomingOrderUseCase), so the failure leaves no half-stored order; the FIX session stays up.
+            orderFixLogger.LogError(orderDecisionException, "Falha ao processar a ordem {ClOrdId}; nenhum ExecutionReport enviado.", incomingOrder.ClOrdId);
             return;
         }
 
-        if (orderOutcome.IsRepeat)
-            orderFixLogger.LogInformation("ClOrdID {ClOrdId} repetido: devolvendo a resposta original.", orderOutcome.ClOrdId);
+        if (orderDecision.IsRepeat)
+            orderFixLogger.LogInformation("ClOrdID {ClOrdId} repetido: devolvendo a resposta original.", orderDecision.ClOrdId);
 
-        // A ordem já está gravada. Se a sessão caiu antes da resposta, reenviar o mesmo ClOrdID devolve
-        // a resposta gravada (D-11); o aviso deixa o caso visível no log.
-        if (!Session.SendToTarget(BuildExecutionReport(orderOutcome), fixSessionId))
-            orderFixLogger.LogWarning("ExecutionReport da ordem {ClOrdId} não foi enviado: a sessão FIX não está logada.", orderOutcome.ClOrdId);
+        // The order is already stored. If the session dropped before the answer, resending the same ClOrdID returns
+        // the stored answer (D-11); the warning makes the case visible in the log.
+        if (!Session.SendToTarget(BuildExecutionReport(orderDecision), fixSessionId))
+            orderFixLogger.LogWarning("ExecutionReport da ordem {ClOrdId} não foi enviado: a sessão FIX não está logada.", orderDecision.ClOrdId);
     }
 
-    // Tags e valores da tabela do ExecutionReport em docs/contracts/contracts.md, seção 2.
-    public static ExecutionReport BuildExecutionReport(OrderOutcome orderOutcome)
+    // Each order gets its own unit of work (one database connection), as an HTTP request would.
+    private async Task<DecideIncomingOrderOutput> DecideIncomingOrderInOwnScopeAsync(IncomingOrder incomingOrder)
+    {
+        await using var orderOperationScope = orderOperationScopeFactory.CreateAsyncScope();
+        return await orderOperationScope.ServiceProvider.GetRequiredService<DecideIncomingOrderUseCase>().DecideIncomingOrderAsync(incomingOrder);
+    }
+
+    // Tags and values from the ExecutionReport table in docs/contracts/contracts.md, section 2.
+    public static ExecutionReport BuildExecutionReport(DecideIncomingOrderOutput orderDecision)
     {
         var executionReport = new ExecutionReport(
-            new OrderID(orderOutcome.OrderId),
-            new ExecID(orderOutcome.ExecId),
-            new ExecType(orderOutcome.Accepted ? ExecType.NEW : ExecType.REJECTED),
-            new OrdStatus(orderOutcome.Accepted ? OrdStatus.NEW : OrdStatus.REJECTED),
-            // O dicionário FIX 4.4 exige a tag 55 na NewOrderSingle, então o símbolo sempre veio.
-            new Symbol(orderOutcome.Symbol!),
-            new Side(orderOutcome.Side),
-            new LeavesQty(orderOutcome.Accepted ? orderOutcome.Quantity : 0m),
+            new OrderID(orderDecision.OrderId),
+            new ExecID(orderDecision.ExecId),
+            new ExecType(orderDecision.Accepted ? ExecType.NEW : ExecType.REJECTED),
+            new OrdStatus(orderDecision.Accepted ? OrdStatus.NEW : OrdStatus.REJECTED),
+            // The FIX 4.4 dictionary requires tag 55 on NewOrderSingle, so the symbol always came.
+            new Symbol(orderDecision.Symbol!),
+            new Side(orderDecision.Side),
+            new LeavesQty(orderDecision.Accepted ? orderDecision.Quantity : 0m),
             new CumQty(0m),
             new AvgPx(0m))
         {
-            ClOrdID = new ClOrdID(orderOutcome.ClOrdId)
+            ClOrdID = new ClOrdID(orderDecision.ClOrdId)
         };
 
-        if (!orderOutcome.Accepted)
-            executionReport.Text = new Text(orderOutcome.RejectReason!);
+        if (!orderDecision.Accepted)
+            executionReport.Text = new Text(orderDecision.RejectReason!);
 
         return executionReport;
     }

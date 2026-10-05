@@ -1,7 +1,7 @@
 name: CI
 
 # Roda o build e todos os testes em cada PR para develop e main e em cada push para main. Em develop quem
-# chama este CI é a esteira de deploy (2-develop-deploy.yml), que só publica com ele verde no mesmo commit.
+# chama este CI é a esteira de deploy (2-develop.yml), que só publica com ele verde no mesmo commit.
 on:
   pull_request:
     branches: [develop, main]
@@ -25,7 +25,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      # A tela vem antes do .NET: o build do Vite grava src/OrderGenerator/wwwroot, que os testes
+      # A tela vem antes do .NET: o build do Vite grava src/app-base-order-generator-webapi-ecs/wwwroot, que os testes
       # de página do OrderGenerator servem.
       - name: Tela — instalar
         working-directory: frontend
@@ -42,8 +42,8 @@ jobs:
 
       # Sem filtro: entram os testes com PostgreSQL em container e os de integração com o compose.
       # O Docker é o do próprio runner.
-      - run: dotnet build Flowa.sln
-      - run: dotnet test Flowa.sln --no-build -m:1
+      - run: dotnet build Flowa.slnx
+      - run: dotnet test Flowa.slnx --no-build -m:1
 
   e2e-tela:
     runs-on: ubuntu-latest

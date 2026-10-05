@@ -1,7 +1,8 @@
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Orders;
 using Flowa.Shared;
-using OrderAccumulator.Exposure;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
@@ -41,12 +42,12 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
         await ProcessExpectingAcceptanceAsync(TestOrders.NewIncomingOrder("PETR4", orderSide, 50_000, 999.99m));
         await ProcessExpectingAcceptanceAsync(TestOrders.NewIncomingOrder("PETR4", orderSide, 50_000, 999.99m));
 
-        var orderLandingOnTheLimit = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(
+        var orderLandingOnTheLimit = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(
             TestOrders.NewIncomingOrder("PETR4", orderSide, 1_000, 1.00m));
 
         Assert.True(orderLandingOnTheLimit.Accepted);
         Assert.Null(orderLandingOnTheLimit.RejectReason);
-        Assert.Equal(limitSign * ExposureLimit.PerSymbol, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
+        Assert.Equal(limitSign * ExposureLimitPolicy.PerSymbol, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     // CA-7: faltando 999,99 para o limite, uma ordem de 1.000,00 passa um centavo e é rejeitada;
@@ -61,17 +62,17 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
         await ProcessExpectingAcceptanceAsync(TestOrders.NewIncomingOrder("VALE3", orderSide, 1, 0.01m));
 
         var exposureBeforeRejection = await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3");
-        Assert.Equal(limitSign * (ExposureLimit.PerSymbol - 999.99m), exposureBeforeRejection);
+        Assert.Equal(limitSign * (ExposureLimitPolicy.PerSymbol - 999.99m), exposureBeforeRejection);
 
-        var orderOneCentPastTheLimit = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(
+        var orderOneCentPastTheLimit = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(
             TestOrders.NewIncomingOrder("VALE3", orderSide, 10, 100.00m));
 
         Assert.False(orderOneCentPastTheLimit.Accepted);
-        Assert.Equal(ExposureLimit.ExposureLimitRejectionText("VALE3"), orderOneCentPastTheLimit.RejectReason);
+        Assert.Equal(ExposureLimitPolicy.BuildExposureLimitRejectionText("VALE3"), orderOneCentPastTheLimit.RejectReason);
         Assert.Equal(exposureBeforeRejection, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
 
         await ProcessExpectingAcceptanceAsync(TestOrders.NewIncomingOrder("VALE3", orderSide, 1, 999.99m));
-        Assert.Equal(limitSign * ExposureLimit.PerSymbol, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
+        Assert.Equal(limitSign * ExposureLimitPolicy.PerSymbol, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
     }
 
     [Fact]
@@ -83,13 +84,13 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
 
         await ProcessExpectingAcceptanceAsync(TestOrders.NewSellOrder("VIIA4", 10, 100.00m));
 
-        Assert.Equal(ExposureLimit.PerSymbol - 1_000m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
+        Assert.Equal(ExposureLimitPolicy.PerSymbol - 1_000m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
     }
 
     private async Task ProcessExpectingAcceptanceAsync(IncomingOrder incomingOrder)
     {
-        var orderOutcome = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(incomingOrder);
-        Assert.True(orderOutcome.Accepted,
-            $"ordem {incomingOrder.Symbol} {incomingOrder.Side} {incomingOrder.Quantity} x {incomingOrder.Price} foi rejeitada: {orderOutcome.RejectReason}");
+        var orderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(incomingOrder);
+        Assert.True(orderDecision.Accepted,
+            $"ordem {incomingOrder.Symbol} {incomingOrder.Side} {incomingOrder.Quantity} x {incomingOrder.Price} foi rejeitada: {orderDecision.RejectReason}");
     }
 }

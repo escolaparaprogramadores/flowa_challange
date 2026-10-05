@@ -1,14 +1,16 @@
 using System.Net;
-using System.Text;
 using System.Text.Json;
+using System.Text;
+using Base.OrderAccumulator.Application.Exposures;
+using Base.OrderAccumulator.Application.Orders.DeleteAllOrders;
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Infrastructure.Metrics;
+using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Observabilidade;
-using OrderAccumulator.Persistence;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // CA-20, CA-22, CA-29 e CA-30: DELETE /api/orders contra o PostgreSQL real.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
@@ -42,18 +44,17 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
     public async Task Delete_zeroes_the_exposure_memory_and_a_new_order_adds_up_from_zero_in_the_database_and_in_memory()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<SymbolExposureMemory>();
+        var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<SymbolExposureMemoryService>();
         await ProcessOneOrderOnEachSymbolAsync(orderAccumulatorTestApp);
 
         await orderAccumulatorTestApp.CreateClient().DeleteAsync("/api/orders");
-        var exposureMemoryAfterDelete = appSymbolExposureMemory.CurrentSymbolExposures();
-        var orderOutcomeAfterDelete = await orderAccumulatorTestApp.Services.GetRequiredService<IOrderProcessor>()
-            .ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 2.50m));
+        var exposureMemoryAfterDelete = appSymbolExposureMemory.ReadCurrentSymbolExposures();
+        var orderDecisionAfterDelete = await orderAccumulatorTestApp.Services.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 2.50m));
 
         Assert.Equal(ZeroedSymbolExposures, exposureMemoryAfterDelete);
-        Assert.True(orderOutcomeAfterDelete.Accepted);
+        Assert.True(orderDecisionAfterDelete.Accepted);
         SymbolExposure[] exposuresAfterTheNewOrder = [new("PETR4", 0m), new("VALE3", 25.00m), new("VIIA4", 0m)];
-        Assert.Equal(exposuresAfterTheNewOrder, appSymbolExposureMemory.CurrentSymbolExposures());
+        Assert.Equal(exposuresAfterTheNewOrder, appSymbolExposureMemory.ReadCurrentSymbolExposures());
         Assert.Equal(exposuresAfterTheNewOrder, await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
     }
 
@@ -134,19 +135,20 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
     {
         var deleteFailureDatabaseConnectionString = await CreateDatabaseWhereDeletingOrdersFailsAsync();
         await using var deleteFailureDataSource = NpgsqlDataSource.Create(deleteFailureDatabaseConnectionString);
-        var deleteFailureExposureReader = new PostgresExposureReader(deleteFailureDataSource);
-        await new PostgresOrderProcessor(deleteFailureDataSource).ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
-        var symbolExposureMemory = new SymbolExposureMemory();
+        var deleteFailureExposureReader = new SymbolExposureReadRepository(deleteFailureDataSource);
+        await new DecideIncomingOrderTestRunner(deleteFailureDataSource).DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
+        var symbolExposureMemory = new SymbolExposureMemoryService();
         symbolExposureMemory.LoadStoredExposures(await deleteFailureExposureReader.GetSymbolExposuresAsync());
-        var orderHistoryRepository = new OrderHistoryRepository(deleteFailureDataSource);
+        await using var deleteFailureUnitOfWork = new PostgresUnitOfWork(deleteFailureDataSource);
+        var deleteAllOrdersUseCase = new DeleteAllOrdersUseCase(
+            deleteFailureUnitOfWork, new OrderRepository(deleteFailureUnitOfWork), new ExposureRepository(deleteFailureUnitOfWork), symbolExposureMemory);
 
-        var refusedDeleteException = await Assert.ThrowsAsync<PostgresException>(() => symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(
-            () => orderHistoryRepository.DeleteAllOrdersAndZeroExposuresAsync(), CancellationToken.None));
+        var refusedDeleteException = await Assert.ThrowsAsync<PostgresException>(() => deleteAllOrdersUseCase.DeleteAllOrdersAsync(CancellationToken.None));
 
         Assert.Equal("P0001", refusedDeleteException.SqlState);
         SymbolExposure[] exposuresBeforeTheFailedDelete = [new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
         Assert.Equal(exposuresBeforeTheFailedDelete, await deleteFailureExposureReader.GetSymbolExposuresAsync());
-        Assert.Equal(exposuresBeforeTheFailedDelete, symbolExposureMemory.CurrentSymbolExposures());
+        Assert.Equal(exposuresBeforeTheFailedDelete, symbolExposureMemory.ReadCurrentSymbolExposures());
         await using var deleteFailureConnection = await deleteFailureDataSource.OpenConnectionAsync();
         Assert.Equal(1L, await deleteFailureConnection.ExecuteScalarAsync<long>("SELECT count(*) FROM orders"));
     }
@@ -162,10 +164,10 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
 
     private static async Task ProcessOneOrderOnEachSymbolAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp)
     {
-        var appOrderProcessor = orderAccumulatorTestApp.Services.GetRequiredService<IOrderProcessor>();
-        Assert.True((await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m))).Accepted);
-        Assert.True((await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 20, 25.00m))).Accepted);
-        Assert.True((await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("VIIA4", 3, 7.00m))).Accepted);
+        var appOrderDecisionServices = orderAccumulatorTestApp.Services;
+        Assert.True((await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m))).Accepted);
+        Assert.True((await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 20, 25.00m))).Accepted);
+        Assert.True((await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VIIA4", 3, 7.00m))).Accepted);
     }
 
     private async Task<long> CountExposureRowsAsync()

@@ -1,12 +1,22 @@
 using System.Globalization;
 using System.Reflection;
+using Base.OrderAccumulator.Application.Exposures.GetExposures;
+using Base.OrderAccumulator.Application.Exposures;
+using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+using Base.OrderAccumulator.Application.Orders.DeleteAllOrders;
+using Base.OrderAccumulator.Application.Orders.ListOrders;
+using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Entrypoint.Fix;
+using Base.OrderAccumulator.Entrypoint.Workers;
+using Base.OrderAccumulator.Entrypoint;
+using Base.OrderAccumulator.Infrastructure.Metrics;
+using Base.OrderAccumulator.Infrastructure.Persistence;
 using Flowa.Shared;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Primitives;
 using Npgsql;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Fix;
-using OrderAccumulator.Observabilidade;
-using OrderAccumulator.Persistence;
 
 var orderAccumulatorWebBuilder = WebApplication.CreateBuilder(args);
 
@@ -16,14 +26,22 @@ var buildCommitSha = ReadBuildCommitSha() is { Length: 40 } shaFromBuild
     : throw new InvalidOperationException(
         "O build não gravou o commit. Compile dentro do repositório git ou passe -p:SourceRevisionId=<sha completo>.");
 
-var flowaConnectionString = orderAccumulatorWebBuilder.Configuration.GetConnectionString("Flowa")
+var flowaConnectionString = orderAccumulatorWebBuilder.Configuration.GetConnectionString(OrderAccumulatorConfigurationKeys.OrderDatabaseConnectionStringName)
     ?? throw new InvalidOperationException("Defina ConnectionStrings__Flowa com a conexão do PostgreSQL.");
 orderAccumulatorWebBuilder.Services.AddOrderAccumulatorPersistence(flowaConnectionString);
 orderAccumulatorWebBuilder.Services.AddOrderMetrics(orderAccumulatorWebBuilder.Configuration);
+orderAccumulatorWebBuilder.Services.AddSingleton<SymbolExposureMemoryService>();
+orderAccumulatorWebBuilder.Services.TryAddSingleton(TimeProvider.System);
+orderAccumulatorWebBuilder.Services.AddScoped<OrderDecisionDomainService>();
+orderAccumulatorWebBuilder.Services.AddScoped<DecideIncomingOrderUseCase>();
+orderAccumulatorWebBuilder.Services.AddScoped<DeleteAllOrdersUseCase>();
+orderAccumulatorWebBuilder.Services.AddScoped<ListOrdersUseCase>();
+orderAccumulatorWebBuilder.Services.AddScoped<GetExposuresUseCase>();
+orderAccumulatorWebBuilder.Services.AddHostedService<SymbolExposureGaugeWorker>();
 
 // Acceptor FIX 4.4: sobe junto com o app, depois da migração abaixo.
-orderAccumulatorWebBuilder.Services.AddSingleton<OrderFixApplication>();
-orderAccumulatorWebBuilder.Services.AddHostedService<FixAcceptorService>();
+orderAccumulatorWebBuilder.Services.AddSingleton<NewOrderSingleConsumer>();
+orderAccumulatorWebBuilder.Services.AddHostedService<FixAcceptorWorker>();
 
 var orderAccumulatorApp = orderAccumulatorWebBuilder.Build();
 
@@ -34,11 +52,11 @@ await orderAccumulatorApp.Services.LoadSymbolExposureMemoryAsync();
 orderAccumulatorApp.MapGet("/health", () => "Healthy");
 orderAccumulatorApp.MapGet("/version", () => new { commit = buildCommitSha });
 
-orderAccumulatorApp.MapGet("/api/exposures", async (IExposureReader exposureReader, CancellationToken cancellationToken) =>
+orderAccumulatorApp.MapGet("/api/exposures", async (GetExposuresUseCase getExposuresUseCase, CancellationToken cancellationToken) =>
 {
-    var symbolExposures = await exposureReader.GetSymbolExposuresAsync(cancellationToken);
+    var symbolExposures = await getExposuresUseCase.GetExposuresAsync(cancellationToken);
     return new ExposuresResponse(
-        ExposureLimit.PerSymbol,
+        ExposureLimitPolicy.PerSymbol,
         symbolExposures.Select(symbolExposure => new SymbolExposureResponse(
             symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)).ToList());
 });
@@ -46,7 +64,7 @@ orderAccumulatorApp.MapGet("/api/exposures", async (IExposureReader exposureRead
 // O teto de páginas limita o custo de um OFFSET grande no banco.
 const int MaxOrderListPageNumber = 1000;
 
-orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, OrderHistoryRepository orderHistoryRepository, CancellationToken cancellationToken) =>
+orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, ListOrdersUseCase listOrdersUseCase, CancellationToken cancellationToken) =>
 {
     if (!TryReadOrderListPageNumber(orderListRequest.Query["page"], out var orderListPageNumber))
     {
@@ -60,17 +78,15 @@ orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, O
             statusCode: StatusCodes.Status400BadRequest);
     }
 
-    var storedOrderPage = await orderHistoryRepository.ReadStoredOrderPageAsync(orderListPageNumber, cancellationToken);
+    var storedOrderPage = await listOrdersUseCase.ListOrdersAsync(orderListPageNumber, cancellationToken);
     return Results.Json(new OrderPageResponse(
-        orderListPageNumber, OrderHistoryRepository.OrdersPerPage, storedOrderPage.TotalStoredOrders,
+        orderListPageNumber, OrderListReadRepository.OrdersPerPage, storedOrderPage.TotalStoredOrders,
         storedOrderPage.StoredOrders.Select(ToListedOrderResponse).ToList()));
 });
 
-orderAccumulatorApp.MapDelete("/api/orders", async (OrderHistoryRepository orderHistoryRepository, SymbolExposureMemory symbolExposureMemory, CancellationToken cancellationToken) =>
+orderAccumulatorApp.MapDelete("/api/orders", async (DeleteAllOrdersUseCase deleteAllOrdersUseCase, CancellationToken cancellationToken) =>
 {
-    // Depois de entrar, o apagar vai até o fim mesmo se o cliente desistir: banco e memória zeram juntos.
-    await symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(
-        () => orderHistoryRepository.DeleteAllOrdersAndZeroExposuresAsync(CancellationToken.None), cancellationToken);
+    await deleteAllOrdersUseCase.DeleteAllOrdersAsync(cancellationToken);
     return Results.NoContent();
 });
 
@@ -96,7 +112,7 @@ static bool TryReadOrderListPageNumber(StringValues pageQueryValues, out int ord
         && orderListPageNumber is >= 1 and <= MaxOrderListPageNumber;
 }
 
-static ListedOrderResponse ToListedOrderResponse(StoredOrderListRow storedOrder) => new(
+static ListedOrderResponse ToListedOrderResponse(OrderListItem storedOrder) => new(
     storedOrder.ReceivedAt,
     storedOrder.Accepted ? "accepted" : "rejected",
     storedOrder.Symbol,
@@ -113,16 +129,5 @@ static string? ToJsonOrderSideOfStoredOrder(string storedOrderSide) => storedOrd
     [OrderSideCodes.SellOrderSideFixCode] => OrderSideCodes.SellOrderSideJsonCode,
     _ => null
 };
-
-// Corpo do GET /api/exposures (docs/contracts/contracts.md, seção 1). Remaining vira "remaining" no JSON.
-public sealed record ExposuresResponse(decimal Limit, IReadOnlyList<SymbolExposureResponse> Exposures);
-
-public sealed record SymbolExposureResponse(string Symbol, decimal Exposure, decimal Remaining);
-
-// Corpo do GET /api/orders: page, pageSize, total e orders no JSON.
-public sealed record OrderPageResponse(int Page, int PageSize, long Total, IReadOnlyList<ListedOrderResponse> Orders);
-
-public sealed record ListedOrderResponse(
-    DateTime ReceivedAt, string Status, string? Symbol, string? Side, decimal Quantity, decimal Price, string OrderId, string ClOrdId);
 
 public partial class Program;

@@ -1,11 +1,11 @@
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Persistence;
+using Base.OrderAccumulator.Application.Exposures.GetExposures;
+using Base.OrderAccumulator.Application.Exposures;
+using Base.OrderAccumulator.Commons;
 using StatsdClient;
 
-namespace OrderAccumulator.Observabilidade;
+namespace Base.OrderAccumulator.Infrastructure.Metrics;
 
-public static class OrderMetricsSetup
+public static class OrderMetricsExtensions
 {
     // O agente do Datadog roda como sidecar na mesma task (contrato da F5).
     public const string DatadogAgentHost = "localhost";
@@ -15,15 +15,7 @@ public static class OrderMetricsSetup
     {
         orderAccumulatorServices.AddSingleton<IDogStatsd>(_ =>
             CreateOrderMetricsClient(DatadogAgentDogStatsdPort, orderAccumulatorConfiguration));
-        orderAccumulatorServices.AddSingleton<SymbolExposureMemory>();
-        orderAccumulatorServices.TryAddSingleton(TimeProvider.System);
-        orderAccumulatorServices.AddSingleton<PostgresOrderProcessor>();
-        orderAccumulatorServices.Replace(ServiceDescriptor.Singleton<IOrderProcessor>(orderAccumulatorServiceProvider =>
-            new OrderProcessorWithMetrics(
-                orderAccumulatorServiceProvider.GetRequiredService<PostgresOrderProcessor>(),
-                orderAccumulatorServiceProvider.GetRequiredService<IDogStatsd>(),
-                orderAccumulatorServiceProvider.GetRequiredService<SymbolExposureMemory>())));
-        orderAccumulatorServices.AddHostedService<SymbolExposureGaugeService>();
+        orderAccumulatorServices.AddSingleton<IOrderMetrics, DatadogOrderMetricsAdapter>();
         return orderAccumulatorServices;
     }
 
@@ -36,9 +28,9 @@ public static class OrderMetricsSetup
             {
                 StatsdServerName = DatadogAgentHost,
                 StatsdPort = dogStatsdPort,
-                Environment = orderAccumulatorConfiguration["DD_ENV"],
-                ServiceName = orderAccumulatorConfiguration["DD_SERVICE"],
-                ServiceVersion = orderAccumulatorConfiguration["DD_VERSION"]
+                Environment = orderAccumulatorConfiguration[OrderAccumulatorConfigurationKeys.DatadogEnvironment],
+                ServiceName = orderAccumulatorConfiguration[OrderAccumulatorConfigurationKeys.DatadogService],
+                ServiceVersion = orderAccumulatorConfiguration[OrderAccumulatorConfigurationKeys.DatadogVersion]
             },
             IgnoreDogStatsdSendFailure);
         return orderMetricsClient;
@@ -47,8 +39,8 @@ public static class OrderMetricsSetup
     // Uma única leitura na subida, antes do acceptor FIX abrir; depois disso o gauge só lê a memória.
     public static async Task LoadSymbolExposureMemoryAsync(this IServiceProvider orderAccumulatorServiceProvider, CancellationToken cancellationToken = default)
     {
-        var storedSymbolExposures = await orderAccumulatorServiceProvider.GetRequiredService<IExposureReader>().GetSymbolExposuresAsync(cancellationToken);
-        orderAccumulatorServiceProvider.GetRequiredService<SymbolExposureMemory>().LoadStoredExposures(storedSymbolExposures);
+        var storedSymbolExposures = await orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>().GetSymbolExposuresAsync(cancellationToken);
+        orderAccumulatorServiceProvider.GetRequiredService<SymbolExposureMemoryService>().LoadStoredExposures(storedSymbolExposures);
     }
 
     // Sem agente escutando (local, testes, agente desligado) o UDP falha a cada envio. Métrica é

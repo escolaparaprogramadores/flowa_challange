@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+using Base.OrderGenerator.Application.Orders.SendOrder;
+using Base.OrderGenerator.Commons;
+using Base.OrderGenerator.Domain.Orders;
 using Flowa.Shared;
 using Flowa.Shared.Fix;
 using QuickFix;
@@ -8,21 +11,10 @@ using QuickFix.Store;
 using QuickFix.Transport;
 using FixSide = QuickFix.Fields.Side;
 
-namespace OrderGenerator;
-
-public enum OrderOutcome
-{
-    Accepted,
-    Rejected,
-    NoLoggedOnSession,
-    ExecutionReportTimeout,
-    UnexpectedExecutionReport
-}
-
-public sealed record OrderResult(OrderOutcome Outcome, string ClOrdId, string? OrderId = null, string? ExecId = null, string? RejectionText = null);
+namespace Base.OrderGenerator.Infrastructure;
 
 // Ponta initiator da sessão FIX: manda a NewOrderSingle e espera o ExecutionReport do mesmo ClOrdID.
-public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
+public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHostedService, IDisposable
 {
     public static readonly TimeSpan ExecutionReportTimeout = TimeSpan.FromSeconds(5);
 
@@ -34,35 +26,35 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     {
         var initiatorSettings = LoadInitiatorSessionSettings(orderGeneratorConfiguration);
         _fixSocketInitiator = new SocketInitiator(
-            this, new MemoryStoreFactory(), initiatorSettings, new LogDaSessaoFixSemTraceParent(new ScreenLogFactory(initiatorSettings)), null);
+            this, new MemoryStoreFactory(), initiatorSettings, new TraceParentHidingLogFactory(new ScreenLogFactory(initiatorSettings)), null);
     }
 
     internal int OrdersAwaitingExecutionReportCount => _ordersAwaitingExecutionReport.Count;
 
-    public async Task<OrderResult> SendNewOrderSingleAsync(ValidOrder order)
+    public async Task<SentOrderResult> SendOrderAsync(ValidOrder order)
     {
         var clOrdId = Guid.NewGuid().ToString("N");
-        using var envioDaOrdem = RastroDaOrdemFix.IniciarEnvioDaOrdem();
+        using var orderSending = FixOrderTraceProvider.StartOrderSending();
 
         // Sem sessão logada a ordem não sai: o QuickFIX a guardaria na store e mandaria depois do logon (D-34).
         var initiatorSessionId = _initiatorSessionId;
         var initiatorSession = initiatorSessionId is null ? null : Session.LookupSession(initiatorSessionId);
         if (initiatorSessionId is null || initiatorSession is null || !initiatorSession.IsLoggedOn)
-            return new OrderResult(OrderOutcome.NoLoggedOnSession, clOrdId);
+            return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
         // A espera é registrada antes do envio porque a resposta pode chegar antes do Send voltar.
         var executionReportWaiter = new TaskCompletionSource<Message>(TaskCreationOptions.RunContinuationsAsynchronously);
         _ordersAwaitingExecutionReport[clOrdId] = executionReportWaiter;
         try
         {
-            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order, RastroDaOrdemFix.TraceParentDoEnvio(envioDaOrdem)), initiatorSessionId))
-                return new OrderResult(OrderOutcome.NoLoggedOnSession, clOrdId);
+            if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, order, FixOrderTraceProvider.GetTraceParentOfOrderSending(orderSending)), initiatorSessionId))
+                return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
-            return ToOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
+            return ToSentOrderResult(clOrdId, await executionReportWaiter.Task.WaitAsync(ExecutionReportTimeout));
         }
         catch (TimeoutException)
         {
-            return new OrderResult(OrderOutcome.ExecutionReportTimeout, clOrdId);
+            return new SentOrderResult(SentOrderStatus.ExecutionReportTimeout, clOrdId);
         }
         finally
         {
@@ -73,9 +65,9 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     private static SessionSettings LoadInitiatorSessionSettings(IConfiguration orderGeneratorConfiguration)
     {
         var initiatorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, "initiator.cfg"));
-        var acceptorHost = orderGeneratorConfiguration["Fix:AcceptorHost"]
+        var acceptorHost = orderGeneratorConfiguration[OrderGeneratorConfigurationKeys.FixAcceptorHost]
             ?? throw new InvalidOperationException("Configuração Fix:AcceptorHost ausente.");
-        var acceptorPort = orderGeneratorConfiguration.GetValue<int?>("Fix:AcceptorPort")
+        var acceptorPort = orderGeneratorConfiguration.GetValue<int?>(OrderGeneratorConfigurationKeys.FixAcceptorPort)
             ?? throw new InvalidOperationException("Configuração Fix:AcceptorPort ausente.");
 
         foreach (var configuredSessionId in initiatorSettings.GetSessions())
@@ -90,7 +82,7 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
         return initiatorSettings;
     }
 
-    private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, ValidOrder order, string? traceParentDoEnvio)
+    private static QuickFix.FIX44.NewOrderSingle BuildNewOrderSingle(string clOrdId, ValidOrder order, string? orderSendingTraceParent)
     {
         var newOrderSingle = new QuickFix.FIX44.NewOrderSingle(
             new ClOrdID(clOrdId),
@@ -100,22 +92,22 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
             new OrdType(OrdType.LIMIT));
         newOrderSingle.Set(new OrderQty(order.OrderQuantity));
         newOrderSingle.Set(new Price(order.OrderPrice));
-        if (traceParentDoEnvio is not null)
-            newOrderSingle.SetField(new StringField(RastroDaOrdemFix.TagTraceParent, traceParentDoEnvio));
+        if (orderSendingTraceParent is not null)
+            newOrderSingle.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, orderSendingTraceParent));
         return newOrderSingle;
     }
 
-    private static OrderResult ToOrderResult(string clOrdId, Message executionReport)
+    private static SentOrderResult ToSentOrderResult(string clOrdId, Message executionReport)
     {
         var orderId = executionReport.GetString(Tags.OrderID);
         var execId = executionReport.GetString(Tags.ExecID);
 
         return executionReport.GetChar(Tags.ExecType) switch
         {
-            ExecType.NEW => new OrderResult(OrderOutcome.Accepted, clOrdId, orderId, execId),
-            ExecType.REJECTED => new OrderResult(OrderOutcome.Rejected, clOrdId, orderId, execId,
+            ExecType.NEW => new SentOrderResult(SentOrderStatus.Accepted, clOrdId, orderId, execId),
+            ExecType.REJECTED => new SentOrderResult(SentOrderStatus.Rejected, clOrdId, orderId, execId,
                 executionReport.IsSetField(Tags.Text) ? executionReport.GetString(Tags.Text) : null),
-            _ => new OrderResult(OrderOutcome.UnexpectedExecutionReport, clOrdId, orderId, execId)
+            _ => new SentOrderResult(SentOrderStatus.UnexpectedExecutionReport, clOrdId, orderId, execId)
         };
     }
 
@@ -156,23 +148,23 @@ public sealed class FixOrderClient : IApplication, IHostedService, IDisposable
     public void Dispose() => _fixSocketInitiator.Dispose();
 
     // O ScreenLog escreve a mensagem FIX crua no stdout; o valor da 5100 (trace id) fica de fora.
-    private sealed class LogDaSessaoFixSemTraceParent(ILogFactory logDaTela) : ILogFactory
+    private sealed class TraceParentHidingLogFactory(ILogFactory screenLogFactory) : ILogFactory
     {
-        public ILog Create(SessionID sessaoFix) => new LogSemTraceParent(logDaTela.Create(sessaoFix));
+        public ILog Create(SessionID fixSessionId) => new TraceParentHidingLog(screenLogFactory.Create(fixSessionId));
 
-        public ILog CreateNonSessionLog() => new LogSemTraceParent(logDaTela.CreateNonSessionLog());
+        public ILog CreateNonSessionLog() => new TraceParentHidingLog(screenLogFactory.CreateNonSessionLog());
     }
 
-    private sealed class LogSemTraceParent(ILog logDaSessaoFix) : ILog
+    private sealed class TraceParentHidingLog(ILog fixSessionLog) : ILog
     {
-        public void Clear() => logDaSessaoFix.Clear();
+        public void Clear() => fixSessionLog.Clear();
 
-        public void OnIncoming(string mensagemRecebida) => logDaSessaoFix.OnIncoming(RastroDaOrdemFix.OcultarTraceParentNoLog(mensagemRecebida));
+        public void OnIncoming(string incomingFixMessage) => fixSessionLog.OnIncoming(FixOrderTraceProvider.HideTraceParentInLog(incomingFixMessage));
 
-        public void OnOutgoing(string mensagemEnviada) => logDaSessaoFix.OnOutgoing(RastroDaOrdemFix.OcultarTraceParentNoLog(mensagemEnviada));
+        public void OnOutgoing(string outgoingFixMessage) => fixSessionLog.OnOutgoing(FixOrderTraceProvider.HideTraceParentInLog(outgoingFixMessage));
 
-        public void OnEvent(string eventoDaSessao) => logDaSessaoFix.OnEvent(RastroDaOrdemFix.OcultarTraceParentNoLog(eventoDaSessao));
+        public void OnEvent(string fixSessionEvent) => fixSessionLog.OnEvent(FixOrderTraceProvider.HideTraceParentInLog(fixSessionEvent));
 
-        public void Dispose() => logDaSessaoFix.Dispose();
+        public void Dispose() => fixSessionLog.Dispose();
     }
 }

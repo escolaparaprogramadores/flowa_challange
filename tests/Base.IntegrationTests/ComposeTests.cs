@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace Flowa.IntegrationTests;
+namespace Base.IntegrationTests;
 
 [Collection(ComposeCollection.CollectionName)]
 [Trait("Category", "Integration")]
@@ -17,8 +17,8 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
 
         Assert.Equal("running", orderGeneratorContainer.ContainerStatus);
         Assert.Equal("running", orderAccumulatorContainer.ContainerStatus);
-        Assert.Equal("dotnet OrderGenerator.dll", orderGeneratorContainer.ContainerEntrypoint);
-        Assert.Equal("dotnet OrderAccumulator.dll", orderAccumulatorContainer.ContainerEntrypoint);
+        Assert.Equal("dotnet app-base-order-generator-webapi-ecs.dll", orderGeneratorContainer.ContainerEntrypoint);
+        Assert.Equal("dotnet app-base-order-accumulator-webapi-ecs.dll", orderAccumulatorContainer.ContainerEntrypoint);
 
         var generatorFixMessages = FixLog.ParseFixMessages(await composeUnderTest.ReadServiceLogAsync("ordergenerator"));
         var initiatorLogon = generatorFixMessages.First(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERGENERATOR");
@@ -254,7 +254,7 @@ public sealed class ExposureLimitOutsideConfigTests
     public void Limite_de_exposicao_nao_aparece_no_compose_nos_Dockerfiles_nem_em_appsettings()
     {
         var repoRoot = RepoPaths.FindRepoRoot();
-        var packagingFiles = new[] { "docker-compose.yml", "src/OrderGenerator/Dockerfile", "src/OrderAccumulator/Dockerfile" }
+        var packagingFiles = new[] { "docker-compose.yml", "src/app-base-order-generator-webapi-ecs/Dockerfile", "src/app-base-order-accumulator-webapi-ecs/Dockerfile" }
             .Select(packagingRelativePath => Path.Combine(repoRoot, packagingRelativePath))
             .ToList();
         var appSettingsFiles = Directory.EnumerateFiles(Path.Combine(repoRoot, "src"), "appsettings*.json", SearchOption.AllDirectories)
@@ -262,7 +262,7 @@ public sealed class ExposureLimitOutsideConfigTests
             .ToList();
 
         Assert.All(packagingFiles, packagingPath => Assert.True(File.Exists(packagingPath), $"{packagingPath} não existe"));
-        Assert.Contains(appSettingsFiles, appSettingsPath => appSettingsPath.Contains("OrderAccumulator"));
+        Assert.Contains(appSettingsFiles, appSettingsPath => appSettingsPath.Contains("app-base-order-accumulator-webapi-ecs"));
 
         var configFilesWithLimit = packagingFiles.Concat(appSettingsFiles)
             .Where(checkedConfigPath => ExposureLimitPattern.IsMatch(File.ReadAllText(checkedConfigPath)))
@@ -289,7 +289,7 @@ public sealed class DockerBuildContextTests
                 ".vs/", ".vscode/", ".idea/",
                 "**/bin/", "**/obj/", "**/node_modules/", "**/dist/",
                 "**/TestResults/", "**/playwright-report/", "**/test-results/",
-                "src/OrderGenerator/wwwroot/",
+                "src/app-base-order-generator-webapi-ecs/wwwroot/",
                 ".env", ".env.*", "*.log",
             },
             dockerignorePatterns);

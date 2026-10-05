@@ -1,3 +1,4 @@
+using Base.OrderGenerator.Entrypoint;
 using System.Diagnostics;
 using System.Net;
 using Microsoft.AspNetCore.Builder;
@@ -8,7 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 
-namespace OrderGenerator.Tests;
+namespace Base.OrderGenerator.Tests;
 
 // D-10: o OrderGenerator só repassa a exposição do OrderAccumulator.
 public sealed class ExposureProxyTests
@@ -153,7 +154,7 @@ public sealed class OrderGeneratorPageTests : IDisposable
 
         var pageResponse = await orderGeneratorClient.GetAsync(pagePath);
 
-        // A página tem de sair só da raiz do teste, mesmo com o build da tela em src/OrderGenerator/wwwroot.
+        // A página tem de sair só da raiz do teste, mesmo com o build da tela em src/app-base-order-generator-webapi-ecs/wwwroot.
         // Em Development o provedor vira um composto com o wwwroot do projeto na frente; aqui ele é só a pasta do teste.
         var orderGeneratorHostEnvironment = orderGeneratorFactory.Services.GetRequiredService<IWebHostEnvironment>();
         Assert.Equal(Environments.Production, orderGeneratorHostEnvironment.EnvironmentName);
@@ -167,7 +168,7 @@ public sealed class OrderGeneratorPageTests : IDisposable
     [Fact]
     public async Task Sem_trocar_a_raiz_a_pagina_sai_do_wwwroot_ao_lado_do_binario()
     {
-        // É de lá que o build e o publish servem a página que a F5 gera em src/OrderGenerator/wwwroot.
+        // É de lá que o build e o publish servem a página que a F5 gera em src/app-base-order-generator-webapi-ecs/wwwroot.
         var binaryWebRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
         var binaryIndexHtml = Path.Combine(binaryWebRoot, "index.html");
         var indexCreatedByThisTest = !File.Exists(binaryIndexHtml);
@@ -256,42 +257,4 @@ public sealed class OrderGeneratorPageTests : IDisposable
     }
 
     public void Dispose() => Directory.Delete(_temporaryWebRoot, recursive: true);
-}
-
-// Contrato §4: a porta HTTP vem de ASPNETCORE_HTTP_PORTS; 8080 só quando ninguém informou.
-public sealed class OrderGeneratorHttpPortTests
-{
-    [Fact]
-    public void Porta_http_vem_da_variavel_do_contrato_e_8080_so_sem_ela()
-    {
-        var originalAspNetCoreHttpPorts = Environment.GetEnvironmentVariable("ASPNETCORE_HTTP_PORTS");
-        var originalAspNetCoreUrls = Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
-        try
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null);
-
-            Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", "18080");
-            Assert.Equal("18080", ReadHttpPortsChosenAtOrderGeneratorStartup());
-
-            Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", null);
-            Assert.Equal(OrderGeneratorHttpPortConfiguration.DefaultOrderGeneratorHttpPort, ReadHttpPortsChosenAtOrderGeneratorStartup());
-
-            // Com ASPNETCORE_URLS informada quem decide é ela: o 8080 padrão não pode entrar por cima.
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:18081");
-            Assert.Null(ReadHttpPortsChosenAtOrderGeneratorStartup());
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", originalAspNetCoreHttpPorts);
-            Environment.SetEnvironmentVariable("ASPNETCORE_URLS", originalAspNetCoreUrls);
-        }
-    }
-
-    // Mesma raiz do Program: lê o appsettings.json que vai junto do binário.
-    private static string? ReadHttpPortsChosenAtOrderGeneratorStartup()
-    {
-        var orderGeneratorStartupBuilder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory });
-        OrderGeneratorHttpPortConfiguration.UseDefaultOrderGeneratorHttpPortWhenMissing(orderGeneratorStartupBuilder);
-        return orderGeneratorStartupBuilder.WebHost.GetSetting(WebHostDefaults.HttpPortsKey);
-    }
 }

@@ -14,7 +14,7 @@ using QuickFix.Store;
 // estático, então duas classes rodando juntas brigariam pelo mesmo nome.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
-namespace OrderGenerator.Tests;
+namespace Base.OrderGenerator.Tests;
 
 // Faz o papel do OrderAccumulator só no que o OrderGenerator enxerga: aceita a sessão FIX,
 // guarda as NewOrderSingle recebidas e responde com o ExecutionReport que o teste escolher.

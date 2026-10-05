@@ -1,9 +1,11 @@
 using System.Net;
 using System.Reflection;
 using System.Text.Json;
+using Base.OrderGenerator.Application.Orders.SendOrder;
+using Base.OrderGenerator.Domain.Orders;
 using Flowa.Shared;
 
-namespace OrderGenerator;
+namespace Base.OrderGenerator.Entrypoint;
 
 // Rotas HTTP do contrato v1. Recebem, chamam quem faz o trabalho e traduzem o resultado.
 public static class OrderGeneratorApiEndpoints
@@ -21,7 +23,7 @@ public static class OrderGeneratorApiEndpoints
 
     public static void MapOrderGeneratorRoutes(this WebApplication orderGeneratorApp, string buildCommitSha)
     {
-        orderGeneratorApp.MapPost("/api/orders", PostOrder);
+        orderGeneratorApp.MapPost("/api/orders", PostOrderAsync);
         orderGeneratorApp.MapGet("/api/orders", GetOrdersPage);
         orderGeneratorApp.MapDelete("/api/orders", DeleteAllOrders);
         orderGeneratorApp.MapGet("/api/exposures", GetExposures);
@@ -44,7 +46,7 @@ public static class OrderGeneratorApiEndpoints
     public static IResult BuildOrderGeneratorUnexpectedErrorResponse() =>
         Results.Json(new { status = "error", message = UnexpectedErrorMessage }, statusCode: StatusCodes.Status500InternalServerError);
 
-    private static async Task<IResult> PostOrder(HttpRequest orderHttpRequest, FixOrderClient fixOrderClient)
+    private static async Task<IResult> PostOrderAsync(HttpRequest orderHttpRequest, SendOrderUseCase sendOrderUseCase)
     {
         var rawOrderFields = await ReadRawOrderFields(orderHttpRequest);
         var orderValidation = OrderValidator.ValidateOrderFromJson(
@@ -57,14 +59,14 @@ public static class OrderGeneratorApiEndpoints
         }
 
         var validOrder = orderValidation.ValidatedOrder!;
-        var fixOrderResult = await fixOrderClient.SendNewOrderSingleAsync(validOrder);
+        var sentOrderResult = await sendOrderUseCase.SendOrderAsync(validOrder);
 
-        return fixOrderResult.Outcome switch
+        return sentOrderResult.Status switch
         {
-            OrderOutcome.Accepted => Results.Json(BuildOrderResponseBody("accepted", fixOrderResult, validOrder, AcceptedOrderMessage)),
-            OrderOutcome.Rejected => Results.Json(BuildOrderResponseBody("rejected", fixOrderResult, validOrder,
-                fixOrderResult.RejectionText ?? RejectedOrderWithoutTextMessage)),
-            OrderOutcome.NoLoggedOnSession or OrderOutcome.ExecutionReportTimeout => BuildOrderAccumulatorCommunicationErrorResponse(OrderCommunicationMessage),
+            SentOrderStatus.Accepted => Results.Json(BuildOrderResponseBody("accepted", sentOrderResult, validOrder, AcceptedOrderMessage)),
+            SentOrderStatus.Rejected => Results.Json(BuildOrderResponseBody("rejected", sentOrderResult, validOrder,
+                sentOrderResult.RejectionText ?? RejectedOrderWithoutTextMessage)),
+            SentOrderStatus.NoLoggedOnSession or SentOrderStatus.ExecutionReportTimeout => BuildOrderAccumulatorCommunicationErrorResponse(OrderCommunicationMessage),
             _ => BuildOrderGeneratorUnexpectedErrorResponse()
         };
     }
@@ -143,12 +145,12 @@ public static class OrderGeneratorApiEndpoints
         Results.Json(new { status = "communication_error", message = communicationErrorMessage },
             statusCode: StatusCodes.Status503ServiceUnavailable);
 
-    private static object BuildOrderResponseBody(string orderStatus, OrderResult fixOrderResult, ValidOrder validOrder, string orderMessage) => new
+    private static object BuildOrderResponseBody(string orderStatus, SentOrderResult sentOrderResult, ValidOrder validOrder, string orderMessage) => new
     {
         status = orderStatus,
-        clOrdId = fixOrderResult.ClOrdId,
-        orderId = fixOrderResult.OrderId,
-        execId = fixOrderResult.ExecId,
+        clOrdId = sentOrderResult.ClOrdId,
+        orderId = sentOrderResult.OrderId,
+        execId = sentOrderResult.ExecId,
         symbol = validOrder.OrderSymbol,
         side = validOrder.OrderSide.ToJsonOrderSide(),
         quantity = validOrder.OrderQuantity,

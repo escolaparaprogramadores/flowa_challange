@@ -2,9 +2,8 @@ using System.Net;
 using System.Text.Json;
 using Dapper;
 using Microsoft.Extensions.DependencyInjection;
-using OrderAccumulator.Exposure;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // CA-21, CA-32, CA-33, CA-42 e CA-34: GET /api/orders?page=n contra o PostgreSQL real, no formato do contrato.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
@@ -18,7 +17,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     public async Task Page_one_and_two_list_the_newest_orders_first_ten_per_page_with_the_real_total()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var clOrdIdsInArrivalOrder = await ProcessOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 12);
+        var clOrdIdsInArrivalOrder = await DecideOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 12);
 
         var firstOrderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1");
         var secondOrderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=2");
@@ -34,9 +33,9 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     public async Task Each_listed_order_carries_the_eight_contract_fields_for_accepted_and_rejected_orders()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var appOrderProcessor = orderAccumulatorTestApp.Services.GetRequiredService<IOrderProcessor>();
-        var acceptedBuyOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
-        var rejectedSellOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 100_000, 1.00m));
+        var appOrderDecisionServices = orderAccumulatorTestApp.Services;
+        var acceptedBuyOutcome = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
+        var rejectedSellOutcome = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 100_000, 1.00m));
         var storedReceivedAtByClOrdId = await ReadStoredReceivedAtByClOrdIdAsync();
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1");
@@ -55,8 +54,8 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     public async Task Rejected_order_with_unknown_symbol_and_side_from_fix_lists_the_symbol_and_a_null_side()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var appOrderProcessor = orderAccumulatorTestApp.Services.GetRequiredService<IOrderProcessor>();
-        var rejectedUnknownSideOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewIncomingOrder("ABCD3", '7', 10, 1.00m));
+        var appOrderDecisionServices = orderAccumulatorTestApp.Services;
+        var rejectedUnknownSideOutcome = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewIncomingOrder("ABCD3", '7', 10, 1.00m));
 
         var listedOrder = Assert.Single((await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1")).GetProperty("orders").EnumerateArray());
 
@@ -99,7 +98,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     public async Task Page_size_sent_by_the_client_is_ignored_and_the_server_keeps_ten()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        await ProcessOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 12);
+        await DecideOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 12);
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1&pageSize=50");
 
@@ -113,7 +112,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     public async Task Page_past_the_last_one_returns_an_empty_list_with_the_real_total(int pastLastPageNumber)
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        await ProcessOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 12);
+        await DecideOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 12);
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, $"/api/orders?page={pastLastPageNumber}");
 
@@ -125,7 +124,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     public async Task Missing_page_returns_the_first_page()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var clOrdIdsInArrivalOrder = await ProcessOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 11);
+        var clOrdIdsInArrivalOrder = await DecideOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 11);
 
         var orderPage = await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders");
 
@@ -172,7 +171,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     public async Task Listing_orders_writes_no_information_log_per_call()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        await ProcessOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 2);
+        await DecideOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 2);
         var logLineCountBeforeTheListing = orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines.Count;
 
         await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1");
@@ -182,20 +181,20 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         var informationLogLinesOfTheListing = orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines
             .Skip(logLineCountBeforeTheListing)
             .Where(capturedLogLine => !capturedLogLine.StartsWith("Trace ") && !capturedLogLine.StartsWith("Debug "))
-            .Where(capturedLogLine => !capturedLogLine.Contains(" QuickFix") && !capturedLogLine.Contains(" OrderAccumulator.Fix."))
+            .Where(capturedLogLine => !capturedLogLine.Contains(" QuickFix") && !capturedLogLine.Contains(" Base.OrderAccumulator.Entrypoint.Fix."))
             .ToList();
         Assert.Empty(informationLogLinesOfTheListing);
     }
 
     // Uma por vez, para cada ordem ter received_at e id maiores que a anterior.
-    private static async Task<List<string>> ProcessOrdersOneAfterAnotherAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp, int orderCount)
+    private static async Task<List<string>> DecideOrdersOneAfterAnotherAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp, int orderCount)
     {
-        var appOrderProcessor = orderAccumulatorTestApp.Services.GetRequiredService<IOrderProcessor>();
+        var appOrderDecisionServices = orderAccumulatorTestApp.Services;
         var clOrdIdsInArrivalOrder = new List<string>();
         for (var orderNumber = 0; orderNumber < orderCount; orderNumber++)
         {
-            var orderOutcome = await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1.00m));
-            clOrdIdsInArrivalOrder.Add(orderOutcome.ClOrdId);
+            var orderDecision = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1.00m));
+            clOrdIdsInArrivalOrder.Add(orderDecision.ClOrdId);
         }
         return clOrdIdsInArrivalOrder;
     }

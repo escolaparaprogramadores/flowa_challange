@@ -1,11 +1,12 @@
+using Base.OrderAccumulator.Application.Exposures.GetExposures;
+using Base.OrderAccumulator.Domain.Exposures;
 using Dapper;
 using Flowa.Shared;
 using Npgsql;
-using OrderAccumulator.Exposure;
 
-namespace OrderAccumulator.Persistence;
+namespace Base.OrderAccumulator.Infrastructure.Persistence;
 
-public sealed class PostgresExposureReader(NpgsqlDataSource orderDatabaseDataSource) : IExposureReader
+public sealed class SymbolExposureReadRepository(NpgsqlDataSource orderDatabaseDataSource) : ISymbolExposureReadRepository
 {
     private const string SelectExposuresSql = """
         SELECT symbol AS Symbol, exposure AS Exposure

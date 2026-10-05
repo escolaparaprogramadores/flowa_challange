@@ -1,4 +1,4 @@
-# Build a partir da raiz do repositório: docker build -f src/OrderAccumulator/Dockerfile .
+# Build a partir da raiz do repositório: docker build -f src/app-base-order-accumulator-webapi-ecs/Dockerfile .
 # Tracer do Datadog (dd-trace-dotnet). Mesma versão e mesmos SHA-256 nas duas imagens; pacote que não
 # bate com o SHA da arquitetura derruba o build. Baixa na arquitetura de quem constrói: é só um tar.
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS tracer
@@ -21,17 +21,17 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY Directory.Build.props ./
 COPY src/Flowa.Shared/Flowa.Shared.csproj src/Flowa.Shared/
-COPY src/OrderAccumulator/OrderAccumulator.csproj src/OrderAccumulator/
-RUN dotnet restore src/OrderAccumulator/OrderAccumulator.csproj
+COPY src/app-base-order-accumulator-webapi-ecs/app-base-order-accumulator-webapi-ecs.csproj src/app-base-order-accumulator-webapi-ecs/
+RUN dotnet restore src/app-base-order-accumulator-webapi-ecs/app-base-order-accumulator-webapi-ecs.csproj
 COPY src/Flowa.Shared/ src/Flowa.Shared/
-COPY src/OrderAccumulator/ src/OrderAccumulator/
+COPY src/app-base-order-accumulator-webapi-ecs/ src/app-base-order-accumulator-webapi-ecs/
 # Os apps só sobem com o commit gravado no build (rota /version). O build precisa do .git no contexto:
 # num clone o SHA sai dele; numa worktree, onde .git é só um arquivo, quem chama passa SOURCE_REVISION_ID.
 ARG SOURCE_REVISION_ID=
 RUN --mount=type=bind,source=.git,target=/repo/.git \
     sha="${SOURCE_REVISION_ID:-$(git -c safe.directory='*' -C /repo rev-parse HEAD 2>/dev/null)}"; \
     if [ ${#sha} -ne 40 ]; then echo "Sem o commit: o .git não deu o SHA (worktree?); passe SOURCE_REVISION_ID=<sha completo>" >&2; exit 1; fi; \
-    dotnet publish src/OrderAccumulator/OrderAccumulator.csproj -c Release -o /app --no-restore \
+    dotnet publish src/app-base-order-accumulator-webapi-ecs/app-base-order-accumulator-webapi-ecs.csproj -c Release -o /app --no-restore \
         -p:SourceRevisionId=$sha -p:EnableSourceControlManagerQueries=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
@@ -48,4 +48,4 @@ ENV CORECLR_ENABLE_PROFILING=1 \
     DD_TRACE_SAMPLE_RATE=1.0
 USER $APP_UID
 EXPOSE 8081 9876
-ENTRYPOINT ["dotnet", "OrderAccumulator.dll"]
+ENTRYPOINT ["dotnet", "app-base-order-accumulator-webapi-ecs.dll"]

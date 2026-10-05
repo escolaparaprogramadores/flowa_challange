@@ -1,4 +1,7 @@
-using OrderGenerator;
+using Base.OrderGenerator.Application.Orders.SendOrder;
+using Base.OrderGenerator.Commons;
+using Base.OrderGenerator.Entrypoint;
+using Base.OrderGenerator.Infrastructure;
 
 // O /version promete o sha completo; sem ele o app não sobe, para o erro aparecer no build e não no aceite.
 var buildCommitSha = OrderGeneratorApiEndpoints.ReadBuildCommitSha() is { Length: 40 } shaFromBuild
@@ -16,10 +19,12 @@ OrderGeneratorHttpPortConfiguration.UseDefaultOrderGeneratorHttpPortWhenMissing(
 
 orderGeneratorBuilder.Services.AddSingleton<FixOrderClient>();
 orderGeneratorBuilder.Services.AddHostedService(orderGeneratorServices => orderGeneratorServices.GetRequiredService<FixOrderClient>());
+orderGeneratorBuilder.Services.AddSingleton<IOrderAccumulatorPort>(orderGeneratorServices => orderGeneratorServices.GetRequiredService<FixOrderClient>());
+orderGeneratorBuilder.Services.AddScoped<SendOrderUseCase>();
 
 orderGeneratorBuilder.Services.AddHttpClient(OrderGeneratorApiEndpoints.AccumulatorHttpClientName, (orderGeneratorServices, accumulatorClient) =>
 {
-    var accumulatorBaseUrl = orderGeneratorServices.GetRequiredService<IConfiguration>()["OrderAccumulator:BaseUrl"]
+    var accumulatorBaseUrl = orderGeneratorServices.GetRequiredService<IConfiguration>()[OrderGeneratorConfigurationKeys.OrderAccumulatorBaseUrl]
         ?? throw new InvalidOperationException("Configuração OrderAccumulator:BaseUrl ausente.");
     accumulatorClient.BaseAddress = new Uri(accumulatorBaseUrl);
     accumulatorClient.Timeout = TimeSpan.FromSeconds(5);
@@ -40,16 +45,3 @@ orderGeneratorApp.Run();
 
 // Deixa o WebApplicationFactory dos testes enxergar o ponto de entrada.
 public partial class Program;
-
-// Contrato §4: a porta HTTP vem de ASPNETCORE_HTTP_PORTS; 8080 só quando ninguém informou porta nem URL.
-public static class OrderGeneratorHttpPortConfiguration
-{
-    public const string DefaultOrderGeneratorHttpPort = "8080";
-
-    public static void UseDefaultOrderGeneratorHttpPortWhenMissing(WebApplicationBuilder orderGeneratorBuilder)
-    {
-        if (string.IsNullOrEmpty(orderGeneratorBuilder.Configuration["HTTP_PORTS"])
-            && string.IsNullOrEmpty(orderGeneratorBuilder.Configuration["URLS"]))
-            orderGeneratorBuilder.WebHost.UseSetting(WebHostDefaults.HttpPortsKey, DefaultOrderGeneratorHttpPort);
-    }
-}

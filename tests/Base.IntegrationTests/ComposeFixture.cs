@@ -3,7 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace Flowa.IntegrationTests;
+namespace Base.IntegrationTests;
 
 // Sobe o docker-compose.yml da raiz num projeto próprio (nome, porta e volume isolados),
 // para não brigar com um compose que já esteja de pé na máquina. Derruba tudo no fim.
@@ -206,9 +206,9 @@ public static class RepoPaths
     public static string FindRepoRoot()
     {
         for (var repoRootCandidateDirectory = new DirectoryInfo(AppContext.BaseDirectory); repoRootCandidateDirectory is not null; repoRootCandidateDirectory = repoRootCandidateDirectory.Parent)
-            if (File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "docker-compose.yml")) && File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "Flowa.sln")))
+            if (File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "docker-compose.yml")) && File.Exists(Path.Combine(repoRootCandidateDirectory.FullName, "Flowa.slnx")))
                 return repoRootCandidateDirectory.FullName;
-        throw new InvalidOperationException("não achei a raiz do repositório (docker-compose.yml + Flowa.sln)");
+        throw new InvalidOperationException("não achei a raiz do repositório (docker-compose.yml + Flowa.slnx)");
     }
 }
 

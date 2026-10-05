@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // CA-17 (parte da F3): o GET /api/exposures no formato do contrato, antes e depois de ordens pelo FIX.
 [Collection(OrderAccumulatorPostgresCollection.Name)]

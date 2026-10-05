@@ -1,9 +1,9 @@
+using Base.OrderAccumulator.Domain.Exposures;
 using Dapper;
 using Flowa.Shared;
-using OrderAccumulator.Exposure;
 using Xunit.Abstractions;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // CA-12: o paralelismo é na camada de dados. Cada ordem abre a própria conexão e transação.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
@@ -44,7 +44,7 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
             "SELECT exposure FROM exposures WHERE symbol = 'PETR4' FOR UPDATE", transaction: exposureRowHolderTransaction);
 
         var simultaneousOrderTasks = simultaneousOrders
-            .Select(incomingOrder => Task.Run(() => orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(incomingOrder)))
+            .Select(incomingOrder => Task.Run(() => orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(incomingOrder)))
             .ToList();
         var transactionsWaitingTogether = await WaitForTransactionsWaitingOnExposureRowAsync(SimultaneousOrders);
 
@@ -59,18 +59,18 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
             $"{acceptedAnswers.Count} aceitas, {rejectedAnswers.Count} rejeitadas, exposição final {finalExposure}");
 
         Assert.Equal(SimultaneousOrders, transactionsWaitingTogether);
-        Assert.True(Math.Abs(finalExposure) <= ExposureLimit.PerSymbol, $"exposição {finalExposure} passou do limite");
+        Assert.True(Math.Abs(finalExposure) <= ExposureLimitPolicy.PerSymbol, $"exposição {finalExposure} passou do limite");
         Assert.Equal(acceptedAnswers.Sum(TestOrders.ExposureDeltaOf), finalExposure);
         Assert.Equal(finalExposure, await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync("PETR4"));
         Assert.Equal(SimultaneousOrders, await orderAccumulatorDatabase.CountStoredOrdersAsync());
         Assert.NotEmpty(rejectedAnswers);
         Assert.All(rejectedAnswers, rejectedAnswer =>
-            Assert.Equal(ExposureLimit.ExposureLimitRejectionText("PETR4"), rejectedAnswer.RejectReason));
+            Assert.Equal(ExposureLimitPolicy.BuildExposureLimitRejectionText("PETR4"), rejectedAnswer.RejectReason));
 
         // A exposição só anda num sentido nesta rodada; então toda rejeitada era maior do que a
         // folga que sobrou no fim. Isso mostra que as aceitas encostaram no limite.
         Assert.All(rejectedAnswers, rejectedAnswer =>
-            Assert.True(Math.Abs(TestOrders.ExposureDeltaOf(rejectedAnswer)) > ExposureLimit.RemainingExposureCapacity(finalExposure)));
+            Assert.True(Math.Abs(TestOrders.ExposureDeltaOf(rejectedAnswer)) > ExposureLimitPolicy.CalculateRemainingExposureCapacity(finalExposure)));
     }
 
     // Regressão do teste instável: com 30 s (padrão do Npgsql) uma rodada lenta estourava a leitura.

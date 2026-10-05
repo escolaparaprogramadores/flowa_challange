@@ -1,6 +1,14 @@
-using System.Net;
 using System.Net.Sockets;
+using System.Net;
 using System.Text;
+using Base.OrderAccumulator.Application.Exposures;
+using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Entrypoint.Workers;
+using Base.OrderAccumulator.Infrastructure.Metrics;
+using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
 using Flowa.Shared;
 using Microsoft.AspNetCore.Hosting;
@@ -10,12 +18,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Observabilidade;
-using OrderAccumulator.Persistence;
 using StatsdClient;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // As métricas saem por UDP de verdade para um ouvinte local, no lugar do agente do Datadog,
 // e o processamento usa o PostgreSQL real: aceita, rejeita e repetição vêm do banco.
@@ -27,16 +32,17 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
 
     private readonly DogStatsdUdpListener dogStatsdUdpListener = new();
     private DogStatsdService orderMetricsClient = null!;
-    private SymbolExposureMemory symbolExposureMemory = null!;
-    private OrderProcessorWithMetrics orderProcessorWithMetrics = null!;
+    private SymbolExposureMemoryService symbolExposureMemory = null!;
+    private DecideIncomingOrderTestRunner meteredOrderDecisionRunner = null!;
 
     public async Task InitializeAsync()
     {
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
-        orderMetricsClient = OrderMetricsSetup.CreateOrderMetricsClient(dogStatsdUdpListener.ListenerPort, UnifiedServiceConfiguration());
-        symbolExposureMemory = new SymbolExposureMemory();
+        orderMetricsClient = OrderMetricsExtensions.CreateOrderMetricsClient(dogStatsdUdpListener.ListenerPort, UnifiedServiceConfiguration());
+        symbolExposureMemory = new SymbolExposureMemoryService();
         symbolExposureMemory.LoadStoredExposures(await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
-        orderProcessorWithMetrics = new OrderProcessorWithMetrics(orderAccumulatorDatabase.OrderProcessor, orderMetricsClient, symbolExposureMemory);
+        meteredOrderDecisionRunner = new DecideIncomingOrderTestRunner(
+            orderAccumulatorDatabase.OrderDatabaseDataSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient));
     }
 
     public Task DisposeAsync()
@@ -49,11 +55,11 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Accepted_order_sends_one_accepted_count_with_symbol_side_and_unified_tags()
     {
-        var acceptedOrderOutcome = await orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
+        var acceptedOrderDecision = await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
 
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
-        Assert.True(acceptedOrderOutcome.Accepted);
+        Assert.True(acceptedOrderDecision.Accepted);
         var acceptedOrderMetric = Assert.Single(sentOrderMetrics);
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.AcceptedOrders, "1", "c", ExpectedTags("symbol:PETR4", "side:buy")), acceptedOrderMetric);
     }
@@ -61,27 +67,27 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Order_over_the_exposure_limit_sends_one_rejected_count_with_symbol_and_side()
     {
-        await SetStoredExposureAsync("VALE3", -ExposureLimit.PerSymbol);
-        var rejectedOrderOutcome = await orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 1, 0.01m));
+        await SetStoredExposureAsync("VALE3", -ExposureLimitPolicy.PerSymbol);
+        var rejectedOrderDecision = await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 1, 0.01m));
 
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
-        Assert.False(rejectedOrderOutcome.Accepted);
+        Assert.False(rejectedOrderDecision.Accepted);
         var rejectedOrderMetric = Assert.Single(sentOrderMetrics);
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.RejectedOrders, "1", "c", ExpectedTags("symbol:VALE3", "side:sell")), rejectedOrderMetric);
-        Assert.Equal(-ExposureLimit.PerSymbol, ExposureInMemory("VALE3"));
+        Assert.Equal(-ExposureLimitPolicy.PerSymbol, ExposureInMemory("VALE3"));
     }
 
     [Fact]
     public async Task Repeated_clordid_is_counted_once_and_moves_the_exposure_memory_once()
     {
         var firstBuyOrder = TestOrders.NewBuyOrder("VIIA4", 200, 3.25m);
-        await orderProcessorWithMetrics.ProcessIncomingOrderAsync(firstBuyOrder);
-        var repeatedOrderOutcome = await orderProcessorWithMetrics.ProcessIncomingOrderAsync(firstBuyOrder);
+        await meteredOrderDecisionRunner.DecideIncomingOrderAsync(firstBuyOrder);
+        var repeatedOrderDecision = await meteredOrderDecisionRunner.DecideIncomingOrderAsync(firstBuyOrder);
 
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
-        Assert.True(repeatedOrderOutcome.IsRepeat);
+        Assert.True(repeatedOrderDecision.IsRepeat);
         var acceptedOrderMetric = Assert.Single(sentOrderMetrics);
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.AcceptedOrders, "1", "c", ExpectedTags("symbol:VIIA4", "side:buy")), acceptedOrderMetric);
         Assert.Equal(650m, ExposureInMemory("VIIA4"));
@@ -91,7 +97,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Unknown_symbol_is_counted_as_invalid_symbol_and_side_never_as_the_typed_text()
     {
-        await orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("ABCD3-texto-livre", 10, 1m));
+        await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("ABCD3-texto-livre", 10, 1m));
 
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
@@ -99,13 +105,13 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.RejectedOrders, "1", "c", ExpectedTags("symbol:invalido", "side:invalido")), rejectedOrderMetric);
         Assert.Equal(
             [new SymbolExposure("PETR4", 0m), new SymbolExposure("VALE3", 0m), new SymbolExposure("VIIA4", 0m)],
-            symbolExposureMemory.CurrentSymbolExposures());
+            symbolExposureMemory.ReadCurrentSymbolExposures());
     }
 
     [Fact]
     public async Task Unknown_side_with_a_known_symbol_is_counted_as_invalid_side()
     {
-        await orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewIncomingOrder("PETR4", '3', 10, 1m));
+        await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewIncomingOrder("PETR4", '3', 10, 1m));
 
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
@@ -118,7 +124,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task Order_tags_never_carry_the_clordid()
     {
         var acceptedSellOrder = TestOrders.NewSellOrder("PETR4", 5, 2m);
-        await orderProcessorWithMetrics.ProcessIncomingOrderAsync(acceptedSellOrder);
+        await meteredOrderDecisionRunner.DecideIncomingOrderAsync(acceptedSellOrder);
 
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
@@ -131,11 +137,12 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task Failed_processing_is_not_counted_and_the_same_exception_reaches_the_caller()
     {
         var databaseFailure = new NpgsqlException("banco fora do ar");
-        var orderProcessorWithFailingDatabase = new OrderProcessorWithMetrics(
-            new OrderProcessorFailingWith(databaseFailure), orderMetricsClient, symbolExposureMemory);
+        var meteredRunnerWithFailingDatabase = new DecideIncomingOrderTestRunner(
+            orderAccumulatorDatabase.OrderDatabaseDataSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
+            wrapOrderRepository: _ => new OrderRepositoryFailingWith(databaseFailure));
 
         var thrownFailure = await Assert.ThrowsAsync<NpgsqlException>(() =>
-            orderProcessorWithFailingDatabase.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m)));
+            meteredRunnerWithFailingDatabase.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m)));
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
         Assert.Same(databaseFailure, thrownFailure);
@@ -146,11 +153,11 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Exposure_gauge_sends_the_three_symbols_from_memory_after_accepted_buys_and_sells()
     {
-        await orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1000, 12.34m));
-        await orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 300, 50.10m));
+        await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1000, 12.34m));
+        await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 300, 50.10m));
         await SendSentinelAndReadOrderMetricsAsync();
 
-        new SymbolExposureGaugeService(orderMetricsClient, symbolExposureMemory, TimeProvider.System).SendSymbolExposureGauges();
+        new SymbolExposureGaugeWorker(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System).SendSymbolExposureGauges();
         var sentExposureGauges = await SendSentinelAndReadOrderMetricsAsync();
 
         Assert.Equal(
@@ -165,10 +172,10 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Exposure_gauge_goes_at_startup_and_again_on_each_30_second_tick()
     {
-        await orderProcessorWithMetrics.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 2m));
+        await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 2m));
         await SendSentinelAndReadOrderMetricsAsync();
         var manualGaugeClock = new ManualGaugeClock();
-        using var symbolExposureGaugeService = new SymbolExposureGaugeService(orderMetricsClient, symbolExposureMemory, manualGaugeClock);
+        using var symbolExposureGaugeService = new SymbolExposureGaugeWorker(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock);
         IReadOnlyList<DogStatsdMetricLine> expectedExposureGauges =
         [
             new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "20", "g", ExpectedTags("symbol:PETR4")),
@@ -195,13 +202,13 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     {
         // A versão única separa as métricas deste teste das de outro app de teste que use a mesma porta.
         var uniqueVersionTag = "sha-" + Guid.NewGuid().ToString("N");
-        using var agentOnTheDatadogPort = new DogStatsdUdpListener(OrderMetricsSetup.DatadogAgentDogStatsdPort);
+        using var agentOnTheDatadogPort = new DogStatsdUdpListener(OrderMetricsExtensions.DatadogAgentDogStatsdPort);
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
         await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, uniqueVersionTag, new OrderAccumulatorCapturedLogs());
         var appServices = orderAccumulatorApp.Services;
         var appOrderMetricsClient = (DogStatsdService)appServices.GetRequiredService<IDogStatsd>();
 
-        await appServices.GetRequiredService<IOrderProcessor>().ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
+        await appServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
         appOrderMetricsClient.Flush();
         appOrderMetricsClient.Increment(SentinelMetricName, tags: [$"version:{uniqueVersionTag}"]);
         appOrderMetricsClient.Flush();
@@ -223,18 +230,18 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "sha-sem-agente", capturedAppLogs);
         var appServices = orderAccumulatorApp.Services;
         var appOrderMetricsClient = (DogStatsdService)appServices.GetRequiredService<IDogStatsd>();
-        var appOrderProcessor = appServices.GetRequiredService<IOrderProcessor>();
+        var appOrderDecisionServices = appServices;
         var logLinesBeforeTheOrders = capturedAppLogs.CapturedLogLines.Count;
 
-        var orderOutcomesWithoutAgent = new List<OrderOutcome>();
+        var orderDecisionsWithoutAgent = new List<DecideIncomingOrderOutput>();
         for (var orderNumber = 0; orderNumber < 20; orderNumber++)
         {
-            orderOutcomesWithoutAgent.Add(await appOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m)));
+            orderDecisionsWithoutAgent.Add(await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m)));
             appOrderMetricsClient.Flush();
         }
         appOrderMetricsClient.Dispose();
 
-        Assert.Equal(20, orderOutcomesWithoutAgent.Count(orderOutcome => orderOutcome.Accepted));
+        Assert.Equal(20, orderDecisionsWithoutAgent.Count(orderDecision => orderDecision.Accepted));
         Assert.Empty(capturedAppLogs.CapturedLogLines.Skip(logLinesBeforeTheOrders));
         await using var startupDatabase = NpgsqlDataSource.Create(startupDatabaseConnectionString);
         await using var startupDatabaseConnection = await startupDatabase.OpenConnectionAsync();
@@ -242,17 +249,19 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     [Fact]
-    public async Task App_wraps_the_postgres_processor_and_loads_the_stored_exposure_at_startup()
+    public async Task App_counts_orders_through_the_datadog_adapter_and_loads_the_stored_exposure_at_startup()
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync("UPDATE exposures SET exposure = 4321.50 WHERE symbol = 'VALE3'");
         await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "sha-de-teste", new OrderAccumulatorCapturedLogs());
 
         var appServices = orderAccumulatorApp.Services;
-        Assert.IsType<OrderProcessorWithMetrics>(appServices.GetRequiredService<IOrderProcessor>());
-        Assert.Contains(appServices.GetServices<IHostedService>(), hostedService => hostedService is SymbolExposureGaugeService);
+        Assert.IsType<DatadogOrderMetricsAdapter>(appServices.GetRequiredService<IOrderMetrics>());
+        await using (var orderOperationScope = appServices.CreateAsyncScope())
+            Assert.IsType<OrderRepository>(orderOperationScope.ServiceProvider.GetRequiredService<IOrderRepository>());
+        Assert.Contains(appServices.GetServices<IHostedService>(), hostedService => hostedService is SymbolExposureGaugeWorker);
         Assert.Equal(
             [new SymbolExposure("PETR4", 0m), new SymbolExposure("VALE3", 4321.50m), new SymbolExposure("VIIA4", 0m)],
-            appServices.GetRequiredService<SymbolExposureMemory>().CurrentSymbolExposures());
+            appServices.GetRequiredService<SymbolExposureMemoryService>().ReadCurrentSymbolExposures());
     }
 
     // Banco próprio por teste de app: a exposição carregada na subida não depende dos outros testes.
@@ -308,7 +317,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     private decimal ExposureInMemory(string orderSymbol) =>
-        symbolExposureMemory.CurrentSymbolExposures().Single(currentSymbolExposure => currentSymbolExposure.Symbol == orderSymbol).Exposure;
+        symbolExposureMemory.ReadCurrentSymbolExposures().Single(currentSymbolExposure => currentSymbolExposure.Symbol == orderSymbol).Exposure;
 
     private async Task SetStoredExposureAsync(string orderSymbol, decimal storedExposure)
     {
@@ -341,10 +350,15 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
             })
             .Build();
 
-    private sealed class OrderProcessorFailingWith(Exception processingFailure) : IOrderProcessor
+    private sealed class OrderRepositoryFailingWith(Exception databaseFailure) : IOrderRepository
     {
-        public Task<OrderOutcome> ProcessIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default) =>
-            Task.FromException<OrderOutcome>(processingFailure);
+        public Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default) =>
+            Task.FromException<Order?>(databaseFailure);
+
+        public Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default) =>
+            Task.FromException<bool>(databaseFailure);
+
+        public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) => Task.FromException(databaseFailure);
     }
 
     // Relógio que só anda quando o teste manda: o PeriodicTimer do gauge pede o timer aqui.

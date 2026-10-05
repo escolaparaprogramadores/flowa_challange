@@ -1,44 +1,13 @@
 using System.Collections.Concurrent;
+using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+using Base.OrderAccumulator.Domain.Exposures;
 using Flowa.Shared;
-using OrderAccumulator.Exposure;
 
-namespace OrderAccumulator.Observabilidade;
-
-// Nomes combinados com o painel do Datadog (observabilidade/datadog/). Mudar aqui apaga o gráfico.
-public static class OrderMetricNames
-{
-    public const string AcceptedOrders = "flowa.ordens.aceitas";
-    public const string RejectedOrders = "flowa.ordens.rejeitadas";
-    public const string SymbolExposure = "flowa.exposicao";
-}
-
-// Etiquetas com valores fechados: cada valor novo vira uma série paga no Datadog.
-// Símbolo fora da lista conta numa série só, para o total não passar de 20 séries.
-public static class OrderMetricTags
-{
-    public const string InvalidTagValue = "invalido";
-
-    public static string[] OrderOutcomeTags(string? orderSymbol, char orderSide)
-    {
-        if (orderSymbol is null || !OrderRules.AllowedOrderSymbols.Contains(orderSymbol))
-            return [$"symbol:{InvalidTagValue}", $"side:{InvalidTagValue}"];
-
-        return [$"symbol:{orderSymbol}", $"side:{OrderSideTagValue(orderSide)}"];
-    }
-
-    public static string[] SymbolExposureTags(string orderSymbol) => [$"symbol:{orderSymbol}"];
-
-    private static string OrderSideTagValue(char orderSide) => orderSide switch
-    {
-        OrderSideCodes.BuyOrderSideFixCode => OrderSideCodes.BuyOrderSideJsonCode,
-        OrderSideCodes.SellOrderSideFixCode => OrderSideCodes.SellOrderSideJsonCode,
-        _ => InvalidTagValue
-    };
-}
+namespace Base.OrderAccumulator.Application.Exposures;
 
 // A exposição de cada símbolo, mantida no processo para o gauge não consultar o banco a cada envio.
 // Vale porque o OrderAccumulator roda numa task só (infra/servicos.tf, desired_count = 1).
-public sealed class SymbolExposureMemory
+public sealed class SymbolExposureMemoryService
 {
     private readonly ConcurrentDictionary<string, decimal> exposureBySymbol = new();
 
@@ -50,7 +19,7 @@ public sealed class SymbolExposureMemory
     private readonly SemaphoreSlim ordersInProgressCountLock = new(1, 1);
     private int ordersInProgressCount;
 
-    public async Task<OrderOutcome> ProcessOrderOutsideDeleteAllAsync(Func<Task<OrderOutcome>> processIncomingOrder, CancellationToken cancellationToken)
+    public async Task<DecideIncomingOrderOutput> DecideOrderOutsideDeleteAllAsync(Func<Task<DecideIncomingOrderOutput>> decideIncomingOrder, CancellationToken cancellationToken)
     {
         await deleteAllOrdersDoor.WaitAsync(cancellationToken);
         deleteAllOrdersDoor.Release();
@@ -62,7 +31,7 @@ public sealed class SymbolExposureMemory
 
         try
         {
-            return await processIncomingOrder();
+            return await decideIncomingOrder();
         }
         finally
         {
@@ -104,15 +73,15 @@ public sealed class SymbolExposureMemory
     }
 
     // Só ordem aceita chega aqui, então símbolo, lado e quantidade já passaram pela validação.
-    public void ApplyAcceptedOrder(OrderOutcome acceptedOrder)
+    public void ApplyAcceptedOrder(DecideIncomingOrderOutput acceptedOrder)
     {
         var acceptedOrderSide = acceptedOrder.Side == OrderSideCodes.BuyOrderSideFixCode ? OrderSide.Buy : OrderSide.Sell;
-        var acceptedOrderExposureDelta = ExposureLimit.OrderExposureDelta(acceptedOrderSide, (int)acceptedOrder.Quantity, acceptedOrder.Price);
+        var acceptedOrderExposureDelta = ExposureLimitPolicy.CalculateOrderExposureDelta(acceptedOrderSide, (int)acceptedOrder.Quantity, acceptedOrder.Price);
         exposureBySymbol.AddOrUpdate(
             acceptedOrder.Symbol!, acceptedOrderExposureDelta, (_, currentSymbolExposure) => currentSymbolExposure + acceptedOrderExposureDelta);
     }
 
-    public IReadOnlyList<SymbolExposure> CurrentSymbolExposures() =>
+    public IReadOnlyList<SymbolExposure> ReadCurrentSymbolExposures() =>
         OrderRules.AllowedOrderSymbols
             .Select(orderSymbol => new SymbolExposure(orderSymbol, exposureBySymbol.GetValueOrDefault(orderSymbol)))
             .ToList();

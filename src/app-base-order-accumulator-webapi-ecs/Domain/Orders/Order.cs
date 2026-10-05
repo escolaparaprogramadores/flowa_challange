@@ -1,35 +1,53 @@
-namespace OrderAccumulator.Exposure;
+using Base.OrderAccumulator.Domain.Exposures;
 
-// A ordem como chegou pelo FIX, antes de qualquer validação.
-public sealed record IncomingOrder(string ClOrdId, string? Symbol, char Side, decimal Quantity, decimal Price);
+namespace Base.OrderAccumulator.Domain.Orders;
 
-// A resposta dada à ordem, já gravada no banco. Repetir o ClOrdID devolve exatamente esta,
-// com IsRepeat = true.
-public sealed record OrderOutcome(
-    string ClOrdId,
-    string OrderId,
-    string ExecId,
-    string? Symbol,
-    char Side,
-    decimal Quantity,
-    decimal Price,
-    bool Accepted,
-    string? RejectReason,
-    bool IsRepeat);
-
-public sealed record SymbolExposure(string Symbol, decimal Exposure)
+// The order as the accumulator answered it: accepted, or rejected with the tag 58 text.
+// The answer is stored once per ClOrdID; a repeated ClOrdID gets this same answer back.
+public sealed class Order : IAggregateRoot
 {
-    public decimal RemainingExposureCapacity => ExposureLimit.RemainingExposureCapacity(Exposure);
-}
+    public string ClOrdId { get; private set; }
+    public string OrderId { get; private set; }
+    public string ExecId { get; private set; }
+    public string? Symbol { get; private set; }
+    public char Side { get; private set; }
+    public decimal Quantity { get; private set; }
+    public decimal Price { get; private set; }
+    public bool Accepted { get; private set; }
+    public string? RejectReason { get; private set; }
 
-public interface IOrderProcessor
-{
-    // Valida, aplica o limite e grava a ordem numa transação só.
-    Task<OrderOutcome> ProcessIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default);
-}
+    private Order(
+        string clOrdId, string orderId, string execId, string? symbol, char side, decimal quantity, decimal price, bool accepted, string? rejectReason)
+    {
+        ClOrdId = clOrdId;
+        OrderId = orderId;
+        ExecId = execId;
+        Symbol = symbol;
+        Side = side;
+        Quantity = quantity;
+        Price = price;
+        Accepted = accepted;
+        RejectReason = rejectReason;
+    }
 
-public interface IExposureReader
-{
-    // Os três símbolos, sempre na ordem de OrderRules.AllowedOrderSymbols.
-    Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default);
+    public static Order AcceptOrder(IncomingOrder incomingOrder) => CreateAnsweredOrder(incomingOrder, accepted: true, rejectReason: null);
+
+    // One sentence per invalid field, in the order the validator reports them.
+    public static Order RejectOrderWithInvalidFields(IncomingOrder incomingOrder, IEnumerable<string> invalidFieldMessages) =>
+        CreateAnsweredOrder(incomingOrder, accepted: false, rejectReason: string.Join(' ', invalidFieldMessages));
+
+    public static Order RejectOrderOverExposureLimit(IncomingOrder incomingOrder, string orderSymbol) =>
+        CreateAnsweredOrder(incomingOrder, accepted: false, rejectReason: ExposureLimitPolicy.BuildExposureLimitRejectionText(orderSymbol));
+
+    // Only the repository calls this, to load an order that was already answered.
+    public static Order RestoreOrder(
+        string clOrdId, string orderId, string execId, string? symbol, char side, decimal quantity, decimal price, bool accepted, string? rejectReason) =>
+        new(clOrdId, orderId, execId, symbol, side, quantity, price, accepted, rejectReason);
+
+    // OrderID (tag 37) and ExecID (tag 17) are born here, as UUIDs without dashes.
+    private static Order CreateAnsweredOrder(IncomingOrder incomingOrder, bool accepted, string? rejectReason) =>
+        new(incomingOrder.ClOrdId, CreateOrderOrExecId(), CreateOrderOrExecId(),
+            incomingOrder.Symbol, incomingOrder.Side, incomingOrder.Quantity, incomingOrder.Price, accepted, rejectReason);
+
+    private static string CreateOrderOrExecId() => Guid.NewGuid().ToString("N");
 }

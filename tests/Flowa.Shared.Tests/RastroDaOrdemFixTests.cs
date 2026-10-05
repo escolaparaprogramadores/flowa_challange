@@ -12,7 +12,7 @@ public class RastroDaOrdemFixTests
     {
         var linhaDoLog = $"8=FIX.4.4\u000135=D\u000111=abc\u00015100={TraceParent}\u000110=128\u0001";
 
-        var linhaSemTraceParent = RastroDaOrdemFix.OcultarTraceParentNoLog(linhaDoLog);
+        var linhaSemTraceParent = FixOrderTraceProvider.HideTraceParentInLog(linhaDoLog);
 
         Assert.Equal("8=FIX.4.4\u000135=D\u000111=abc\u00015100=***\u000110=128\u0001", linhaSemTraceParent);
     }
@@ -20,7 +20,7 @@ public class RastroDaOrdemFixTests
     [Fact]
     public void Linha_que_comeca_pela_5100_tambem_perde_o_valor()
     {
-        Assert.Equal("5100=***\u000110=128", RastroDaOrdemFix.OcultarTraceParentNoLog($"5100={TraceParent}\u000110=128"));
+        Assert.Equal("5100=***\u000110=128", FixOrderTraceProvider.HideTraceParentInLog($"5100={TraceParent}\u000110=128"));
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public class RastroDaOrdemFixTests
     {
         var linhaDoLog = "8=FIX.4.4\u000115100=x\u000158=5100=y\u000110=128\u0001";
 
-        Assert.Equal(linhaDoLog, RastroDaOrdemFix.OcultarTraceParentNoLog(linhaDoLog));
+        Assert.Equal(linhaDoLog, FixOrderTraceProvider.HideTraceParentInLog(linhaDoLog));
     }
 
     [Fact]
@@ -36,6 +36,6 @@ public class RastroDaOrdemFixTests
     {
         var linhaDoLog = "8=FIX.4.4\u000135=A\u000110=213\u0001";
 
-        Assert.Same(linhaDoLog, RastroDaOrdemFix.OcultarTraceParentNoLog(linhaDoLog));
+        Assert.Same(linhaDoLog, FixOrderTraceProvider.HideTraceParentInLog(linhaDoLog));
     }
 }

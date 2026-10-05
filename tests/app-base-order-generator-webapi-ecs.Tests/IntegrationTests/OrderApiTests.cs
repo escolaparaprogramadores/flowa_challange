@@ -1,3 +1,4 @@
+using Base.OrderGenerator.Infrastructure;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -7,7 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using QuickFix.Fields;
 
-namespace OrderGenerator.Tests;
+namespace Base.OrderGenerator.Tests;
 
 // OrderGenerator já logado num acceptor de teste que aceita tudo, para as ordens poderem sair.
 public sealed class LoggedOnOrderGenerator : IAsyncLifetime

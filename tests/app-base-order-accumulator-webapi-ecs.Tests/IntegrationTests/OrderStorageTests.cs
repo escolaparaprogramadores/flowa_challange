@@ -1,10 +1,16 @@
+using Base.OrderAccumulator.Application.Exposures.GetExposures;
+using Base.OrderAccumulator.Application.Exposures;
+using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+using Base.OrderAccumulator.Application.Orders.ListOrders;
+using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
 using Flowa.Shared;
 using Microsoft.Extensions.DependencyInjection;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Persistence;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // CA-18 (parte da F2), D-8, D-11 e o apoio ao D-13: o que fica gravado e o que volta numa repetição.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
@@ -19,12 +25,12 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     {
         var acceptableOrder = TestOrders.NewBuyOrder("VALE3", 100, 10.00m);
 
-        var firstAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(acceptableOrder);
-        var repeatedAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(acceptableOrder);
+        var firstOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(acceptableOrder);
+        var repeatedOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(acceptableOrder);
 
-        Assert.True(firstAnswer.Accepted);
-        Assert.False(firstAnswer.IsRepeat);
-        Assert.Equal(firstAnswer with { IsRepeat = true }, repeatedAnswer);
+        Assert.True(firstOrderDecision.Accepted);
+        Assert.False(firstOrderDecision.IsRepeat);
+        Assert.Equal(firstOrderDecision with { IsRepeat = true }, repeatedOrderDecision);
         Assert.Equal(1_000.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync(acceptableOrder.ClOrdId));
     }
@@ -32,19 +38,19 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Repeated_order_rejected_by_the_limit_stays_rejected_even_after_room_opens()
     {
-        await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 50_000, 999.99m));
-        await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 50_000, 999.99m));
-        await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1_000, 1.00m));
+        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 50_000, 999.99m));
+        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 50_000, 999.99m));
+        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1_000, 1.00m));
         var orderPastTheLimit = TestOrders.NewBuyOrder("PETR4", 1, 1.00m);
 
-        var firstAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(orderPastTheLimit);
-        await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("PETR4", 10, 100.00m));
-        var repeatedAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(orderPastTheLimit);
+        var firstOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(orderPastTheLimit);
+        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("PETR4", 10, 100.00m));
+        var repeatedOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(orderPastTheLimit);
 
-        Assert.False(firstAnswer.Accepted);
-        Assert.Equal(ExposureLimit.ExposureLimitRejectionText("PETR4"), firstAnswer.RejectReason);
-        Assert.Equal(firstAnswer with { IsRepeat = true }, repeatedAnswer);
-        Assert.Equal(ExposureLimit.PerSymbol - 1_000m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
+        Assert.False(firstOrderDecision.Accepted);
+        Assert.Equal(ExposureLimitPolicy.BuildExposureLimitRejectionText("PETR4"), firstOrderDecision.RejectReason);
+        Assert.Equal(firstOrderDecision with { IsRepeat = true }, repeatedOrderDecision);
+        Assert.Equal(ExposureLimitPolicy.PerSymbol - 1_000m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     [Fact]
@@ -52,12 +58,12 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     {
         var invalidOrder = new IncomingOrder(Guid.NewGuid().ToString("N"), "ABCD", OrderSideCodes.BuyOrderSideFixCode, 1.5m, 10.00m);
 
-        var firstAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(invalidOrder);
-        var repeatedAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(invalidOrder);
+        var firstOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(invalidOrder);
+        var repeatedOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(invalidOrder);
 
-        Assert.False(firstAnswer.Accepted);
-        Assert.Equal($"{OrderMessages.OrderSymbolInvalidMessage} {OrderMessages.OrderQuantityNotIntegerMessage}", firstAnswer.RejectReason);
-        Assert.Equal(firstAnswer with { IsRepeat = true }, repeatedAnswer);
+        Assert.False(firstOrderDecision.Accepted);
+        Assert.Equal($"{OrderMessages.OrderSymbolInvalidMessage} {OrderMessages.OrderQuantityNotIntegerMessage}", firstOrderDecision.RejectReason);
+        Assert.Equal(firstOrderDecision with { IsRepeat = true }, repeatedOrderDecision);
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync(invalidOrder.ClOrdId));
         Assert.Equal(
             [new SymbolExposure("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)],
@@ -67,8 +73,8 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Every_order_is_stored_with_its_answer()
     {
-        var acceptedAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("VIIA4", 100, 2.50m));
-        var rejectedAnswer = await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("VIIA4", 1, 1_000.00m));
+        var acceptedOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VIIA4", 100, 2.50m));
+        var rejectedOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VIIA4", 1, 1_000.00m));
 
         await using var orderDatabaseConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
         var storedOrders = (await orderDatabaseConnection.QueryAsync<StoredOrderInDatabase>(
@@ -81,9 +87,9 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
 
         Assert.Equal(
             [
-                new StoredOrderInDatabase(acceptedAnswer.ClOrdId, acceptedAnswer.OrderId, acceptedAnswer.ExecId,
+                new StoredOrderInDatabase(acceptedOrderDecision.ClOrdId, acceptedOrderDecision.OrderId, acceptedOrderDecision.ExecId,
                     "VIIA4", "1", 100m, 2.50m, true, null),
-                new StoredOrderInDatabase(rejectedAnswer.ClOrdId, rejectedAnswer.OrderId, rejectedAnswer.ExecId,
+                new StoredOrderInDatabase(rejectedOrderDecision.ClOrdId, rejectedOrderDecision.OrderId, rejectedOrderDecision.ExecId,
                     "VIIA4", "2", 1m, 1_000.00m, false, OrderMessages.OrderPriceTooLargeMessage)
             ],
             storedOrders);
@@ -98,7 +104,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
             .Select(_ => Task.Run(async () =>
             {
                 await repeatStartSignal.Task;
-                return await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(repeatedOrder);
+                return await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(repeatedOrder);
             }))
             .ToList();
 
@@ -135,7 +141,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Applying_the_schema_again_keeps_what_was_stored()
     {
-        await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 10.00m));
+        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 10.00m));
 
         await orderAccumulatorDatabase.OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();
 
@@ -152,7 +158,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
             await orderDatabaseConnection.ExecuteAsync("DELETE FROM exposures WHERE symbol = 'VIIA4'");
 
         var missingRowError = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("VIIA4", 1, 1.00m)));
+            () => orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VIIA4", 1, 1.00m)));
 
         Assert.Equal("O símbolo VIIA4 não tem linha de exposição. A migração do banco não foi aplicada.", missingRowError.Message);
         Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync());
@@ -173,16 +179,16 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     [Fact]
     public async Task Reader_returns_exposure_and_remaining_room_for_each_symbol()
     {
-        await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
-        await orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewSellOrder("VIIA4", 50, 4.00m));
+        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
+        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VIIA4", 50, 4.00m));
 
         var symbolExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
 
         Assert.Equal(
             [
-                ("PETR4", 1_000.00m, ExposureLimit.PerSymbol - 1_000m),
-                ("VALE3", 0m, ExposureLimit.PerSymbol),
-                ("VIIA4", -200.00m, ExposureLimit.PerSymbol - 200m)
+                ("PETR4", 1_000.00m, ExposureLimitPolicy.PerSymbol - 1_000m),
+                ("VALE3", 0m, ExposureLimitPolicy.PerSymbol),
+                ("VIIA4", -200.00m, ExposureLimitPolicy.PerSymbol - 200m)
             ],
             symbolExposures.Select(symbolExposure => (symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)));
     }
@@ -192,7 +198,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     [InlineData(" ")]
     public async Task Order_without_cl_ord_id_is_refused_before_touching_the_database(string blankClOrdId)
     {
-        await Assert.ThrowsAsync<ArgumentException>(() => orderAccumulatorDatabase.OrderProcessor.ProcessIncomingOrderAsync(
+        await Assert.ThrowsAsync<ArgumentException>(() => orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(
             new IncomingOrder(blankClOrdId, "PETR4", OrderSideCodes.BuyOrderSideFixCode, 1, 1.00m)));
 
         Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync());
@@ -206,14 +212,25 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
             .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString);
         await using var orderAccumulatorServiceProvider = orderAccumulatorAppServices.BuildServiceProvider();
 
-        var registeredOrderProcessor = orderAccumulatorServiceProvider.GetRequiredService<IOrderProcessor>();
-        var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<IExposureReader>();
-        var orderAnswer = await registeredOrderProcessor.ProcessIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
+        await using var orderOperationScope = orderAccumulatorServiceProvider.CreateAsyncScope();
+        await using var otherOrderOperationScope = orderAccumulatorServiceProvider.CreateAsyncScope();
+        var orderOperationServices = orderOperationScope.ServiceProvider;
+        var registeredUnitOfWork = orderOperationServices.GetRequiredService<IUnitOfWork>();
+        var registeredOrderRepository = orderOperationServices.GetRequiredService<IOrderRepository>();
+        var registeredSymbolExposureRepository = orderOperationServices.GetRequiredService<IExposureRepository>();
+        var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>();
+        var registeredServicesOrderDecision = await new DecideIncomingOrderUseCase(
+                registeredUnitOfWork, registeredOrderRepository, new OrderDecisionDomainService(registeredSymbolExposureRepository),
+                new SymbolExposureMemoryService(), new UncountedOrderMetrics())
+            .DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
 
-        Assert.IsType<PostgresOrderProcessor>(registeredOrderProcessor);
-        Assert.IsType<PostgresExposureReader>(registeredExposureReader);
-        Assert.Same(registeredOrderProcessor, orderAccumulatorServiceProvider.GetRequiredService<IOrderProcessor>());
-        Assert.True(orderAnswer.Accepted);
+        Assert.IsType<OrderRepository>(registeredOrderRepository);
+        Assert.IsType<ExposureRepository>(registeredSymbolExposureRepository);
+        Assert.IsType<SymbolExposureReadRepository>(registeredExposureReader);
+        Assert.IsType<OrderListReadRepository>(orderAccumulatorServiceProvider.GetRequiredService<IOrderListReadRepository>());
+        Assert.Same(orderOperationServices.GetRequiredService<PostgresUnitOfWork>(), registeredUnitOfWork);
+        Assert.NotSame(registeredUnitOfWork, otherOrderOperationScope.ServiceProvider.GetRequiredService<IUnitOfWork>());
+        Assert.True(registeredServicesOrderDecision.Accepted);
         Assert.Equal(50.00m, (await registeredExposureReader.GetSymbolExposuresAsync())
             .Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
     }

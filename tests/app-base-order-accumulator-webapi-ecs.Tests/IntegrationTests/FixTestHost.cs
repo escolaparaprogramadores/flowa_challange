@@ -1,21 +1,21 @@
 using System.Collections.Concurrent;
-using System.Net;
 using System.Net.Sockets;
+using System.Net;
 using System.Threading.Channels;
-using OrderSideCodes = Flowa.Shared.OrderSideCodes;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using QuickFix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
 using QuickFix.Store;
 using QuickFix.Transport;
+using QuickFix;
+using OrderSideCodes = Flowa.Shared.OrderSideCodes;
 using Message = QuickFix.Message;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // O OrderAccumulator inteiro (Program.cs), com o acceptor FIX em 127.0.0.1 numa porta livre
 // (ou na porta pedida) e o banco do container.

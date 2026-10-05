@@ -1,8 +1,8 @@
 using System.Text.RegularExpressions;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Observabilidade;
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Infrastructure.Metrics;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // O painel e a esteira dele só rodam no GitHub, depois do merge. Estes testes leem os arquivos e
 // barram antes disso o que quebraria a regra: pull_request com as chaves, state no lugar errado,
@@ -11,7 +11,7 @@ public sealed class PainelDatadogStaticTests
 {
     private static readonly string RepoRoot = FindRepoRoot();
     private static readonly string PainelWorkflow = ReadText(Path.Combine(RepoRoot, ".github", "workflows", "2-develop-painel-datadog.yml"));
-    private static readonly string DeployWorkflow = ReadText(Path.Combine(RepoRoot, ".github", "workflows", "2-develop-deploy.yml"));
+    private static readonly string DeployWorkflow = ReadText(Path.Combine(RepoRoot, ".github", "workflows", "2-develop.yml"));
     private static readonly string PainelDirectory = Path.Combine(RepoRoot, "observabilidade", "datadog");
     private static readonly string MainTf = ReadText(Path.Combine(PainelDirectory, "main.tf"));
     private static readonly string PainelTf = ReadText(Path.Combine(PainelDirectory, "painel.tf"));
@@ -115,7 +115,7 @@ public sealed class PainelDatadogStaticTests
         var dashboardWidgets = PainelTf.Split("\n  widget {\n").Skip(1).ToList();
         const string acceptedOrdersQuery = "            name        = \"aceitas\"\n            data_source = \"metrics\"\n            query       = local.ordens_aceitas\n";
         const string rejectedOrdersQuery = "            name        = \"rejeitadas\"\n            data_source = \"metrics\"\n            query       = local.ordens_rejeitadas\n";
-        var exposureLimit = ExposureLimit.PerSymbol.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+        var exposureLimit = ExposureLimitPolicy.PerSymbol.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.Equal(4, dashboardWidgets.Count);
 
@@ -181,13 +181,13 @@ public sealed class PainelDatadogStaticTests
     private static string QuietTerraformFunction(string workflowText) =>
         Regex.Match(workflowText, @"terraform_quieto\(\) \{\n.*?\n          \}\n", RegexOptions.Singleline).Value is { Length: > 0 } quietFunction
             ? quietFunction
-            : throw new InvalidOperationException("2-develop-deploy.yml sem a função terraform_quieto");
+            : throw new InvalidOperationException("2-develop.yml sem a função terraform_quieto");
 
     private static string FindRepoRoot()
     {
         for (var candidateDirectory = new DirectoryInfo(AppContext.BaseDirectory); candidateDirectory is not null; candidateDirectory = candidateDirectory.Parent)
-            if (File.Exists(Path.Combine(candidateDirectory.FullName, "Flowa.sln")))
+            if (File.Exists(Path.Combine(candidateDirectory.FullName, "Flowa.slnx")))
                 return candidateDirectory.FullName;
-        throw new InvalidOperationException("não achei a raiz do repositório (Flowa.sln)");
+        throw new InvalidOperationException("não achei a raiz do repositório (Flowa.slnx)");
     }
 }

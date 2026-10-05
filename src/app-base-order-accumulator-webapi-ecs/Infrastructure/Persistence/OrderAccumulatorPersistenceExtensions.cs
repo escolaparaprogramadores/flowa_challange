@@ -1,12 +1,16 @@
+using Base.OrderAccumulator.Application.Exposures.GetExposures;
+using Base.OrderAccumulator.Application.Orders.ListOrders;
+using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Orders;
 using Dapper;
 using Flowa.Shared;
 using Npgsql;
-using OrderAccumulator.Exposure;
 
-namespace OrderAccumulator.Persistence;
+namespace Base.OrderAccumulator.Infrastructure.Persistence;
 
 // Pontos de entrada para o Program.cs: registrar os serviços e criar as tabelas na subida.
-public static class OrderAccumulatorPersistenceSetup
+public static class OrderAccumulatorPersistenceExtensions
 {
     private const string SeedExposuresSql = """
         INSERT INTO exposures (symbol)
@@ -18,9 +22,12 @@ public static class OrderAccumulatorPersistenceSetup
         this IServiceCollection orderAccumulatorServices, string orderDatabaseConnectionString)
     {
         orderAccumulatorServices.AddSingleton(_ => NpgsqlDataSource.Create(orderDatabaseConnectionString));
-        orderAccumulatorServices.AddSingleton<IOrderProcessor, PostgresOrderProcessor>();
-        orderAccumulatorServices.AddSingleton<IExposureReader, PostgresExposureReader>();
-        orderAccumulatorServices.AddSingleton<OrderHistoryRepository>();
+        orderAccumulatorServices.AddScoped<PostgresUnitOfWork>();
+        orderAccumulatorServices.AddScoped<IUnitOfWork>(orderOperationServices => orderOperationServices.GetRequiredService<PostgresUnitOfWork>());
+        orderAccumulatorServices.AddScoped<IOrderRepository, OrderRepository>();
+        orderAccumulatorServices.AddScoped<IExposureRepository, ExposureRepository>();
+        orderAccumulatorServices.AddSingleton<ISymbolExposureReadRepository, SymbolExposureReadRepository>();
+        orderAccumulatorServices.AddSingleton<IOrderListReadRepository, OrderListReadRepository>();
         return orderAccumulatorServices;
     }
 
@@ -42,7 +49,7 @@ public static class OrderAccumulatorPersistenceSetup
 
     private static string ReadOrderAccumulatorSchema()
     {
-        using var schemaResourceStream = typeof(OrderAccumulatorPersistenceSetup).Assembly.GetManifestResourceStream("OrderAccumulator.Persistence.Schema.sql")
+        using var schemaResourceStream = typeof(OrderAccumulatorPersistenceExtensions).Assembly.GetManifestResourceStream("Base.OrderAccumulator.Infrastructure.Persistence.Schema.sql")
             ?? throw new InvalidOperationException("O script Schema.sql não foi embutido no assembly.");
         using var schemaReader = new StreamReader(schemaResourceStream);
         return schemaReader.ReadToEnd();

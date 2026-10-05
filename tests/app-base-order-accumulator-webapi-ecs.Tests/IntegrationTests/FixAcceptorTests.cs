@@ -1,21 +1,23 @@
 using System.Globalization;
-using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Http.Json;
+using System.Net.NetworkInformation;
+using System.Net;
+using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Entrypoint.Fix;
+using Base.OrderAccumulator.Entrypoint.Workers;
+using Base.OrderAccumulator.Entrypoint;
+using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Fix;
-using OrderAccumulator.Persistence;
-using QuickFix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
+using QuickFix;
 using Xunit.Abstractions;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // CA-8, CA-9, CA-13, CA-18 e CA-19 da F3: as duas pontas QuickFIX/n de verdade, com o PostgreSQL do container.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
@@ -108,7 +110,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Assert.Equal(ExecType.NEW, repeatedOrderExecutionReport.ExecType.Value);
         Assert.Equal(50.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("repetida"));
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Information OrderAccumulator.Fix.OrderFixApplication: ClOrdID repetida repetido: devolvendo a resposta original.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Information Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: ClOrdID repetida repetido: devolvendo a resposta original.");
     }
 
     [Fact]
@@ -183,22 +185,22 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     public async Task Database_failure_sends_no_execution_report_logs_the_order_and_keeps_the_fix_session_up()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
-            orderAccumulatorTestServices.AddSingleton<IOrderProcessor>(orderAccumulatorServiceProvider =>
-                new OrderProcessorFailingForClOrdId("falha-banco", new PostgresOrderProcessor(orderAccumulatorServiceProvider.GetRequiredService<NpgsqlDataSource>())))).StartWithFixAcceptor();
+            orderAccumulatorTestServices.AddScoped<IOrderRepository>(orderOperationServices =>
+                new OrderRepositoryFailingForClOrdId("falha-banco", new OrderRepository(orderOperationServices.GetRequiredService<PostgresUnitOfWork>())))).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
         await fixTestInitiator.ExpectNoAnswerAsync(FixTestInitiator.NewOrder("falha-banco", "PETR4", '1', 10, 1.00m), TimeSpan.FromSeconds(2));
         var orderExecutionReportAfterDatabaseFailure = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("depois-da-falha", "PETR4", '1', 10, 1.00m));
 
         Assert.Equal(ExecType.NEW, orderExecutionReportAfterDatabaseFailure.ExecType.Value);
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Error OrderAccumulator.Fix.OrderFixApplication: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Error Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: Falha ao processar a ordem falha-banco; nenhum ExecutionReport enviado.");
         Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     [Fact]
     public void Acceptor_session_is_fix44_with_ephemeral_store_reset_on_every_reconnect()
     {
-        var loadedFixAcceptorSettings = FixAcceptorService.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration(("Fix:AcceptorPort", "19876")));
+        var loadedFixAcceptorSettings = FixAcceptorWorker.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration(("Fix:AcceptorPort", "19876")));
 
         var fixSessionId = Assert.Single(loadedFixAcceptorSettings.GetSessions());
         Assert.Equal(new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR"), fixSessionId);
@@ -218,7 +220,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Bind_host_from_configuration_limits_the_acceptor_to_that_address()
     {
-        var loadedFixAcceptorSettings = FixAcceptorService.LoadFixAcceptorSessionSettings(
+        var loadedFixAcceptorSettings = FixAcceptorWorker.LoadFixAcceptorSessionSettings(
             BuildFixAcceptorConfiguration(("Fix:AcceptorPort", "19876"), ("Fix:AcceptorBindHost", "127.0.0.1")));
 
         Assert.Equal("127.0.0.1", loadedFixAcceptorSettings.Get(loadedFixAcceptorSettings.GetSessions().Single()).GetString("SocketAcceptHost"));
@@ -261,12 +263,12 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     {
         // Sessão do acceptor criada, mas ninguém logado: o SendToTarget devolve false.
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var orderFixApplication = orderAccumulatorTestApp.Services.GetRequiredService<OrderFixApplication>();
+        var newOrderSingleConsumer = orderAccumulatorTestApp.Services.GetRequiredService<NewOrderSingleConsumer>();
         var acceptorSessionId = new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR");
 
-        orderFixApplication.OnMessage(FixTestInitiator.NewOrder("sem-sessao", "VIIA4", '1', 10, 2.00m), acceptorSessionId);
+        newOrderSingleConsumer.OnMessage(FixTestInitiator.NewOrder("sem-sessao", "VIIA4", '1', 10, 2.00m), acceptorSessionId);
 
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Warning OrderAccumulator.Fix.OrderFixApplication: ExecutionReport da ordem sem-sessao não foi enviado: a sessão FIX não está logada.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Warning Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: ExecutionReport da ordem sem-sessao não foi enviado: a sessão FIX não está logada.");
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("sem-sessao"));
         Assert.Equal(20.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
     }
@@ -285,8 +287,8 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     public async Task Stopping_and_disposing_the_acceptor_in_any_order_frees_the_fix_port()
     {
         var fixAcceptorPort = OrderAccumulatorFixTestHost.FindFreeFixAcceptorTcpPort();
-        var fixAcceptorService = new FixAcceptorService(
-            new OrderFixApplication(orderAccumulatorDatabase.OrderProcessor, NullLogger<OrderFixApplication>.Instance),
+        var fixAcceptorService = new FixAcceptorWorker(
+            new NewOrderSingleConsumer(new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(), NullLogger<NewOrderSingleConsumer>.Instance),
             BuildFixAcceptorConfiguration(("Fix:AcceptorPort", fixAcceptorPort.ToString()), ("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost)),
             NullLoggerFactory.Instance);
         await fixAcceptorService.StartAsync(CancellationToken.None);
@@ -303,7 +305,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Missing_acceptor_port_stops_the_startup_with_a_clear_message()
     {
-        var missingAcceptorPortError = Assert.Throws<InvalidOperationException>(() => FixAcceptorService.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration()));
+        var missingAcceptorPortError = Assert.Throws<InvalidOperationException>(() => FixAcceptorWorker.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration()));
 
         Assert.Equal("Defina a porta do acceptor FIX em Fix__AcceptorPort.", missingAcceptorPortError.Message);
     }
@@ -327,12 +329,18 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
             "SELECT order_id, exec_id FROM orders WHERE cl_ord_id = @ClOrdId", new { ClOrdId = clOrdId });
     }
 
-    // Processador que simula o banco fora do ar para um ClOrdID e repassa o resto ao de verdade.
-    private sealed class OrderProcessorFailingForClOrdId(string failingClOrdId, IOrderProcessor postgresOrderProcessor) : IOrderProcessor
+    // Repository that plays the database being down for one ClOrdID and hands the rest to the real one.
+    private sealed class OrderRepositoryFailingForClOrdId(string failingClOrdId, IOrderRepository postgresOrderRepository) : IOrderRepository
     {
-        public Task<OrderOutcome> ProcessIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default) =>
-            incomingOrder.ClOrdId == failingClOrdId
+        public Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default) =>
+            clOrdId == failingClOrdId
                 ? throw new NpgsqlException("banco fora do ar (simulado no teste)")
-                : postgresOrderProcessor.ProcessIncomingOrderAsync(incomingOrder, cancellationToken);
+                : postgresOrderRepository.FindOrderByClOrdIdAsync(clOrdId, cancellationToken);
+
+        public Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default) =>
+            postgresOrderRepository.TryAddOrderAsync(answeredOrder, cancellationToken);
+
+        public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
+            postgresOrderRepository.DeleteAllOrdersAsync(cancellationToken);
     }
 }

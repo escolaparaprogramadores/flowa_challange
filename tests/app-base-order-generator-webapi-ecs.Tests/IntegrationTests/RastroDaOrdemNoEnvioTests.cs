@@ -5,7 +5,7 @@ using System.Text;
 using Flowa.Shared.Fix;
 using QuickFix.Fields;
 
-namespace OrderGenerator.Tests;
+namespace Base.OrderGenerator.Tests;
 
 // CA-O5 da onda 3, ponta do OrderGenerator: a ordem sai com o traceparent do span de envio na tag 5100.
 public sealed class RastroDaOrdemNoEnvioTests : IClassFixture<LoggedOnOrderGenerator>
@@ -29,7 +29,7 @@ public sealed class RastroDaOrdemNoEnvioTests : IClassFixture<LoggedOnOrderGener
         Assert.Equal(HttpStatusCode.OK, respostaDaOrdem.StatusCode);
         var envioDaOrdem = Assert.Single(enviosDaOrdem);
         var ordemRecebidaPeloAcceptor = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
-        Assert.Equal($"00-{envioDaOrdem.TraceId}-{envioDaOrdem.SpanId}-01", ordemRecebidaPeloAcceptor.GetString(RastroDaOrdemFix.TagTraceParent));
+        Assert.Equal($"00-{envioDaOrdem.TraceId}-{envioDaOrdem.SpanId}-01", ordemRecebidaPeloAcceptor.GetString(FixOrderTraceProvider.TraceParentTag));
         Assert.Equal(ActivityKind.Producer, envioDaOrdem.Kind);
         // Decisão 17: nenhuma etiqueta no span, e o ClOrdID em particular nunca.
         Assert.Empty(envioDaOrdem.TagObjects);
@@ -60,7 +60,7 @@ public sealed class RastroDaOrdemNoEnvioTests : IClassFixture<LoggedOnOrderGener
         var envioDaOrdem = Assert.Single(enviosDaOrdem);
         // A mensagem que saiu leva o traceparent inteiro; só o log fica sem ele.
         var ordemRecebidaPeloAcceptor = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
-        Assert.Equal($"00-{envioDaOrdem.TraceId}-{envioDaOrdem.SpanId}-01", ordemRecebidaPeloAcceptor.GetString(RastroDaOrdemFix.TagTraceParent));
+        Assert.Equal($"00-{envioDaOrdem.TraceId}-{envioDaOrdem.SpanId}-01", ordemRecebidaPeloAcceptor.GetString(FixOrderTraceProvider.TraceParentTag));
         var linhasDoStdout = stdoutCapturado.ToString().Split('\n');
         Assert.Single(linhasDoStdout, linhaDoStdout => linhaDoStdout.StartsWith("<outgoing> ") && linhaDoStdout.Contains("|35=D|") && linhaDoStdout.Contains("|5100=***|"));
         Assert.DoesNotContain(linhasDoStdout, linhaDoStdout => linhaDoStdout.Contains(envioDaOrdem.TraceId.ToHexString()));
@@ -74,7 +74,7 @@ public sealed class RastroDaOrdemNoEnvioTests : IClassFixture<LoggedOnOrderGener
 
         Assert.Equal(HttpStatusCode.OK, respostaDaOrdem.StatusCode);
         var ordemRecebidaPeloAcceptor = Assert.Single(_loggedOnOrderGenerator.FixAcceptor.ReceivedOrders);
-        Assert.False(ordemRecebidaPeloAcceptor.IsSetField(RastroDaOrdemFix.TagTraceParent));
+        Assert.False(ordemRecebidaPeloAcceptor.IsSetField(FixOrderTraceProvider.TraceParentTag));
     }
 
     private Task<HttpResponseMessage> EnviarOrdemDeCompraDePetr4() =>
@@ -85,7 +85,7 @@ public sealed class RastroDaOrdemNoEnvioTests : IClassFixture<LoggedOnOrderGener
     {
         var ouvinteDoRastroDaOrdem = new ActivityListener
         {
-            ShouldListenTo = fonteDoRastro => fonteDoRastro.Name == RastroDaOrdemFix.NomeDaFonteDoRastro,
+            ShouldListenTo = fonteDoRastro => fonteDoRastro.Name == FixOrderTraceProvider.TraceSourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
             ActivityStarted = spanIniciado =>
             {

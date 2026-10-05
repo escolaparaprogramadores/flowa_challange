@@ -1,12 +1,13 @@
+using Base.OrderAccumulator.Commons;
 using Flowa.Shared.Fix;
-using QuickFix;
 using QuickFix.Store;
+using QuickFix;
 
-namespace OrderAccumulator.Fix;
+namespace Base.OrderAccumulator.Entrypoint.Fix;
 
 // Liga o acceptor FIX junto com o app e desliga na parada.
-public sealed class FixAcceptorService(
-    OrderFixApplication orderFixApplication, IConfiguration appConfiguration, ILoggerFactory orderAccumulatorLoggerFactory)
+public sealed class FixAcceptorWorker(
+    NewOrderSingleConsumer newOrderSingleConsumer, IConfiguration appConfiguration, ILoggerFactory orderAccumulatorLoggerFactory)
     : IHostedService, IDisposable
 {
     private const string AcceptorSettingsFile = "acceptor.cfg";
@@ -18,8 +19,8 @@ public sealed class FixAcceptorService(
     {
         // O log FIX vai para o ILoggerFactory do app, que escreve no stdout (D-34), sem o valor da 5100.
         fixAcceptor = new ThreadedSocketAcceptor(
-            orderFixApplication, new MemoryStoreFactory(), LoadFixAcceptorSessionSettings(appConfiguration),
-            new LogDaSessaoFixSemTraceParent(orderAccumulatorLoggerFactory),
+            newOrderSingleConsumer, new MemoryStoreFactory(), LoadFixAcceptorSessionSettings(appConfiguration),
+            new TraceParentHidingLoggerFactory(orderAccumulatorLoggerFactory),
             new DefaultMessageFactory([typeof(QuickFix.FIX44.NewOrderSingle).Assembly], string.Empty));
         fixAcceptor.Start();
         return Task.CompletedTask;
@@ -50,9 +51,9 @@ public sealed class FixAcceptorService(
     // compose precisa; os testes usam 127.0.0.1 para não abrir a porta para a rede.
     public static SessionSettings LoadFixAcceptorSessionSettings(IConfiguration appConfiguration)
     {
-        var fixAcceptorPort = appConfiguration.GetValue<int?>("Fix:AcceptorPort")
+        var fixAcceptorPort = appConfiguration.GetValue<int?>(OrderAccumulatorConfigurationKeys.FixAcceptorPort)
             ?? throw new InvalidOperationException("Defina a porta do acceptor FIX em Fix__AcceptorPort.");
-        var fixAcceptorBindHost = appConfiguration["Fix:AcceptorBindHost"];
+        var fixAcceptorBindHost = appConfiguration[OrderAccumulatorConfigurationKeys.FixAcceptorBindHost];
 
         var loadedFixAcceptorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, AcceptorSettingsFile));
         foreach (var fixSessionId in loadedFixAcceptorSettings.GetSessions())
@@ -69,32 +70,32 @@ public sealed class FixAcceptorService(
 
     // O log de sessão do QuickFIX escreve a mensagem FIX crua; o valor da 5100 (trace id) fica de fora.
     // A fábrica é a do app (injeção de dependência): quem a descarta é o host, não o acceptor.
-    private sealed class LogDaSessaoFixSemTraceParent(ILoggerFactory logDoApp) : ILoggerFactory
+    private sealed class TraceParentHidingLoggerFactory(ILoggerFactory appLoggerFactory) : ILoggerFactory
     {
-        public ILogger CreateLogger(string categoriaDoLog) => new LogSemTraceParent(logDoApp.CreateLogger(categoriaDoLog));
+        public ILogger CreateLogger(string logCategoryName) => new TraceParentHidingLogger(appLoggerFactory.CreateLogger(logCategoryName));
 
-        public void AddProvider(ILoggerProvider provedorDoLog) => logDoApp.AddProvider(provedorDoLog);
+        public void AddProvider(ILoggerProvider loggerProvider) => appLoggerFactory.AddProvider(loggerProvider);
 
         public void Dispose() { }
     }
 
-    private sealed class LogSemTraceParent(ILogger logDaCategoria) : ILogger
+    private sealed class TraceParentHidingLogger(ILogger categoryLogger) : ILogger
     {
-        public IDisposable? BeginScope<TState>(TState estadoDoEscopo) where TState : notnull => logDaCategoria.BeginScope(estadoDoEscopo);
+        public IDisposable? BeginScope<TState>(TState scopeState) where TState : notnull => categoryLogger.BeginScope(scopeState);
 
-        public bool IsEnabled(LogLevel nivelDoLog) => logDaCategoria.IsEnabled(nivelDoLog);
+        public bool IsEnabled(LogLevel logLevel) => categoryLogger.IsEnabled(logLevel);
 
-        public void Log<TState>(LogLevel nivelDoLog, EventId eventoDoLog, TState estadoDoLog, Exception? erroDoLog, Func<TState, Exception?, string> formatarLinha)
+        public void Log<TState>(LogLevel logLevel, EventId logEventId, TState logState, Exception? logException, Func<TState, Exception?, string> formatLogLine)
         {
-            if (!logDaCategoria.IsEnabled(nivelDoLog))
+            if (!categoryLogger.IsEnabled(logLevel))
                 return;
 
-            var linhaDoLog = formatarLinha(estadoDoLog, erroDoLog);
-            var linhaSemTraceParent = RastroDaOrdemFix.OcultarTraceParentNoLog(linhaDoLog);
-            if (ReferenceEquals(linhaDoLog, linhaSemTraceParent))
-                logDaCategoria.Log(nivelDoLog, eventoDoLog, estadoDoLog, erroDoLog, formatarLinha);
+            var logLine = formatLogLine(logState, logException);
+            var logLineWithoutTraceParent = FixOrderTraceProvider.HideTraceParentInLog(logLine);
+            if (ReferenceEquals(logLine, logLineWithoutTraceParent))
+                categoryLogger.Log(logLevel, logEventId, logState, logException, formatLogLine);
             else
-                logDaCategoria.Log(nivelDoLog, eventoDoLog, linhaSemTraceParent, erroDoLog, static (linha, _) => linha);
+                categoryLogger.Log(logLevel, logEventId, logLineWithoutTraceParent, logException, static (hiddenLogLine, _) => hiddenLogLine);
         }
     }
 }

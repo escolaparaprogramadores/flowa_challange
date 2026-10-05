@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   ci:
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/0-ci-pull-request.yml
 
   deploy:
     needs: [ci]
@@ -138,8 +138,8 @@ jobs:
             echo "${imagem_em_uso##*:}"
           }
 
-          for servico_container_e_pasta in flowa-challenge-order-generator:generator:OrderGenerator \
-                                           flowa-challenge-order-accumulator:accumulator:OrderAccumulator; do
+          for servico_container_e_pasta in flowa-challenge-order-generator:generator:app-base-order-generator-webapi-ecs \
+                                           flowa-challenge-order-accumulator:accumulator:app-base-order-accumulator-webapi-ecs; do
             IFS=: read -r nome_do_servico_no_ecs nome_do_container pasta_do_servico <<< "$servico_container_e_pasta"
             tag_em_uso=$(tag_da_imagem_em_uso_no_servico "$nome_do_servico_no_ecs" "$nome_do_container")
             mapfile -t entradas_da_imagem < <(entradas_da_imagem_do_servico "src/$pasta_do_servico/Dockerfile")
@@ -213,8 +213,8 @@ jobs:
           CONSTRUIR_IMAGEM_DO_ACCUMULATOR: ${{ steps.tags.outputs.accumulator_construir }}
         run: |
           for servico_repositorio_e_decisao in \
-              "OrderGenerator:flowa-challenge-order-generator:$CONSTRUIR_IMAGEM_DO_GENERATOR" \
-              "OrderAccumulator:flowa-challenge-order-accumulator:$CONSTRUIR_IMAGEM_DO_ACCUMULATOR"; do
+              "app-base-order-generator-webapi-ecs:flowa-challenge-order-generator:$CONSTRUIR_IMAGEM_DO_GENERATOR" \
+              "app-base-order-accumulator-webapi-ecs:flowa-challenge-order-accumulator:$CONSTRUIR_IMAGEM_DO_ACCUMULATOR"; do
             IFS=: read -r servico_flowa repositorio_ecr construir_imagem_do_servico <<< "$servico_repositorio_e_decisao"
             if [ "$construir_imagem_do_servico" != "true" ]; then
               echo "$servico_flowa: sem imagem nova; continua a que já roda"

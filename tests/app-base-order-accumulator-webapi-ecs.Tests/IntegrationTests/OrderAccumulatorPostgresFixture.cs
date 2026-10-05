@@ -1,11 +1,14 @@
+using Base.OrderAccumulator.Application.Exposures.GetExposures;
+using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
 using Flowa.Shared;
 using Npgsql;
-using OrderAccumulator.Exposure;
-using OrderAccumulator.Persistence;
 using Testcontainers.PostgreSql;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // Um PostgreSQL de verdade, em container, compartilhado pelos testes de banco.
 public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
@@ -21,8 +24,8 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
 
     public string OrderDatabaseConnectionString { get; private set; } = null!;
     public NpgsqlDataSource OrderDatabaseDataSource { get; private set; } = null!;
-    public IOrderProcessor OrderProcessor { get; private set; } = null!;
-    public IExposureReader ExposureReader { get; private set; } = null!;
+    public DecideIncomingOrderTestRunner OrderDecisionRunner { get; private set; } = null!;
+    public ISymbolExposureReadRepository ExposureReader { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
@@ -36,8 +39,8 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
         OrderDatabaseDataSource = NpgsqlDataSource.Create(OrderDatabaseConnectionString);
         await OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();
 
-        OrderProcessor = new PostgresOrderProcessor(OrderDatabaseDataSource);
-        ExposureReader = new PostgresExposureReader(OrderDatabaseDataSource);
+        OrderDecisionRunner = new DecideIncomingOrderTestRunner(OrderDatabaseDataSource);
+        ExposureReader = new SymbolExposureReadRepository(OrderDatabaseDataSource);
     }
 
     public async Task DisposeAsync()
@@ -97,8 +100,8 @@ public static class TestOrders
     public static IncomingOrder NewSellOrder(string symbol, decimal quantity, decimal price) =>
         NewIncomingOrder(symbol, OrderSideCodes.SellOrderSideFixCode, quantity, price);
 
-    public static decimal ExposureDeltaOf(OrderOutcome orderOutcome) =>
-        ExposureLimit.OrderExposureDelta(
-            orderOutcome.Side == OrderSideCodes.BuyOrderSideFixCode ? OrderSide.Buy : OrderSide.Sell,
-            (int)orderOutcome.Quantity, orderOutcome.Price);
+    public static decimal ExposureDeltaOf(DecideIncomingOrderOutput orderDecision) =>
+        ExposureLimitPolicy.CalculateOrderExposureDelta(
+            orderDecision.Side == OrderSideCodes.BuyOrderSideFixCode ? OrderSide.Buy : OrderSide.Sell,
+            (int)orderDecision.Quantity, orderDecision.Price);
 }

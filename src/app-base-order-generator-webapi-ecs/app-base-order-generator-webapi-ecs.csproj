@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <RootNamespace>OrderGenerator</RootNamespace>
+    <RootNamespace>Base.OrderGenerator</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="OrderGenerator.Tests" />
+    <InternalsVisibleTo Include="app-base-order-generator-webapi-ecs.Tests" />
   </ItemGroup>
 
   <!-- A sessão vai junto do binário; o dicionário (FIX44-flowa.xml) chega pelo Flowa.Shared. -->

@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace OrderGenerator.Tests;
+namespace Base.OrderGenerator.Tests;
 
 // GET e DELETE /api/orders só repassam ao OrderAccumulator (CA-21, CA-22, CA-29, CA-33, CA-34, CA-35, CA-42).
 public sealed class OrdersProxyTests : IDisposable

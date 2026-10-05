@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Net;
+using Base.OrderAccumulator.Infrastructure.Persistence;
 using Dapper;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Npgsql;
-using OrderAccumulator.Persistence;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // O app sobe contra um banco vazio próprio: a migração tem de rodar na subida.
 [Collection(OrderAccumulatorPostgresCollection.Name)]

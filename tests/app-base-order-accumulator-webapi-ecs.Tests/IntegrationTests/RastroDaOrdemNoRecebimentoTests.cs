@@ -4,7 +4,7 @@ using Flowa.Shared.Fix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
 
-namespace OrderAccumulator.Tests;
+namespace Base.OrderAccumulator.Tests;
 
 // CA-O5 da onda 3: o contexto do rastro chega na tag 5100 e nunca muda o destino da ordem.
 // Os testes FIX desta coleção rodam um de cada vez, então cada um vê só o recebimento da sua ordem.
@@ -22,10 +22,10 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         // O envio sai do mesmo helper que o OrderGenerator usa (FixOrderClient).
-        using var envioDaOrdem = RastroDaOrdemFix.IniciarEnvioDaOrdem();
+        using var envioDaOrdem = FixOrderTraceProvider.StartOrderSending();
         Assert.NotNull(envioDaOrdem);
         var ordemComRastro = FixTestInitiator.NewOrder("rastro-com-5100", "PETR4", '1', 100, 10.50m);
-        ordemComRastro.SetField(new StringField(RastroDaOrdemFix.TagTraceParent, RastroDaOrdemFix.TraceParentDoEnvio(envioDaOrdem)!));
+        ordemComRastro.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, FixOrderTraceProvider.GetTraceParentOfOrderSending(envioDaOrdem)!));
 
         var relatorioDaOrdem = await fixTestInitiator.SendExpectingExecutionReportAsync(ordemComRastro);
 
@@ -53,12 +53,12 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
             using var spansDoRastro = new SpansDoRastroDaOrdemCapturados();
             await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-            using var envioDaOrdem = RastroDaOrdemFix.IniciarEnvioDaOrdem();
+            using var envioDaOrdem = FixOrderTraceProvider.StartOrderSending();
             Assert.NotNull(envioDaOrdem);
             traceIdDoEnvio = envioDaOrdem.TraceId.ToHexString();
             spanIdDoEnvio = envioDaOrdem.SpanId.ToHexString();
             var ordemComRastro = FixTestInitiator.NewOrder("log-sem-trace-id", "PETR4", '1', 100, 10.50m);
-            ordemComRastro.SetField(new StringField(RastroDaOrdemFix.TagTraceParent, RastroDaOrdemFix.TraceParentDoEnvio(envioDaOrdem)!));
+            ordemComRastro.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, FixOrderTraceProvider.GetTraceParentOfOrderSending(envioDaOrdem)!));
 
             var relatorioDaOrdem = await fixTestInitiator.SendExpectingExecutionReportAsync(ordemComRastro);
 
@@ -105,7 +105,7 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         var ordemComRastroMalformado = FixTestInitiator.NewOrder("rastro-malformado", "VIIA4", '1', 10, 3.21m);
-        ordemComRastroMalformado.SetField(new StringField(RastroDaOrdemFix.TagTraceParent, traceParentMalformado));
+        ordemComRastroMalformado.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, traceParentMalformado));
 
         var relatorioDaOrdem = await fixTestInitiator.SendExpectingExecutionReportAsync(ordemComRastroMalformado);
 
@@ -142,7 +142,7 @@ public sealed class RastroDaOrdemNoRecebimentoTests(OrderAccumulatorPostgresFixt
         {
             ouvinteDoRastroDaOrdem = new ActivityListener
             {
-                ShouldListenTo = fonteDoRastro => fonteDoRastro.Name == RastroDaOrdemFix.NomeDaFonteDoRastro,
+                ShouldListenTo = fonteDoRastro => fonteDoRastro.Name == FixOrderTraceProvider.TraceSourceName,
                 Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
                 ActivityStarted = spanIniciado =>
                 {

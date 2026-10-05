@@ -8,7 +8,7 @@
 **/TestResults/
 **/playwright-report/
 **/test-results/
-src/OrderGenerator/wwwroot/
+src/app-base-order-generator-webapi-ecs/wwwroot/
 .env
 .env.*
 *.log
