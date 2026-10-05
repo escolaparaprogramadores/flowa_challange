@@ -81,6 +81,8 @@ public class OrderFieldRuleTests
         { 0m, "A quantidade deve ser maior que zero." },
         { -1m, "A quantidade deve ser maior que zero." },
         { 1.5m, "A quantidade deve ser um número inteiro." },
+        // Breaks two checks: the whole-number one comes first, so -1.5 is not reported as "maior que zero".
+        { -1.5m, "A quantidade deve ser um número inteiro." },
         { 99999.0000000000000000000001m, "A quantidade deve ser um número inteiro." },
         { 100000m, "A quantidade deve ser menor que 100.000." },
         { decimal.MaxValue, "A quantidade deve ser menor que 100.000." }
@@ -109,7 +111,10 @@ public class OrderFieldRuleTests
         { -0.01m, "O preço deve ser maior que zero." },
         { 1000m, "O preço deve ser menor que 1.000,00." },
         { 10.005m, "O preço deve ser múltiplo de 0,01." },
-        { 999.999m, "O preço deve ser múltiplo de 0,01." }
+        { 999.999m, "O preço deve ser múltiplo de 0,01." },
+        // Break two checks each: positive comes before the limit, and both come before the 0.01 step.
+        { -0.005m, "O preço deve ser maior que zero." },
+        { 1000.005m, "O preço deve ser menor que 1.000,00." }
     };
 
     [Theory]
