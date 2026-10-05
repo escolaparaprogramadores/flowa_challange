@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Reflection;
+using System.Text.Json.Serialization;
 using Base.OrderAccumulator.Application.Exposures.GetExposures;
 using Base.OrderAccumulator.Application.Exposures;
 using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
@@ -11,6 +12,7 @@ using Base.OrderAccumulator.Domain.Orders;
 using Base.OrderAccumulator.Entrypoint.Fix;
 using Base.OrderAccumulator.Entrypoint.Workers;
 using Base.OrderAccumulator.Entrypoint;
+using Base.OrderAccumulator.Entrypoint.Errors;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using Base.OrderAccumulator.Infrastructure.Logging;
 using Base.OrderAccumulator.Infrastructure.Metrics;
@@ -46,7 +48,17 @@ orderAccumulatorWebBuilder.Services.AddSingleton<FixSessionLogFactory>();
 orderAccumulatorWebBuilder.Services.AddSingleton<NewOrderSingleConsumer>();
 orderAccumulatorWebBuilder.Services.AddHostedService<FixAcceptorWorker>();
 
+// Success as DataMessage, with the status by name; every error as problem+json with traceId and one log line.
+orderAccumulatorWebBuilder.Services.ConfigureHttpJsonOptions(jsonOptions => jsonOptions.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+// The own writer comes before AddProblemDetails: it is the first in line and answers any caller.
+orderAccumulatorWebBuilder.Services.AddSingleton<IProblemDetailsWriter, ProblemDetailsForAnyClientWriter>();
+orderAccumulatorWebBuilder.Services.AddProblemDetails(problemDetailsOptions => problemDetailsOptions.CustomizeProblemDetails = ApiProblemDetails.CompleteProblemDetails);
+orderAccumulatorWebBuilder.Services.AddExceptionHandler<GlobalErrorHandler>();
+
 var orderAccumulatorApp = orderAccumulatorWebBuilder.Build();
+orderAccumulatorApp.UseExceptionHandler();
+// Any 404 under /api, a route that does not exist included, answers the problem+json too.
+orderAccumulatorApp.UseStatusCodePages();
 
 // As tabelas precisam existir antes de a primeira ordem chegar.
 await orderAccumulatorApp.Services.GetRequiredService<NpgsqlDataSource>().ApplyOrderAccumulatorSchemaAsync();
@@ -56,13 +68,10 @@ orderAccumulatorApp.MapGet("/health", () => "Healthy");
 orderAccumulatorApp.MapGet("/version", () => new { commit = buildCommitSha });
 
 orderAccumulatorApp.MapGet("/api/exposures", async (GetExposuresUseCase getExposuresUseCase, CancellationToken cancellationToken) =>
-{
-    var symbolExposures = await getExposuresUseCase.GetExposuresAsync(cancellationToken);
-    return new ExposuresResponse(
+    (await getExposuresUseCase.GetExposuresAsync(cancellationToken)).ConvertToHttpResponse(symbolExposures => new ExposuresResponse(
         ExposureLimitPolicy.PerSymbol,
         symbolExposures.Select(symbolExposure => new SymbolExposureResponse(
-            symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)).ToList());
-});
+            symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)).ToList())));
 
 // O teto de páginas limita o custo de um OFFSET grande no banco.
 const int MaxOrderListPageNumber = 1000;
@@ -71,18 +80,12 @@ orderAccumulatorApp.MapGet("/api/orders", async (HttpRequest orderListRequest, L
 {
     if (!TryReadOrderListPageNumber(orderListRequest.Query["page"], out var orderListPageNumber))
     {
-        return Results.Json(
-            new
-            {
-                status = "validation_error",
-                message = "Página inválida.",
-                errors = new[] { new { field = "page", message = $"A página deve ser um número inteiro de 1 a {MaxOrderListPageNumber}." } }
-            },
-            statusCode: StatusCodes.Status400BadRequest);
+        return DataMessage<OrderPageResponse>.CreateErrorMessage(
+            "Página inválida.", ResultStatus.InvalidInput, [$"A página deve ser um número inteiro de 1 a {MaxOrderListPageNumber}."], "invalid-page")
+            .ConvertToHttpResponse();
     }
 
-    var storedOrderPage = await listOrdersUseCase.ListOrdersAsync(orderListPageNumber, cancellationToken);
-    return Results.Json(new OrderPageResponse(
+    return (await listOrdersUseCase.ListOrdersAsync(orderListPageNumber, cancellationToken)).ConvertToHttpResponse(storedOrderPage => new OrderPageResponse(
         orderListPageNumber, OrderListReadRepository.OrdersPerPage, storedOrderPage.TotalStoredOrders,
         storedOrderPage.StoredOrders.Select(ToListedOrderResponse).ToList()));
 });

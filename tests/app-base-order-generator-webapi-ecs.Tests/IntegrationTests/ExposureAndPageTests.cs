@@ -1,4 +1,5 @@
-using Base.OrderGenerator.Entrypoint;
+using Base.OrderGenerator.Commons;
+using Base.OrderGenerator.Infrastructure;
 using System.Diagnostics;
 using System.Net;
 using Microsoft.AspNetCore.Builder;
@@ -14,28 +15,33 @@ namespace Base.OrderGenerator.Tests;
 // D-10: o OrderGenerator só repassa a exposição do OrderAccumulator.
 public sealed class ExposureProxyTests
 {
-    private const string ExposureCommunicationMessage = "Não foi possível ler a exposição no OrderAccumulator. Tente de novo em instantes.";
+    private const string OrderAccumulatorUnavailableMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
 
-    private const string AccumulatorExposuresJson = """
+    private const string AccumulatorExposuresDataJson = """
         {"limit":100000000.00,"exposures":[{"symbol":"PETR4","exposure":1000.00,"remaining":99999000.00},{"symbol":"VALE3","exposure":-500.00,"remaining":99999500.00},{"symbol":"VIIA4","exposure":0.00,"remaining":100000000.00}]}
         """;
 
+    private const string AccumulatorExposuresMessage = "Exposição dos símbolos lida.";
+
+    // CA-4: the OrderGenerator answers the DataMessage with the "data" of the OrderAccumulator as it came, without a
+    // second envelope around it.
     [Fact]
-    public async Task Repassa_o_corpo_do_accumulator_com_status_200()
+    public async Task Passes_on_the_data_of_the_accumulator_in_one_data_message()
     {
         await using var fakeAccumulator = await StartFakeAccumulator(async exposuresHttpContext =>
         {
             exposuresHttpContext.Response.ContentType = "application/json";
-            await exposuresHttpContext.Response.WriteAsync(AccumulatorExposuresJson);
+            await exposuresHttpContext.Response.WriteAsync(
+                $$"""{"success":true,"status":"Ok","message":"{{AccumulatorExposuresMessage}}","data":{{AccumulatorExposuresDataJson}},"errors":[],"errorCode":null}""");
         });
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
-        var exposuresResponse = await orderGeneratorClient.GetAsync("/api/exposures");
+        var exposuresDataMessage = await OrderApiTests.ReadSuccessDataMessageAsync(await orderGeneratorClient.GetAsync("/api/exposures"));
 
-        Assert.Equal(HttpStatusCode.OK, exposuresResponse.StatusCode);
-        Assert.Equal("application/json", exposuresResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal(AccumulatorExposuresJson, await exposuresResponse.Content.ReadAsStringAsync());
+        Assert.Equal(AccumulatorExposuresMessage, exposuresDataMessage.GetProperty("message").GetString());
+        Assert.Equal(AccumulatorExposuresDataJson, exposuresDataMessage.GetProperty("data").GetRawText());
+        Assert.False(exposuresDataMessage.GetProperty("data").TryGetProperty("data", out _));
     }
 
     [Fact]
@@ -83,21 +89,22 @@ public sealed class ExposureProxyTests
     }
 
     [Fact]
-    public async Task Erro_nao_previsto_vira_500_com_o_corpo_do_contrato_sem_detalhe_interno()
+    public async Task Unexpected_error_becomes_500_problem_without_internal_detail()
     {
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(orderGeneratorWebHostBuilder =>
             orderGeneratorWebHostBuilder.ConfigureTestServices(testServices => testServices
-                .AddHttpClient(OrderGeneratorApiEndpoints.AccumulatorHttpClientName)
+                .AddHttpClient<IOrderAccumulatorHttpClient, OrderAccumulatorHttpClient>(OrderAccumulatorHttpClient.OrderAccumulatorHttpClientName)
                 .ConfigurePrimaryHttpMessageHandler(() => new ExplodingAccumulatorHandler())));
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
         var unexpectedErrorHttpResponse = await orderGeneratorClient.GetAsync("/api/exposures");
         var unexpectedErrorBody = await unexpectedErrorHttpResponse.Content.ReadAsStringAsync();
 
-        Assert.Equal(HttpStatusCode.InternalServerError, unexpectedErrorHttpResponse.StatusCode);
-        var unexpectedErrorResponseJson = await OrderApiTests.ReadOrderGeneratorResponseJson(unexpectedErrorHttpResponse);
-        Assert.Equal("error", unexpectedErrorResponseJson.GetProperty("status").GetString());
-        Assert.Equal("Erro inesperado ao processar a ordem.", unexpectedErrorResponseJson.GetProperty("message").GetString());
+        var unexpectedErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(unexpectedErrorHttpResponse, HttpStatusCode.InternalServerError);
+        Assert.Equal("urn:base-investimentos:problem:internal-error", unexpectedErrorProblem.GetProperty("type").GetString());
+        Assert.Equal("Erro interno", unexpectedErrorProblem.GetProperty("title").GetString());
+        Assert.Equal("Aconteceu um erro inesperado. Informe o traceId ao suporte.", unexpectedErrorProblem.GetProperty("detail").GetString());
+        Assert.Equal("InternalError", unexpectedErrorProblem.GetProperty("statusResultado").GetString());
         Assert.DoesNotContain(ExplodingAccumulatorHandler.InternalErrorDetail, unexpectedErrorBody);
         Assert.DoesNotContain("   at ", unexpectedErrorBody);
     }
@@ -112,10 +119,11 @@ public sealed class ExposureProxyTests
 
     private static async Task AssertExposureError(HttpResponseMessage exposuresResponse)
     {
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, exposuresResponse.StatusCode);
-        var communicationErrorResponse = await OrderApiTests.ReadOrderGeneratorResponseJson(exposuresResponse);
-        Assert.Equal("communication_error", communicationErrorResponse.GetProperty("status").GetString());
-        Assert.Equal(ExposureCommunicationMessage, communicationErrorResponse.GetProperty("message").GetString());
+        var unavailableProblem = await OrderApiTests.ReadProblemDetailsAsync(exposuresResponse, HttpStatusCode.ServiceUnavailable);
+        Assert.Equal("urn:base-investimentos:problem:order-accumulator-unavailable", unavailableProblem.GetProperty("type").GetString());
+        Assert.Equal("Serviço indisponível", unavailableProblem.GetProperty("title").GetString());
+        Assert.Equal(OrderAccumulatorUnavailableMessage, unavailableProblem.GetProperty("detail").GetString());
+        Assert.Equal("ServiceUnavailable", unavailableProblem.GetProperty("statusResultado").GetString());
     }
 
     private static async Task<FakeAccumulatorServer> StartFakeAccumulator(RequestDelegate exposuresHandler)
@@ -212,8 +220,13 @@ public sealed class OrderGeneratorPageTests : IDisposable
 
         var unknownApiResponse = await orderGeneratorClient.GetAsync(apiPath);
 
-        Assert.Equal(HttpStatusCode.NotFound, unknownApiResponse.StatusCode);
         Assert.DoesNotContain("boleta-de-teste", await unknownApiResponse.Content.ReadAsStringAsync());
+        var notFoundProblem = await OrderApiTests.ReadProblemDetailsAsync(unknownApiResponse, HttpStatusCode.NotFound);
+        Assert.Equal("urn:base-investimentos:problem:not-found", notFoundProblem.GetProperty("type").GetString());
+        Assert.Equal("Não encontrado", notFoundProblem.GetProperty("title").GetString());
+        Assert.Equal("Não encontrado", notFoundProblem.GetProperty("detail").GetString());
+        Assert.Equal("NotFound", notFoundProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(notFoundProblem.GetProperty("errors").EnumerateArray());
     }
 
     [Fact]

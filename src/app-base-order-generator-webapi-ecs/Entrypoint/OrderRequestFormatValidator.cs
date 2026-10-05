@@ -1,13 +1,9 @@
 using System.Globalization;
-using System.Text.Json.Serialization;
 using Base.OrderGenerator.Domain.Orders;
 
 namespace Base.OrderGenerator.Entrypoint;
 
-// The error goes straight into the HTTP response; the contract promises the "field" and "message" names.
-public sealed record OrderFieldFormatError(
-    [property: JsonPropertyName("field")] string OrderField,
-    [property: JsonPropertyName("message")] string OrderFieldFormatMessage);
+public sealed record OrderFieldFormatError(string OrderField, string OrderFieldFormatMessage);
 
 public sealed record OrderRequestFormatValidation(OrderToSend? OrderToSend, IReadOnlyList<OrderFieldFormatError> OrderFieldFormatErrors);
 
