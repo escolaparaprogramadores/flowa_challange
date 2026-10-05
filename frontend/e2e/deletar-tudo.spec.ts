@@ -164,8 +164,13 @@ test('CA-17: clicar abre a janela por cima, com fundo escurecido e borrado, íco
   await localizarBotaoDeletarTudoDoCabecalho(page).click();
   const janela = localizarJanelaDeConfirmacao(page);
   await expect(janela).toBeVisible();
-  await expect(janela.getByRole('heading', { name: 'Deletar todos os dados?' })).toHaveCSS('font-family', /^Sora/);
-  await conferirMedidaEmPxDeCss(janela.getByRole('heading', { name: 'Deletar todos os dados?' }), 'font-size', 20);
+  // getByRole({ name }) casa pedaço do nome: o texto exato de título e botões é conferido à parte.
+  const tituloDaJanela = janela.getByRole('heading');
+  await expect(tituloDaJanela).toHaveCount(1);
+  await expect(tituloDaJanela).toHaveText('Deletar todos os dados?');
+  await expect(tituloDaJanela).toHaveCSS('font-family', /^Sora/);
+  await conferirMedidaEmPxDeCss(tituloDaJanela, 'font-size', 20);
+  await expect(janela.getByRole('button')).toHaveText(['Cancelar', 'Deletar tudo']);
   await expect(janela.locator('#texto-confirmacao-deletar')).toHaveText(TEXTO_DA_JANELA);
   await conferirMedidaEmPxDeCss(janela, 'width', 440);
   await conferirMedidaEmPxDeCss(janela, 'border-top-left-radius', 22);
