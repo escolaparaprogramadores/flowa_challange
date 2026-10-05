@@ -320,18 +320,31 @@ plano contratado, os três painéis param de receber dado novo depois disso.
 
 ### Teste de carga
 
-O k6 (`k6/carga-ordens.js`) manda 15 ordens por segundo durante 5 minutos para a URL pública, abaixo
-do limite de 20 por segundo do API Gateway. As ordens vão em pares de compra e venda do mesmo ativo,
-quantidade e preço, para a exposição voltar perto de onde estava. O teste só reprova se a taxa de erro
-chegar a 1%. O commit é a versão do OrderGenerator no ar durante o teste.
+O k6 (`k6/carga-ordens.js`) manda cerca de 15 ordens por segundo durante 5 minutos, abaixo do limite
+de 20 por segundo do API Gateway. Em PETR4, VALE3 e VIIA4 ele provoca três resultados:
 
-| Data | Commit | Requisições por minuto | Taxa de erro | P80 | P90 | P95 | P99 |
-|---|---|---|---|---|---|---|---|
-| 2026-10-04 00:24 UTC | f6a268d | 899 | 0,00% | 79 ms | 90 ms | 101 ms | 146 ms |
+- **Aceitas:** pares de compra e venda do mesmo ativo, quantidade e preço, que se compensam.
+- **Rejeitadas por campo inválido:** quantidade 100000, que passa pelo FIX e volta rejeitada.
+- **Rejeitadas por limite:** ordens grandes enchem a exposição até a seguinte passar de
+  R$ 100.000.000,00 e voltar rejeitada. Depois o k6 desfaz o que a API aceitou, olhando a exposição real.
 
-Foram 4500 ordens, todas aceitas. O relatório completo está no
-[run do GitHub Actions](https://github.com/escolaparaprogramadores/flowa_challange/actions/runs/37164582295).
-Para rodar de novo: em Actions, escolha o workflow `k6-carga.yml` e clique em "Run workflow". O
-relatório fica como anexo do run.
+O teste reprova se faltar algum dos três resultados em algum ativo, se a exposição de algum ativo não
+voltar ao valor de antes, se o k6 não conseguir manter o ritmo ou se a taxa de erro chegar a 1%.
+
+Medição na máquina, contra o `docker compose` do commit 62979f4 (5 minutos, 4523 ordens):
+
+| Ativo | Aceitas | Rejeitadas por campo | Rejeitadas por limite | Exposição antes e depois |
+|---|---|---|---|---|
+| PETR4 | 1406 | 101 | 2 | igual |
+| VALE3 | 1404 | 101 | 2 | igual |
+| VIIA4 | 1404 | 101 | 2 | igual |
+
+| Requisições por minuto | Taxa de erro | P80 | P90 | P95 | P99 |
+|---|---|---|---|---|---|
+| 904 | 0,00% | 5 ms | 5 ms | 5 ms | 6 ms |
+
+Para rodar no ambiente dev: em Actions, escolha o workflow `k6-carga.yml` e clique em "Run workflow".
+Só rode quando ninguém mais estiver mandando ordens para dev, senão a exposição não fecha. O resumo
+aparece na página do run e fica como anexo. Na máquina: `k6 run -e FLOWA_URL=http://localhost:8080 k6/carga-ordens.js`.
 
 This is a challenge by [Coodesh](https://coodesh.com/)
