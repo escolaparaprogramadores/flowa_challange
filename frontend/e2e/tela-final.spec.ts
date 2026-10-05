@@ -91,11 +91,27 @@ for (const larguraDaJanela of [860, 375]) {
     expect(caixaDaBoleta.y).toBeGreaterThanOrEqual(ultimoAtivo.y + ultimoAtivo.height);
     expect(caixaDaCompraVenda.y).toBeGreaterThanOrEqual(caixaDaBoleta.y + caixaDaBoleta.height);
 
-    // A lista rola de lado dentro do cartão: a moldura tem rolagem própria e não passa da borda do cartão.
+    // ASSUMI-06 (decisão da F6, ASSUMI-04 dela): em vez de rolar de lado, a lista cabe inteira no cartão.
+    // Em 860 a tabela fica inteira com cabeçalho; em 375 cada ordem vira um bloco com os 8 campos rotulados.
     const molduraDaLista = page.getByRole('region', { name: 'Compra/Venda' }).locator('.tabela-de-ordens-moldura');
-    await expect(molduraDaLista).toHaveCSS('overflow-x', 'auto');
     const caixaDaMoldura = await conferirVisivelELerCaixaDoElemento(molduraDaLista, 'moldura da lista');
     expect(caixaDaMoldura.x + caixaDaMoldura.width).toBeLessThanOrEqual(caixaDaCompraVenda.x + caixaDaCompraVenda.width + 0.5);
+    const larguraDaListaNaMoldura = await molduraDaLista.evaluate((molduraNaPagina) => ({ larguraDoConteudo: molduraNaPagina.scrollWidth, larguraVisivel: molduraNaPagina.clientWidth }));
+    expect(larguraDaListaNaMoldura.larguraDoConteudo, 'nada escondido para os lados').toBeLessThanOrEqual(larguraDaListaNaMoldura.larguraVisivel);
+    const primeiraOrdemDaLista = page.getByRole('region', { name: 'Compra/Venda' }).getByTestId('linha-da-ordem').first();
+    const caixaDaPrimeiraOrdem = await conferirVisivelELerCaixaDoElemento(primeiraOrdemDaLista, 'primeira ordem');
+    expect(caixaDaPrimeiraOrdem.x + caixaDaPrimeiraOrdem.width).toBeLessThanOrEqual(caixaDaMoldura.x + caixaDaMoldura.width + 0.5);
+    const formatoDaLista = await primeiraOrdemDaLista.evaluate((linhaNaPagina) => ({
+      exibicaoDaLinha: getComputedStyle(linhaNaPagina).display,
+      cabecalhoVisivel: getComputedStyle(linhaNaPagina.closest('table')!.querySelector('thead')!).display !== 'none',
+      rotulosDosCampos: [...linhaNaPagina.querySelectorAll('td')].map((campoDaOrdem) => getComputedStyle(campoDaOrdem, '::before').content),
+    }));
+    const rotulosEsperados = ['"Data"', '"Status"', '"Ativo"', '"Lado"', '"Quantidade"', '"Preço"', '"Número da ordem"', '"Identificador do envio"'];
+    if (larguraDaJanela === 375) {
+      expect(formatoDaLista).toEqual({ exibicaoDaLinha: 'grid', cabecalhoVisivel: false, rotulosDosCampos: rotulosEsperados });
+    } else {
+      expect(formatoDaLista).toEqual({ exibicaoDaLinha: 'table-row', cabecalhoVisivel: true, rotulosDosCampos: Array(8).fill('none') });
+    }
 
     // Links do Datadog e selo quebram linha sem sobrepor o logo e sem sair da tela.
     const caixaDoLogo = await conferirVisivelELerCaixaDoElemento(page.getByRole('img', { name: 'Base investimentos' }), 'logo');
