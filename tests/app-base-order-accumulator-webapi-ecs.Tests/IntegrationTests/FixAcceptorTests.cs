@@ -112,7 +112,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Assert.Equal(ExecType.NEW, repeatedOrderExecutionReport.ExecType.Value);
         Assert.Equal(50.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync("repetida"));
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Information Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: ClOrdID repetida repetido: devolvendo a resposta original.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Information Base.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: Repeated ClOrdID: sending the stored answer back.");
     }
 
     [Fact]
@@ -172,15 +172,15 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
             const string fixSessionLogCategory = "Base.OrderAccumulator.Infrastructure.Fix.FixSessionLog";
             const string acceptorFixSession = "FIX.4.4:ORDERACCUMULATOR->ORDERGENERATOR";
             var fixSessionLogLines = stdoutJsonLogCapture.JsonLogLines
-                .Where(jsonLogLine => jsonLogLine.Category == fixSessionLogCategory && jsonLogLine.ReadScopeField("FixSession") == acceptorFixSession)
+                .Where(jsonLogLine => jsonLogLine.Category == fixSessionLogCategory && jsonLogLine.ReadLogField("FixSession") == acceptorFixSession)
                 .ToList();
             var receivedOrderLine = Assert.Single(fixSessionLogLines, fixLogLine =>
-                fixLogLine.Message == "FIX message received." && fixLogLine.ReadScopeField("FixMessage")!.Contains("|35=D|") && fixLogLine.ReadScopeField("FixMessage")!.Contains("|11=log-ca19|"));
+                fixLogLine.Message == "FIX message received." && fixLogLine.ReadLogField("FixMessage")!.Contains("|35=D|") && fixLogLine.ReadLogField("FixMessage")!.Contains("|11=log-ca19|"));
             var sentExecutionReportLine = Assert.Single(fixSessionLogLines, fixLogLine =>
-                fixLogLine.Message == "FIX message sent." && fixLogLine.ReadScopeField("FixMessage")!.Contains("|35=8|") && fixLogLine.ReadScopeField("FixMessage")!.Contains("|11=log-ca19|"));
+                fixLogLine.Message == "FIX message sent." && fixLogLine.ReadLogField("FixMessage")!.Contains("|35=8|") && fixLogLine.ReadLogField("FixMessage")!.Contains("|11=log-ca19|"));
             Assert.Equal("Information", receivedOrderLine.LogLevel);
             Assert.Equal("Information", sentExecutionReportLine.LogLevel);
-            Assert.StartsWith("8=FIX.4.4|", receivedOrderLine.ReadScopeField("FixMessage"));
+            Assert.StartsWith("8=FIX.4.4|", receivedOrderLine.ReadLogField("FixMessage"));
             Assert.Contains(fixSessionLogLines, fixLogLine => fixLogLine.Message == "Session reset: ResetOnLogon");
             Assert.Contains(fixSessionLogLines, fixLogLine => fixLogLine.Message == "Session reset: ResetOnDisconnect");
             Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Debug" or "Trace");

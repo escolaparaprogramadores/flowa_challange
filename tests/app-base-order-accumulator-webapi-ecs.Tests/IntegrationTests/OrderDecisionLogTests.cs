@@ -41,7 +41,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
 
         var rejectionLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, saleOverTheLimit.ClOrdID.Value);
         Assert.Equal(("Warning", "Order rejected: exposure limit exceeded."), (rejectionLogLine.LogLevel, rejectionLogLine.Message));
-        Assert.Equal("exposure_limit_exceeded", rejectionLogLine.ReadScopeField("ErrorCode"));
+        Assert.Equal("exposure_limit_exceeded", rejectionLogLine.ReadLogField("ErrorCode"));
         Assert.Null(rejectionLogLine.Exception);
         // The accepted order has no consumer line; its FIX messages in and out already record it.
         Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine =>
@@ -64,7 +64,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
 
         var rejectionLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, orderWithUnknownSymbol.ClOrdID.Value);
         Assert.Equal(("Warning", "Order rejected: invalid fields."), (rejectionLogLine.LogLevel, rejectionLogLine.Message));
-        Assert.Equal("invalid_order_fields", rejectionLogLine.ReadScopeField("ErrorCode"));
+        Assert.Equal("invalid_order_fields", rejectionLogLine.ReadLogField("ErrorCode"));
         Assert.Null(rejectionLogLine.Exception);
     }
 
@@ -88,7 +88,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
         Assert.Single(consumerLogLines, consumerLogLine => consumerLogLine.LogLevel == "Warning" && consumerLogLine.Message == "Order rejected: invalid fields.");
         var repeatLogLine = Assert.Single(consumerLogLines, consumerLogLine => consumerLogLine.LogLevel == "Information");
         Assert.Equal("Repeated ClOrdID: sending the stored answer back.", repeatLogLine.Message);
-        Assert.Null(repeatLogLine.ReadScopeField("ErrorCode"));
+        Assert.Null(repeatLogLine.ReadLogField("ErrorCode"));
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
 
         var notSentLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, orderWithoutLoggedOnSession.ClOrdID.Value);
         Assert.Equal(("Warning", "ExecutionReport not sent: the FIX session is not logged on."), (notSentLogLine.LogLevel, notSentLogLine.Message));
-        Assert.Equal("execution_report_not_sent", notSentLogLine.ReadScopeField("ErrorCode"));
+        Assert.Equal("execution_report_not_sent", notSentLogLine.ReadLogField("ErrorCode"));
         Assert.Null(notSentLogLine.Exception);
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync(orderWithoutLoggedOnSession.ClOrdID.Value));
     }
@@ -127,7 +127,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
 
         var failureLogLine = AssertSingleConsumerLogLine(stdoutJsonLogCapture, orderThatHitsTheDatabaseFailure.ClOrdID.Value);
         Assert.Equal(("Error", "Order decision failed; no ExecutionReport sent."), (failureLogLine.LogLevel, failureLogLine.Message));
-        Assert.Equal("error", failureLogLine.ReadScopeField("ErrorCode"));
+        Assert.Equal("error", failureLogLine.ReadLogField("ErrorCode"));
         Assert.StartsWith("Npgsql.NpgsqlException", failureLogLine.Exception);
         Assert.Contains(OrderRepositoryFailingForClOrdId.SimulatedDatabaseFailure, failureLogLine.Exception);
     }

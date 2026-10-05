@@ -69,11 +69,11 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         var orderLogLines = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.TraceId == orderClOrdId).ToList();
         Assert.Equal(2, orderLogLines.Count);
         var receivedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message received.");
-        Assert.Contains("|35=D|", receivedOrderLine.ReadScopeField("FixMessage"));
-        Assert.Contains($"|5100={orderTraceParent}|", receivedOrderLine.ReadScopeField("FixMessage"));
+        Assert.Contains("|35=D|", receivedOrderLine.ReadLogField("FixMessage"));
+        Assert.Contains($"|5100={orderTraceParent}|", receivedOrderLine.ReadLogField("FixMessage"));
         var sentExecutionReportLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
-        Assert.Contains("|35=8|", sentExecutionReportLine.ReadScopeField("FixMessage"));
-        Assert.Contains($"|11={orderClOrdId}|", sentExecutionReportLine.ReadScopeField("FixMessage"));
+        Assert.Contains("|35=8|", sentExecutionReportLine.ReadLogField("FixMessage"));
+        Assert.Contains($"|11={orderClOrdId}|", sentExecutionReportLine.ReadLogField("FixMessage"));
     }
 
     [Fact]

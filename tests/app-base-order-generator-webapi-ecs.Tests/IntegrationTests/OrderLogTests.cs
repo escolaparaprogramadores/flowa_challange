@@ -44,13 +44,13 @@ public sealed class OrderLogTests
         Assert.Equal(2, orderLogLines.Count);
         Assert.All(orderLogLines, orderLogLine => Assert.Equal((FixSessionLogCategory, "Information"), (orderLogLine.Category, orderLogLine.LogLevel)));
         var sentOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
-        Assert.Contains("|35=D|", sentOrderLine.ReadScopeField("FixMessage"));
-        Assert.Contains($"|11={orderClOrdId}|", sentOrderLine.ReadScopeField("FixMessage"));
+        Assert.Contains("|35=D|", sentOrderLine.ReadLogField("FixMessage"));
+        Assert.Contains($"|11={orderClOrdId}|", sentOrderLine.ReadLogField("FixMessage"));
         // Decision 17 fell: the traceparent of tag 5100 goes whole to the log.
-        Assert.Contains($"|5100=00-{orderClOrdId}-{orderSending.SpanId.ToHexString()}-01|", sentOrderLine.ReadScopeField("FixMessage"));
+        Assert.Contains($"|5100=00-{orderClOrdId}-{orderSending.SpanId.ToHexString()}-01|", sentOrderLine.ReadLogField("FixMessage"));
         var receivedExecutionReportLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message received.");
-        Assert.Contains("|35=8|", receivedExecutionReportLine.ReadScopeField("FixMessage"));
-        Assert.Contains($"|11={orderClOrdId}|", receivedExecutionReportLine.ReadScopeField("FixMessage"));
+        Assert.Contains("|35=8|", receivedExecutionReportLine.ReadLogField("FixMessage"));
+        Assert.Contains($"|11={orderClOrdId}|", receivedExecutionReportLine.ReadLogField("FixMessage"));
         Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Debug" or "Trace");
     }
 
@@ -69,7 +69,7 @@ public sealed class OrderLogTests
         var orderSending = Assert.Single(orderSendingSpans);
         var communicationWarning = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.Category == FixOrderClientCategory);
         Assert.Equal(("Warning", "Order not sent: the FIX session is not logged on."), (communicationWarning.LogLevel, communicationWarning.Message));
-        Assert.Equal("communication_error", communicationWarning.ReadScopeField("ErrorCode"));
+        Assert.Equal("communication_error", communicationWarning.ReadLogField("ErrorCode"));
         Assert.Equal(orderSending.TraceId.ToHexString(), communicationWarning.TraceId);
         Assert.Null(communicationWarning.Exception);
     }
@@ -92,7 +92,7 @@ public sealed class OrderLogTests
         var unansweredClOrdId = Assert.Single(silentFixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
         var communicationWarning = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.Category == FixOrderClientCategory);
         Assert.Equal(("Warning", "No ExecutionReport for the order within 5 seconds."), (communicationWarning.LogLevel, communicationWarning.Message));
-        Assert.Equal("communication_error", communicationWarning.ReadScopeField("ErrorCode"));
+        Assert.Equal("communication_error", communicationWarning.ReadLogField("ErrorCode"));
         Assert.Equal(unansweredClOrdId, communicationWarning.TraceId);
         Assert.Null(communicationWarning.Exception);
     }
@@ -116,7 +116,7 @@ public sealed class OrderLogTests
         var answeredClOrdId = Assert.Single(fixTestAcceptor.ReceivedOrders).GetString(Tags.ClOrdID);
         var unexpectedAnswerError = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.Category == FixOrderClientCategory);
         Assert.Equal(("Error", "Unexpected ExecutionReport for the order."), (unexpectedAnswerError.LogLevel, unexpectedAnswerError.Message));
-        Assert.Equal("error", unexpectedAnswerError.ReadScopeField("ErrorCode"));
+        Assert.Equal("error", unexpectedAnswerError.ReadLogField("ErrorCode"));
         Assert.Equal(answeredClOrdId, unexpectedAnswerError.TraceId);
         Assert.StartsWith("System.InvalidOperationException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
     }
@@ -136,12 +136,14 @@ public sealed class OrderLogTests
             Assert.Equal(HttpStatusCode.ServiceUnavailable, forwardedCallResponse.StatusCode);
         }
 
-        var forwardedCallWarning = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Warning" or "Error");
+        // The test host has no wwwroot, so the static files middleware warns about it; the app does not.
+        var forwardedCallWarning = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine =>
+            jsonLogLine.LogLevel is "Warning" or "Error" && jsonLogLine.Category != "Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware");
         Assert.Equal(("Program", "Warning", "The OrderAccumulator did not answer the forwarded call."),
             (forwardedCallWarning.Category, forwardedCallWarning.LogLevel, forwardedCallWarning.Message));
-        Assert.Equal("communication_error", forwardedCallWarning.ReadScopeField("ErrorCode"));
-        Assert.Equal(forwardedHttpMethod, forwardedCallWarning.ReadScopeField("Method"));
-        Assert.Equal(forwardedRoute, forwardedCallWarning.ReadScopeField("Route"));
+        Assert.Equal("communication_error", forwardedCallWarning.ReadLogField("ErrorCode"));
+        Assert.Equal(forwardedHttpMethod, forwardedCallWarning.ReadLogField("Method"));
+        Assert.Equal(forwardedRoute, forwardedCallWarning.ReadLogField("Route"));
         Assert.Null(forwardedCallWarning.Exception);
     }
 
