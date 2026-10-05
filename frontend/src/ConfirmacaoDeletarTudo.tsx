@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent, type SyntheticEvent } from 'react';
+import { useRef, useState, type KeyboardEvent, type MouseEvent, type SyntheticEvent } from 'react';
 import { IconeAlerta, IconeLixeira } from './Icones';
 
 type PropsDaConfirmacaoDeletarTudo = {
@@ -8,7 +8,7 @@ type PropsDaConfirmacaoDeletarTudo = {
 
 export function ConfirmacaoDeletarTudo({ aoConfirmarDeletarTudo }: PropsDaConfirmacaoDeletarTudo) {
   const janelaDeConfirmacao = useRef<HTMLDialogElement>(null);
-  const [apagandoTudo, setApagandoTudo] = useState(false);
+  const [estaApagandoTudo, setEstaApagandoTudo] = useState(false);
   const [mensagemDeErroDoApagar, setMensagemDeErroDoApagar] = useState<string>();
 
   function aoClicarEmDeletarTudoNoCabecalho() {
@@ -22,16 +22,22 @@ export function ConfirmacaoDeletarTudo({ aoConfirmarDeletarTudo }: PropsDaConfir
 
   // Enquanto o apagar está no servidor a janela fica aberta: é nela que aparece o erro.
   function aoApertarEscNaJanela(eventoDeCancelamentoDaJanela: SyntheticEvent<HTMLDialogElement>) {
-    if (apagandoTudo) eventoDeCancelamentoDaJanela.preventDefault();
+    if (estaApagandoTudo) eventoDeCancelamentoDaJanela.preventDefault();
+  }
+
+  // O Chrome só deixa cancelar o "cancel" do <dialog> uma vez sem novo clique: o segundo Esc fecharia a janela.
+  // Barrar a tecla antes do navegador segura a janela aberta até o apagar responder.
+  function aoApertarTeclaNaJanela(eventoDeTeclaNaJanela: KeyboardEvent<HTMLDialogElement>) {
+    if (estaApagandoTudo && eventoDeTeclaNaJanela.key === 'Escape') eventoDeTeclaNaJanela.preventDefault();
   }
 
   // O clique no fundo escurecido chega com o próprio <dialog> como alvo; o clique no conteúdo, não.
   function aoClicarNoFundoDaJanela(eventoDeCliqueNaJanela: MouseEvent<HTMLDialogElement>) {
-    if (eventoDeCliqueNaJanela.target === eventoDeCliqueNaJanela.currentTarget && !apagandoTudo) fecharJanelaDeConfirmacao();
+    if (eventoDeCliqueNaJanela.target === eventoDeCliqueNaJanela.currentTarget && !estaApagandoTudo) fecharJanelaDeConfirmacao();
   }
 
   async function aoConfirmarDeletarTudoNaJanela() {
-    setApagandoTudo(true);
+    setEstaApagandoTudo(true);
     setMensagemDeErroDoApagar(undefined);
     try {
       await aoConfirmarDeletarTudo();
@@ -39,7 +45,7 @@ export function ConfirmacaoDeletarTudo({ aoConfirmarDeletarTudo }: PropsDaConfir
     } catch (falhaNoApagar) {
       setMensagemDeErroDoApagar((falhaNoApagar as Error).message);
     } finally {
-      setApagandoTudo(false);
+      setEstaApagandoTudo(false);
     }
   }
 
@@ -55,6 +61,7 @@ export function ConfirmacaoDeletarTudo({ aoConfirmarDeletarTudo }: PropsDaConfir
         aria-labelledby="titulo-confirmacao-deletar"
         aria-describedby="texto-confirmacao-deletar"
         onCancel={aoApertarEscNaJanela}
+        onKeyDown={aoApertarTeclaNaJanela}
         onClick={aoClicarNoFundoDaJanela}
       >
         <div className="janela-confirmacao-conteudo">
@@ -69,11 +76,11 @@ export function ConfirmacaoDeletarTudo({ aoConfirmarDeletarTudo }: PropsDaConfir
             <p className="janela-confirmacao-erro" role="alert">{mensagemDeErroDoApagar}</p>
           )}
           <div className="janela-confirmacao-acoes">
-            <button type="button" className="janela-confirmacao-cancelar" onClick={fecharJanelaDeConfirmacao} disabled={apagandoTudo}>
+            <button type="button" className="janela-confirmacao-cancelar" onClick={fecharJanelaDeConfirmacao} disabled={estaApagandoTudo}>
               Cancelar
             </button>
-            <button type="button" className="janela-confirmacao-deletar" onClick={aoConfirmarDeletarTudoNaJanela} disabled={apagandoTudo}>
-              {apagandoTudo ? 'Apagando…' : 'Deletar tudo'}
+            <button type="button" className="janela-confirmacao-deletar" onClick={aoConfirmarDeletarTudoNaJanela} disabled={estaApagandoTudo}>
+              {estaApagandoTudo ? 'Apagando…' : 'Deletar tudo'}
             </button>
           </div>
         </div>

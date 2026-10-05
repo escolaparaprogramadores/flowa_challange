@@ -45,7 +45,7 @@ function caixasSeSobrepoem(primeiraCaixa: { x: number; y: number; width: number;
   );
 }
 
-async function caixaVisivel(elementoDaTela: Locator, nomeDoElemento: string) {
+async function conferirVisivelELerCaixaDoElemento(elementoDaTela: Locator, nomeDoElemento: string) {
   await expect(elementoDaTela, nomeDoElemento).toHaveCount(1);
   await expect(elementoDaTela, nomeDoElemento).toBeVisible();
   return (await elementoDaTela.boundingBox())!;
@@ -76,7 +76,7 @@ for (const larguraDaJanela of [860, 375]) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(larguraDaJanela);
 
     const caixasDosAtivos = [];
-    for (const simboloDaExposicao of SIMBOLOS_DA_EXPOSICAO) caixasDosAtivos.push(await caixaVisivel(page.getByTestId('exposicao-' + simboloDaExposicao), simboloDaExposicao));
+    for (const simboloDaExposicao of SIMBOLOS_DA_EXPOSICAO) caixasDosAtivos.push(await conferirVisivelELerCaixaDoElemento(page.getByTestId('exposicao-' + simboloDaExposicao), simboloDaExposicao));
     for (let posicaoDoAtivo = 1; posicaoDoAtivo < caixasDosAtivos.length; posicaoDoAtivo++) {
       const ativoDeCima = caixasDosAtivos[posicaoDoAtivo - 1];
       const ativoDeBaixo = caixasDosAtivos[posicaoDoAtivo];
@@ -85,8 +85,8 @@ for (const larguraDaJanela of [860, 375]) {
     }
 
     // Ordem do computador também no celular (decisão G-1): ativos → Nova ordem → Compra/Venda.
-    const caixaDaBoleta = await caixaVisivel(page.getByRole('form', { name: 'Boleta de ordem' }), 'Nova ordem');
-    const caixaDaCompraVenda = await caixaVisivel(page.getByRole('region', { name: 'Compra/Venda' }), 'Compra/Venda');
+    const caixaDaBoleta = await conferirVisivelELerCaixaDoElemento(page.getByRole('form', { name: 'Boleta de ordem' }), 'Nova ordem');
+    const caixaDaCompraVenda = await conferirVisivelELerCaixaDoElemento(page.getByRole('region', { name: 'Compra/Venda' }), 'Compra/Venda');
     const ultimoAtivo = caixasDosAtivos[caixasDosAtivos.length - 1];
     expect(caixaDaBoleta.y).toBeGreaterThanOrEqual(ultimoAtivo.y + ultimoAtivo.height);
     expect(caixaDaCompraVenda.y).toBeGreaterThanOrEqual(caixaDaBoleta.y + caixaDaBoleta.height);
@@ -94,11 +94,11 @@ for (const larguraDaJanela of [860, 375]) {
     // A lista rola de lado dentro do cartão: a moldura tem rolagem própria e não passa da borda do cartão.
     const molduraDaLista = page.getByRole('region', { name: 'Compra/Venda' }).locator('.tabela-de-ordens-moldura');
     await expect(molduraDaLista).toHaveCSS('overflow-x', 'auto');
-    const caixaDaMoldura = await caixaVisivel(molduraDaLista, 'moldura da lista');
+    const caixaDaMoldura = await conferirVisivelELerCaixaDoElemento(molduraDaLista, 'moldura da lista');
     expect(caixaDaMoldura.x + caixaDaMoldura.width).toBeLessThanOrEqual(caixaDaCompraVenda.x + caixaDaCompraVenda.width + 0.5);
 
     // Links do Datadog e selo quebram linha sem sobrepor o logo e sem sair da tela.
-    const caixaDoLogo = await caixaVisivel(page.getByRole('img', { name: 'Base investimentos' }), 'logo');
+    const caixaDoLogo = await conferirVisivelELerCaixaDoElemento(page.getByRole('img', { name: 'Base investimentos' }), 'logo');
     const linksDoDatadog = page.getByRole('list', { name: 'Painéis do Datadog' }).getByRole('link');
     await expect(linksDoDatadog).toHaveCount(3);
     const elementosDoTopo: Array<[string, Locator]> = [
@@ -108,25 +108,25 @@ for (const larguraDaJanela of [860, 375]) {
       ['selo do ambiente', page.locator('.selo-ambiente')],
     ];
     for (const [nomeDoElemento, elementoDoTopo] of elementosDoTopo) {
-      const caixaDoElemento = await caixaVisivel(elementoDoTopo, nomeDoElemento);
+      const caixaDoElemento = await conferirVisivelELerCaixaDoElemento(elementoDoTopo, nomeDoElemento);
       expect(caixasSeSobrepoem(caixaDoElemento, caixaDoLogo), `${nomeDoElemento} sobre o logo`).toBe(false);
       expect(caixaDoElemento.x, nomeDoElemento).toBeGreaterThanOrEqual(0);
       expect(caixaDoElemento.x + caixaDoElemento.width, nomeDoElemento).toBeLessThanOrEqual(larguraDaJanela);
     }
 
     // Cabeçalho de Compra/Venda: título e "Deletar tudo" cabem lado a lado, sem cortar.
-    const caixaDoTitulo = await caixaVisivel(page.getByRole('heading', { name: 'Compra/Venda' }), 'título Compra/Venda');
-    const caixaDoDeletarTudo = await caixaVisivel(page.getByRole('region', { name: 'Compra/Venda' }).getByRole('button', { name: 'Deletar tudo' }), 'Deletar tudo');
+    const caixaDoTitulo = await conferirVisivelELerCaixaDoElemento(page.getByRole('heading', { name: 'Compra/Venda' }), 'título Compra/Venda');
+    const caixaDoDeletarTudo = await conferirVisivelELerCaixaDoElemento(page.getByRole('region', { name: 'Compra/Venda' }).getByRole('button', { name: 'Deletar tudo' }), 'Deletar tudo');
     expect(caixasSeSobrepoem(caixaDoTitulo, caixaDoDeletarTudo)).toBe(false);
     expect(caixaDoDeletarTudo.x + caixaDoDeletarTudo.width).toBeLessThanOrEqual(caixaDaCompraVenda.x + caixaDaCompraVenda.width);
 
     // A janela de confirmação também cabe inteira.
     await page.getByRole('region', { name: 'Compra/Venda' }).getByRole('button', { name: 'Deletar tudo' }).click();
-    const caixaDaJanela = await caixaVisivel(page.getByRole('dialog', { name: 'Deletar todos os dados?' }), 'janela');
+    const caixaDaJanela = await conferirVisivelELerCaixaDoElemento(page.getByRole('dialog', { name: 'Deletar todos os dados?' }), 'janela');
     expect(caixaDaJanela.x).toBeGreaterThanOrEqual(0);
     expect(caixaDaJanela.x + caixaDaJanela.width).toBeLessThanOrEqual(larguraDaJanela);
     for (const nomeDoBotao of ['Cancelar', 'Deletar tudo']) {
-      const caixaDoBotao = await caixaVisivel(page.getByRole('dialog').getByRole('button', { name: nomeDoBotao }), nomeDoBotao);
+      const caixaDoBotao = await conferirVisivelELerCaixaDoElemento(page.getByRole('dialog').getByRole('button', { name: nomeDoBotao }), nomeDoBotao);
       expect(caixaDoBotao.x + caixaDoBotao.width, nomeDoBotao).toBeLessThanOrEqual(caixaDaJanela.x + caixaDaJanela.width);
     }
     await page.screenshot({ path: path.join(PASTA_DAS_PROVAS, `08-janela-aberta-${larguraDaJanela}.png`) });
@@ -135,14 +135,14 @@ for (const larguraDaJanela of [860, 375]) {
 
 // Razão de contraste da WCAG 2 entre duas cores "rgb(r, g, b)".
 function calcularContrasteWcag(corDaFrente: string, corDoFundo: string) {
-  const luminanciaDaCor = (corRgb: string) => {
+  const calcularLuminanciaDaCor = (corRgb: string) => {
     const [canalVermelho, canalVerde, canalAzul] = (corRgb.match(/\d+(\.\d+)?/g) ?? []).slice(0, 3).map(Number).map((canalDe0a255) => {
       const canalDe0a1 = canalDe0a255 / 255;
       return canalDe0a1 <= 0.03928 ? canalDe0a1 / 12.92 : ((canalDe0a1 + 0.055) / 1.055) ** 2.4;
     });
     return 0.2126 * canalVermelho + 0.7152 * canalVerde + 0.0722 * canalAzul;
   };
-  const [luminanciaMaior, luminanciaMenor] = [luminanciaDaCor(corDaFrente), luminanciaDaCor(corDoFundo)].sort((luminanciaDaPrimeira, luminanciaDaSegunda) => luminanciaDaSegunda - luminanciaDaPrimeira);
+  const [luminanciaMaior, luminanciaMenor] = [calcularLuminanciaDaCor(corDaFrente), calcularLuminanciaDaCor(corDoFundo)].sort((luminanciaDaPrimeira, luminanciaDaSegunda) => luminanciaDaSegunda - luminanciaDaPrimeira);
   return (luminanciaMaior + 0.05) / (luminanciaMenor + 0.05);
 }
 
@@ -157,12 +157,25 @@ async function levarFocoPorTabAte(paginaDaBoleta: Page, controleDaTela: Locator,
 
 async function lerFocoEContrasteDoControle(controleDaTela: Locator) {
   return controleDaTela.evaluate((controleNaPagina) => {
-    const corDeFundoOpaca = (elementoInicial: Element | null) => {
+    // Fundo translúcido (como o coral a 12% do "Deletar tudo") se mistura com os fundos de baixo:
+    // junta as camadas do elemento para cima até a primeira opaca e devolve a cor que aparece na tela.
+    const calcularCorDeFundoVisivel = (elementoInicial: Element | null) => {
+      const camadasDeFundo: number[][] = [];
       for (let elementoAtual = elementoInicial; elementoAtual; elementoAtual = elementoAtual.parentElement) {
-        const corDeFundo = getComputedStyle(elementoAtual).backgroundColor;
-        if (corDeFundo !== 'rgba(0, 0, 0, 0)' && !/,\s*0(\.\d+)?\)$/.test(corDeFundo)) return corDeFundo;
+        const [canalVermelho, canalVerde, canalAzul, opacidade = 1] = (getComputedStyle(elementoAtual).backgroundColor.match(/[\d.]+/g) ?? []).map(Number);
+        if (opacidade > 0) camadasDeFundo.push([canalVermelho, canalVerde, canalAzul, opacidade]);
+        if (opacidade >= 1) break;
       }
-      return getComputedStyle(document.body).backgroundColor;
+      const corDaPagina = (getComputedStyle(document.body).backgroundColor.match(/[\d.]+/g) ?? []).map(Number);
+      const corMisturada = camadasDeFundo.reduceRight(
+        (corDeBaixo, [canalVermelho, canalVerde, canalAzul, opacidade]) => [
+          canalVermelho * opacidade + corDeBaixo[0] * (1 - opacidade),
+          canalVerde * opacidade + corDeBaixo[1] * (1 - opacidade),
+          canalAzul * opacidade + corDeBaixo[2] * (1 - opacidade),
+        ],
+        corDaPagina.slice(0, 3),
+      );
+      return `rgb(${corMisturada.map(Math.round).join(', ')})`;
     };
     const estiloDoControle = getComputedStyle(controleNaPagina);
     return {
@@ -170,8 +183,8 @@ async function lerFocoEContrasteDoControle(controleDaTela: Locator) {
       corDoContorno: estiloDoControle.outlineColor,
       larguraDoContorno: parseFloat(estiloDoControle.outlineWidth),
       corDoTexto: estiloDoControle.color,
-      corDoFundoDoControle: corDeFundoOpaca(controleNaPagina),
-      corDoFundoEmVolta: corDeFundoOpaca(controleNaPagina.parentElement),
+      corDoFundoDoControle: calcularCorDeFundoVisivel(controleNaPagina),
+      corDoFundoEmVolta: calcularCorDeFundoVisivel(controleNaPagina.parentElement),
       estaComFocoVisivel: controleNaPagina.matches(':focus-visible'),
     };
   });
@@ -180,7 +193,7 @@ async function lerFocoEContrasteDoControle(controleDaTela: Locator) {
 // O anel do tema tem 2px de CSS e os links do Datadog, 3px (topo.css). Com a página em 90% o Chromium arredonda
 // para pixel inteiro da tela: 2px vira 1 pixel e 3px vira 2.
 async function conferirFocoVisivelPorTab(paginaDaBoleta: Page, nomeDoControle: string, controleDaTela: Locator, larguraDoAnelEmPxDeCss = 2) {
-  await caixaVisivel(controleDaTela, nomeDoControle);
+  await conferirVisivelELerCaixaDoElemento(controleDaTela, nomeDoControle);
   await levarFocoPorTabAte(paginaDaBoleta, controleDaTela, nomeDoControle);
   const focoEContraste = await lerFocoEContrasteDoControle(controleDaTela);
   expect(focoEContraste.estaComFocoVisivel, nomeDoControle).toBe(true);
