@@ -29,6 +29,7 @@ export function PaginaDaBoletaEExposicao() {
   const [estadoDaListaDeOrdens, setEstadoDaListaDeOrdens] = useState<EstadoDaListaDeOrdens>({ situacao: 'carregando' });
   const [enviandoOrdem, setEnviandoOrdem] = useState(false);
   const [falhaNoUltimoEnvio, setFalhaNoUltimoEnvio] = useState<FalhaNoEnvioDaOrdem>();
+  const [paginaDaListaSendoCarregada, setPaginaDaListaSendoCarregada] = useState<number>();
   const numeroDaUltimaLeituraDaExposicao = useRef(0);
   const numeroDaUltimaLeituraDaListaDeOrdens = useRef(0);
 
@@ -47,8 +48,11 @@ export function PaginaDaBoletaEExposicao() {
   // Também vale entre cliques rápidos na paginação: só a última página pedida aparece.
   const atualizarListaDeOrdens = useCallback(async (paginaPedida: number) => {
     const numeroDestaLeitura = ++numeroDaUltimaLeituraDaListaDeOrdens.current;
+    setPaginaDaListaSendoCarregada(paginaPedida);
     const estadoDaListaDeOrdensLido = await lerPaginaDaListaDeOrdens(paginaPedida);
-    if (numeroDestaLeitura === numeroDaUltimaLeituraDaListaDeOrdens.current) setEstadoDaListaDeOrdens(estadoDaListaDeOrdensLido);
+    if (numeroDestaLeitura !== numeroDaUltimaLeituraDaListaDeOrdens.current) return;
+    setEstadoDaListaDeOrdens(estadoDaListaDeOrdensLido);
+    setPaginaDaListaSendoCarregada(undefined);
   }, []);
 
   useEffect(() => {
@@ -93,6 +97,7 @@ export function PaginaDaBoletaEExposicao() {
                 paginaAtual={estadoDaListaDeOrdens.paginaDeOrdens.pagina}
                 totalDeOrdens={estadoDaListaDeOrdens.paginaDeOrdens.totalDeOrdens}
                 quantidadeDeOrdensNaPagina={estadoDaListaDeOrdens.paginaDeOrdens.ordens.length}
+                paginaSendoCarregada={paginaDaListaSendoCarregada}
                 aoEscolherPagina={(paginaEscolhida) => void atualizarListaDeOrdens(paginaEscolhida)}
               />
             )

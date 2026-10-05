@@ -6,22 +6,30 @@ type PropsDaPaginacao = {
   paginaAtual: number;
   totalDeOrdens: number;
   quantidadeDeOrdensNaPagina: number;
+  paginaSendoCarregada?: number;
   aoEscolherPagina: (paginaEscolhida: number) => void;
 };
 
-export function Paginacao({ paginaAtual, totalDeOrdens, quantidadeDeOrdensNaPagina, aoEscolherPagina }: PropsDaPaginacao) {
+export function Paginacao({ paginaAtual, totalDeOrdens, quantidadeDeOrdensNaPagina, paginaSendoCarregada, aoEscolherPagina }: PropsDaPaginacao) {
   const totalDePaginas = contarPaginasDaLista(totalDeOrdens);
   if (totalDeOrdens <= ORDENS_POR_PAGINA) return null;
 
   const primeiraOrdemDaPagina = (paginaAtual - 1) * ORDENS_POR_PAGINA + 1;
   const ultimaOrdemDaPagina = primeiraOrdemDaPagina + quantidadeDeOrdensNaPagina - 1;
   const itensDaPaginacao = listarPaginasVisiveis(paginaAtual, totalDePaginas);
+  const estaCarregandoOutraPagina = paginaSendoCarregada !== undefined;
 
   return (
-    <div className="paginacao" role="group" aria-label="Páginas da lista de ordens">
+    <div className="paginacao" role="group" aria-label="Páginas da lista de ordens" aria-busy={estaCarregandoOutraPagina}>
       <p className="paginacao-resumo num" data-testid="resumo-da-paginacao">
-        Mostrando {formatarQuantidade(primeiraOrdemDaPagina)}–{formatarQuantidade(ultimaOrdemDaPagina)} de{' '}
-        {formatarQuantidade(totalDeOrdens)} ordens
+        {estaCarregandoOutraPagina ? (
+          <>Carregando a página {formatarQuantidade(paginaSendoCarregada)}…</>
+        ) : (
+          <>
+            Mostrando {formatarQuantidade(primeiraOrdemDaPagina)}–{formatarQuantidade(ultimaOrdemDaPagina)} de{' '}
+            {formatarQuantidade(totalDeOrdens)} ordens
+          </>
+        )}
       </p>
       <ul className="paginacao-botoes">
         <li>
@@ -47,6 +55,7 @@ export function Paginacao({ paginaAtual, totalDeOrdens, quantidadeDeOrdensNaPagi
                 className="paginacao-botao num"
                 aria-label={`Página ${itemDaPaginacao}`}
                 aria-current={itemDaPaginacao === paginaAtual ? 'page' : undefined}
+                data-carregando={itemDaPaginacao === paginaSendoCarregada && itemDaPaginacao !== paginaAtual ? 'true' : undefined}
                 onClick={() => aoEscolherPagina(itemDaPaginacao)}
               >
                 {itemDaPaginacao}

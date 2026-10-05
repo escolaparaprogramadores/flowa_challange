@@ -12,6 +12,13 @@ const NOME_DA_PAGINACAO = 'Páginas da lista de ordens';
 const COR_DA_PAGINA_ATUAL = { fundo: 'rgb(232, 239, 238)', texto: 'rgb(8, 17, 19)' };
 const COR_DO_ANEL_DE_FOCO = 'rgb(79, 227, 176)';
 const LARGURA_DO_ANEL_DE_FOCO_EM_PX_DE_CSS = 2;
+const COR_DO_REALCE_DA_PAGINA_PEDIDA = 'rgb(79, 227, 176)';
+const COR_TRANSPARENTE = 'rgba(0, 0, 0, 0)';
+const COR_DA_BORDA_DO_TEMA = 'rgb(28, 48, 52)';
+const COR_DO_FUNDO_DO_RODAPE = 'rgb(11, 23, 25)';
+const COR_DO_DIVISOR_DO_RODAPE = 'rgb(23, 42, 45)';
+const RAIO_DE_BAIXO_DO_RODAPE = '16px';
+const TAMANHO_DA_JANELA_EM_1440 = { width: 1440, height: 1000 };
 const CONTRASTE_MINIMO_DE_TEXTO = 4.5;
 const ALTURA_DO_BOTAO_DA_PAGINACAO_EM_PX_DE_CSS = 32;
 
@@ -106,6 +113,49 @@ async function conferirLinhasIguaisAoServidor(paginaDaBoleta: Page, numeroDaPagi
   await expect(localizarLinhasDaLista(paginaDaBoleta).locator('td[data-coluna="identificador-do-envio"]')).toHaveText(
     paginaNoServidor.orders.map((ordemNoServidor) => ordemNoServidor.clOrdId),
   );
+}
+
+function montarPaginaSimuladaDeOrdens(paginaDevolvida: number, totalDeOrdens: number): PaginaDeOrdensNoServidor {
+  const ordensMontadas: OrdemGravadaNoServidor[] = Array.from({ length: 10 }, (_, posicaoNaPagina) => {
+    const numeroDaOrdem = String((paginaDevolvida - 1) * 10 + posicaoNaPagina + 1).padStart(32, '0');
+    return { receivedAt: '2026-10-04T15:00:00Z', status: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1, price: 1, orderId: numeroDaOrdem, clOrdId: numeroDaOrdem };
+  });
+  return { page: paginaDevolvida, pageSize: 10, total: totalDeOrdens, orders: ordensMontadas };
+}
+
+async function conferirFileiraDentroDoCartaoSemRolarAPagina(paginaDaBoleta: Page) {
+  const larguraDaPagina = await paginaDaBoleta.evaluate(() => ({ larguraDoConteudo: document.documentElement.scrollWidth, larguraVisivel: document.documentElement.clientWidth }));
+  expect(larguraDaPagina.larguraDoConteudo).toBe(larguraDaPagina.larguraVisivel);
+
+  const caixaDoCartao = await localizarCartaoCompraVenda(paginaDaBoleta).boundingBox();
+  const fileiraDeBotoes = localizarPaginacaoDaLista(paginaDaBoleta).locator('ul');
+  const caixaDaFileira = await fileiraDeBotoes.boundingBox();
+  expect(caixaDaFileira!.x).toBeGreaterThanOrEqual(caixaDoCartao!.x);
+  expect(caixaDaFileira!.x + caixaDaFileira!.width).toBeLessThanOrEqual(caixaDoCartao!.x + caixaDoCartao!.width);
+  const fileiraSemCorte = await fileiraDeBotoes.evaluate((elementoDaFileira) => elementoDaFileira.scrollWidth <= elementoDaFileira.clientWidth);
+  expect(fileiraSemCorte).toBe(true);
+  await localizarPaginacaoDaLista(paginaDaBoleta).scrollIntoViewIfNeeded();
+  for (const botaoDaFileira of await localizarPaginacaoDaLista(paginaDaBoleta).getByRole('button').all()) {
+    await expect(botaoDaFileira).toBeInViewport();
+  }
+}
+
+// Maquete-02: o rodapé é a última faixa da moldura da tabela, colado nela, com a mesma largura.
+async function conferirRodapeFechandoAMoldura(paginaDaBoleta: Page) {
+  const molduraDaTabela = localizarCartaoCompraVenda(paginaDaBoleta).locator('.tabela-de-ordens-moldura');
+  const rodapeDaPaginacao = localizarPaginacaoDaLista(paginaDaBoleta);
+  const caixaDaMoldura = await molduraDaTabela.boundingBox();
+  const caixaDoRodape = await rodapeDaPaginacao.boundingBox();
+  expect(caixaDoRodape!.y).toBeCloseTo(caixaDaMoldura!.y + caixaDaMoldura!.height, 0);
+  expect(caixaDoRodape!.x).toBeCloseTo(caixaDaMoldura!.x, 0);
+  expect(caixaDoRodape!.width).toBeCloseTo(caixaDaMoldura!.width, 0);
+  await expect(molduraDaTabela).toHaveCSS('border-bottom-style', 'none');
+  await expect(molduraDaTabela).toHaveCSS('border-bottom-left-radius', '0px');
+  await expect(rodapeDaPaginacao).toHaveCSS('background-color', COR_DO_FUNDO_DO_RODAPE);
+  await expect(rodapeDaPaginacao).toHaveCSS('border-top-color', COR_DO_DIVISOR_DO_RODAPE);
+  await expect(rodapeDaPaginacao).toHaveCSS('border-bottom-color', COR_DA_BORDA_DO_TEMA);
+  await expect(rodapeDaPaginacao).toHaveCSS('border-bottom-left-radius', RAIO_DE_BAIXO_DO_RODAPE);
+  await expect(rodapeDaPaginacao).toHaveCSS('border-bottom-right-radius', RAIO_DE_BAIXO_DO_RODAPE);
 }
 
 async function salvarProva(paginaDaBoleta: Page, nomeDoArquivo: string) {
@@ -222,11 +272,48 @@ test('cliques rápidos: a resposta lenta de uma página pedida antes não cobre 
   await irParaPaginaPeloBotao(page, localizarBotaoDaPagina(page, 3), 3);
   await conferirPaginaAtual(page, 3);
   liberarRespostaDaPagina2();
-  await respostaDaPagina2;
+  await (await respostaDaPagina2).finished();
+  // Marco depois da resposta atrasada: dois quadros pintados garantem que a tela já tratou o corpo
+  // dela; só então "a página 3 continua" prova que a resposta antiga foi descartada, não que ainda não chegou.
+  await page.evaluate(() => new Promise<void>((resolver) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolver, 0)))));
 
   await conferirPaginaAtual(page, 3);
   await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 21–25 de 25 ordens');
   await conferirLinhasIguaisAoServidor(page, 3);
+});
+
+test('RF-12: enquanto a página pedida não chega, a paginação avisa que está carregando e realça o número pedido', async ({ page }) => {
+  await criarOrdensPelaApi(page, 25);
+  await abrirTelaEEsperarPrimeiraPagina(page);
+  await expect(localizarPaginacaoDaLista(page)).toHaveAttribute('aria-busy', 'false');
+
+  let liberarRespostaDaPagina2 = () => {};
+  const respostaDaPagina2Liberada = new Promise<void>((resolver) => {
+    liberarRespostaDaPagina2 = resolver;
+  });
+  await page.route(
+    (urlPedida) => urlPedida.pathname === ROTA_DAS_ORDENS && urlPedida.searchParams.get('page') === '2',
+    async (rotaDaPagina2) => {
+      await respostaDaPagina2Liberada;
+      await rotaDaPagina2.continue();
+    },
+  );
+
+  const respostaDaPagina2 = esperarLeituraDaPagina(page, 2);
+  await localizarBotaoDaPagina(page, 2).click();
+  await expect(localizarPaginacaoDaLista(page)).toHaveAttribute('aria-busy', 'true');
+  await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Carregando a página 2…');
+  await expect(localizarBotaoDaPagina(page, 2)).toHaveAttribute('data-carregando', 'true');
+  await expect(localizarBotaoDaPagina(page, 2)).toHaveCSS('border-color', COR_DO_REALCE_DA_PAGINA_PEDIDA);
+  await expect(localizarBotaoDaPagina(page, 2)).toHaveCSS('color', COR_DO_REALCE_DA_PAGINA_PEDIDA);
+  await conferirPaginaAtual(page, 1);
+
+  liberarRespostaDaPagina2();
+  await respostaDaPagina2;
+  await expect(localizarPaginacaoDaLista(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 11–20 de 25 ordens');
+  await conferirPaginaAtual(page, 2);
+  await expect(localizarBotaoDaPagina(page, 2)).not.toHaveAttribute('data-carregando');
 });
 
 test('erro ao trocar de página mostra o aviso da lista no cartão e tira a paginação', async ({ page }) => {
@@ -244,6 +331,7 @@ test('erro ao trocar de página mostra o aviso da lista no cartão e tira a pagi
 });
 
 test('CA-13: com 23 ordens a paginação vai à página 2, à 3 e volta à 1 mostrando as ordens de cada uma', async ({ page }) => {
+  await page.setViewportSize(TAMANHO_DA_JANELA_EM_1440);
   await criarOrdensPelaApi(page, 23);
   await abrirTelaEEsperarPrimeiraPagina(page);
 
@@ -254,8 +342,13 @@ test('CA-13: com 23 ordens a paginação vai à página 2, à 3 e volta à 1 mos
   await conferirFileiraDaPaginacao(page, ['‹', '1', '2', '3', '›']);
   await conferirPaginaAtual(page, 1);
   await expect(localizarBotaoPaginaAnterior(page)).toBeDisabled();
+  // Desligado aparece só como o símbolo apagado, sem caixa nem borda (maquete-02).
+  await expect(localizarBotaoPaginaAnterior(page)).toHaveCSS('border-top-color', COR_TRANSPARENTE);
+  await expect(localizarBotaoPaginaAnterior(page)).toHaveCSS('background-color', COR_TRANSPARENTE);
   await expect(localizarBotaoProximaPagina(page)).toBeEnabled();
+  await expect(localizarBotaoProximaPagina(page)).toHaveCSS('border-top-color', COR_DA_BORDA_DO_TEMA);
   await conferirLinhasIguaisAoServidor(page, 1);
+  await conferirRodapeFechandoAMoldura(page);
   await salvarProva(page, '07-paginacao-1440.png');
 
   await irParaPaginaPeloBotao(page, localizarBotaoDaPagina(page, 2), 2);
@@ -286,6 +379,7 @@ test('CA-13: com 23 ordens a paginação vai à página 2, à 3 e volta à 1 mos
 });
 
 test('CA-37: com 8 páginas a fileira encurta com "…" não clicável e mostra a primeira, a última, a atual e as vizinhas', async ({ page }) => {
+  await page.setViewportSize(TAMANHO_DA_JANELA_EM_1440);
   await criarOrdensPelaApi(page, 75);
   await abrirTelaEEsperarPrimeiraPagina(page);
   await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 1–10 de 75 ordens');
@@ -389,11 +483,7 @@ test('CA-42: com mais de 10.000 ordens a paginação para na página 1000 e most
     async (rotaInterceptada) => {
       if (rotaInterceptada.request().method() !== 'GET') return rotaInterceptada.fallback();
       const paginaPedida = Number(new URL(rotaInterceptada.request().url()).searchParams.get('page'));
-      const ordensMontadas: OrdemGravadaNoServidor[] = Array.from({ length: 10 }, (_, posicaoNaPagina) => {
-        const numeroDaOrdem = String((paginaPedida - 1) * 10 + posicaoNaPagina + 1).padStart(32, '0');
-        return { receivedAt: '2026-10-04T15:00:00Z', status: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1, price: 1, orderId: numeroDaOrdem, clOrdId: numeroDaOrdem };
-      });
-      await rotaInterceptada.fulfill({ json: { page: paginaPedida, pageSize: 10, total: TOTAL_ACIMA_DO_TETO, orders: ordensMontadas } });
+      await rotaInterceptada.fulfill({ json: montarPaginaSimuladaDeOrdens(paginaPedida, TOTAL_ACIMA_DO_TETO) });
     },
   );
 
@@ -410,23 +500,29 @@ test('CA-42: com mais de 10.000 ordens a paginação para na página 1000 e most
 });
 
 test('CA-27: os botões da paginação recebem foco visível pelo Tab e têm contraste legível', async ({ page }) => {
+  await page.setViewportSize(TAMANHO_DA_JANELA_EM_1440);
   await criarOrdensPelaApi(page, 23);
   await abrirTelaEEsperarPrimeiraPagina(page);
 
+  // Na página 1 o ‹ está desligado e fica fora do Tab; os três botões com estilos diferentes são
+  // a página atual (fundo claro), um número comum e o ›.
   const botaoDaPagina2 = localizarBotaoDaPagina(page, 2);
-  let chegouNoBotaoPeloTab = false;
-  for (let toqueNoTab = 0; toqueNoTab < 80 && !chegouNoBotaoPeloTab; toqueNoTab++) {
-    await page.keyboard.press('Tab');
-    chegouNoBotaoPeloTab = await botaoDaPagina2.evaluate((elementoDoBotao) => elementoDoBotao === document.activeElement);
-  }
-  expect(chegouNoBotaoPeloTab).toBe(true);
-  await expect(botaoDaPagina2).toHaveCSS('outline-style', 'solid');
-  await expect(botaoDaPagina2).toHaveCSS('outline-color', COR_DO_ANEL_DE_FOCO);
-  // O anel é o de 2px do tema; com a página em 90% o Chromium o arredonda para pixel inteiro da tela.
+  const botoesConferidosPeloTab = [localizarBotaoDaPagina(page, 1), botaoDaPagina2, localizarBotaoProximaPagina(page)];
   const escalaDaPagina = await lerEscalaDaPagina(page);
-  const larguraDoAnelDeFoco = await botaoDaPagina2.evaluate((elementoDoBotao) => parseFloat(getComputedStyle(elementoDoBotao).outlineWidth));
-  expect(larguraDoAnelDeFoco).toBeCloseTo(Math.floor(LARGURA_DO_ANEL_DE_FOCO_EM_PX_DE_CSS * escalaDaPagina) / escalaDaPagina, 3);
-  await salvarProva(page, '07-paginacao-foco-tab-1440.png');
+  for (const botaoConferidoPeloTab of botoesConferidosPeloTab) {
+    let chegouNoBotaoPeloTab = false;
+    for (let toqueNoTab = 0; toqueNoTab < 80 && !chegouNoBotaoPeloTab; toqueNoTab++) {
+      await page.keyboard.press('Tab');
+      chegouNoBotaoPeloTab = await botaoConferidoPeloTab.evaluate((elementoDoBotao) => elementoDoBotao === document.activeElement);
+    }
+    expect(chegouNoBotaoPeloTab).toBe(true);
+    await expect(botaoConferidoPeloTab).toHaveCSS('outline-style', 'solid');
+    await expect(botaoConferidoPeloTab).toHaveCSS('outline-color', COR_DO_ANEL_DE_FOCO);
+    // O anel é o de 2px do tema; com a página em 90% o Chromium o arredonda para pixel inteiro da tela.
+    const larguraDoAnelDeFoco = await botaoConferidoPeloTab.evaluate((elementoDoBotao) => parseFloat(getComputedStyle(elementoDoBotao).outlineWidth));
+    expect(larguraDoAnelDeFoco).toBeCloseTo(Math.floor(LARGURA_DO_ANEL_DE_FOCO_EM_PX_DE_CSS * escalaDaPagina) / escalaDaPagina, 3);
+    if (botaoConferidoPeloTab === botaoDaPagina2) await salvarProva(page, '07-paginacao-foco-tab-1440.png');
+  }
 
   const textosDaPaginacaoConferidos = [
     botaoDaPagina2,
@@ -441,30 +537,30 @@ test('CA-27: os botões da paginação recebem foco visível pelo Tab e têm con
   }
 });
 
-for (const larguraEstreita of [375, 860]) {
-  test(`CA-26: em ${larguraEstreita}px a paginação mais longa cabe no cartão e a página não rola para o lado`, async ({ page }) => {
-    await page.setViewportSize({ width: larguraEstreita, height: 900 });
+for (const larguraDaJanela of [375, 860, 1440, 1920]) {
+  test(`CA-26/CA-37/RNF-06: em ${larguraDaJanela}px a fileira de 8 e a de 1.000 páginas cabem no cartão, fecham a moldura e a página não rola para o lado`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraDaJanela, height: 1000 });
     await criarOrdensPelaApi(page, 75);
     await abrirTelaEEsperarPrimeiraPagina(page);
     await irParaPaginaPeloBotao(page, localizarBotaoDaPagina(page, 2), 2);
     await irParaPaginaPeloBotao(page, localizarBotaoDaPagina(page, 3), 3);
     await irParaPaginaPeloBotao(page, localizarBotaoDaPagina(page, 4), 4);
     await conferirFileiraDaPaginacao(page, ['‹', '1', '…', '3', '4', '5', '…', '8', '›']);
+    await conferirFileiraDentroDoCartaoSemRolarAPagina(page);
+    await conferirRodapeFechandoAMoldura(page);
+    await salvarProva(page, `07-paginacao-8-paginas-${larguraDaJanela}.png`);
 
-    const larguraDaPagina = await page.evaluate(() => ({ larguraDoConteudo: document.documentElement.scrollWidth, larguraVisivel: document.documentElement.clientWidth }));
-    expect(larguraDaPagina.larguraDoConteudo).toBe(larguraDaPagina.larguraVisivel);
-
-    const caixaDoCartao = await localizarCartaoCompraVenda(page).boundingBox();
-    const fileiraDeBotoes = localizarPaginacaoDaLista(page).locator('ul');
-    const caixaDaFileira = await fileiraDeBotoes.boundingBox();
-    expect(caixaDaFileira!.x).toBeGreaterThanOrEqual(caixaDoCartao!.x);
-    expect(caixaDaFileira!.x + caixaDaFileira!.width).toBeLessThanOrEqual(caixaDoCartao!.x + caixaDoCartao!.width);
-    const fileiraSemCorte = await fileiraDeBotoes.evaluate((elementoDaFileira) => elementoDaFileira.scrollWidth <= elementoDaFileira.clientWidth);
-    expect(fileiraSemCorte).toBe(true);
-    await localizarPaginacaoDaLista(page).scrollIntoViewIfNeeded();
-    for (const botaoDaFileira of await localizarPaginacaoDaLista(page).getByRole('button').all()) {
-      await expect(botaoDaFileira).toBeInViewport();
-    }
-    await salvarProva(page, `07-paginacao-${larguraEstreita}.png`);
+    // A fileira mais larga que a tela pode mostrar: números de 3 e 4 algarismos (‹ 1 … 499 500 501 … 1000 ›).
+    await page.route(
+      (urlPedida) => urlPedida.pathname === ROTA_DAS_ORDENS,
+      (rotaDaListagem) =>
+        rotaDaListagem.request().method() === 'GET' ? rotaDaListagem.fulfill({ json: montarPaginaSimuladaDeOrdens(500, 25_000) }) : rotaDaListagem.fallback(),
+    );
+    await abrirTelaEEsperarPrimeiraPagina(page);
+    await conferirFileiraDaPaginacao(page, ['‹', '1', '…', '499', '500', '501', '…', '1000', '›']);
+    await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 4.991–5.000 de 25.000 ordens');
+    await conferirFileiraDentroDoCartaoSemRolarAPagina(page);
+    await conferirRodapeFechandoAMoldura(page);
+    await salvarProva(page, `07-paginacao-1000-paginas-${larguraDaJanela}.png`);
   });
 }

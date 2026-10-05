@@ -1,10 +1,21 @@
+/* O rodapé é a última faixa da moldura da tabela (maquete-02): sobe o espaço do cartão e fecha a moldura,
+   que perde a borda e os cantos de baixo só quando a paginação aparece. */
+.compra-venda .tabela-de-ordens-moldura:has(+ .paginacao) { border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .paginacao {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--espaco-3);
-  padding: 0 var(--espaco-1);
+  margin-top: calc(-1 * var(--espaco-5-5));
+  padding: var(--espaco-3) var(--espaco-4);
+  border: var(--espessura-divisor) solid var(--cor-borda);
+  border-top-color: var(--cor-divisor);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-bottom-left-radius: var(--raio-aba);
+  border-bottom-right-radius: var(--raio-aba);
+  background: var(--cor-afundado);
 }
 .paginacao-resumo { margin: 0; font-size: var(--texto-rotulo); color: var(--cor-texto-apagado); }
 .paginacao-botoes { display: flex; align-items: center; gap: var(--espaco-1-5); margin: 0; padding: 0; list-style: none; }
@@ -20,14 +31,15 @@
   font-weight: 700;
   transition: background var(--transicao), border-color var(--transicao), color var(--transicao);
 }
-.paginacao-botao:hover:not(:disabled):not([aria-current='page']) { background: var(--cor-hover); border-color: var(--cor-borda-forte); color: var(--cor-texto); }
+.paginacao-botao:hover:not(:disabled):not([aria-current='page']):not([data-carregando='true']) { background: var(--cor-hover); border-color: var(--cor-borda-forte); color: var(--cor-texto); }
 .paginacao-botao[aria-current='page'] { background: var(--cor-texto); border-color: var(--cor-texto); color: var(--cor-fundo); cursor: default; }
-.paginacao-botao:disabled { background: transparent; color: var(--cor-desabilitado-texto); cursor: default; }
+.paginacao-botao[data-carregando='true'] { border-color: var(--cor-acento); color: var(--cor-acento); }
+.paginacao-botao:disabled { background: transparent; border-color: transparent; color: var(--cor-desabilitado-texto); cursor: default; }
 .paginacao-reticencias { min-width: 20px; text-align: center; color: var(--cor-texto-apagado); font-size: var(--texto-rotulo); user-select: none; }
 
 /* Em tela estreita a fileira (até 7 números + ‹ ›) encolhe para caber no cartão. */
 @media (max-width: 520px) {
-  .paginacao { justify-content: center; }
+  .paginacao { justify-content: center; padding: var(--espaco-3); }
   .paginacao-botoes { gap: var(--espaco-1); }
   .paginacao-botao { min-width: 28px; height: 28px; padding: 0 var(--espaco-1-5); }
 }

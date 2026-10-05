@@ -1,5 +1,5 @@
 export const ORDENS_POR_PAGINA = 10;
-// O servidor recusa página acima de 1.000 (CA-42); a tela nunca oferece além dela.
+// O servidor recusa página acima de 1.000; a tela nunca oferece além dela.
 export const ULTIMA_PAGINA_PERMITIDA = 1000;
 const PAGINAS_MOSTRADAS_SEM_ENCURTAR = 7;
 
