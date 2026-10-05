@@ -277,5 +277,32 @@ jobs:
           grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan sem linha de resumo"
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
+          # Plan guard: only the two task definitions may be destroyed or replaced (every image deploy replaces
+          # them); only they and the log collector's task roles may be created, and those roles may only be
+          # removed when Datadog is switched off. Anything else stops the run here, before apply. The plan JSON
+          # stays on the runner. New resources in infra/ must be added to these lists.
+          terraform show -json tfplan > "$RUNNER_TEMP/deploy-plan.json"
+          jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
+            | "plan: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/deploy-plan.json"
+          replaceable_task_definitions='["aws_ecs_task_definition.tarefa_do_order_generator",
+            "aws_ecs_task_definition.tarefa_do_order_accumulator"]'
+          log_collector_roles='["aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"generator\"]",
+            "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"accumulator\"]",
+            "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"generator\"]",
+            "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"accumulator\"]"]'
+          disallowed_plan_changes=$(jq -r --arg datadog_enabled "$AGENTE_DATADOG_LIGADO" \
+            --argjson replaceable "$replaceable_task_definitions" --argjson collector_roles "$log_collector_roles" \
+            '($replaceable + (if $datadog_enabled == "true" then [] else $collector_roles end)) as $deletable
+            | ($replaceable + $collector_roles) as $creatable
+            | .resource_changes[]
+            | select(((.change.actions | index("delete")) and (.address | IN($deletable[]) | not))
+              or ((.change.actions | index("create")) and (.address | IN($creatable[]) | not)))
+            | "\(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/deploy-plan.json")
+          if [ -n "$disallowed_plan_changes" ]; then
+            echo "the plan destroys, replaces or creates a resource outside the allowed list; apply will not run:" >&2
+            echo "$disallowed_plan_changes" >&2
+            exit 1
+          fi
+
           terraform_quieto apply tfplan
           grep -E '^Apply complete!' "$TERRAFORM_LOG"
