@@ -58,21 +58,28 @@ for (const { largura: larguraDaJanela, colunasEsperadas } of LARGURAS_DO_TEMA) {
   });
 }
 
-test('RF-01/RF-02: página única sem login, com logo, boleta, resposta e exposição, sem menu nem lista de ordens', async ({ page }) => {
+test('RF-01/RF-02 e CA-8: página única sem login, com logo, exposição, Compra/Venda e boleta, sem menu', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('img', { name: 'Base investimentos' })).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Boleta de ordens');
-  await expect(page.getByRole('heading', { level: 2 })).toHaveText(['Exposição por ativo', 'Resposta da ordem', 'Nova ordem']);
+  await expect(page.getByRole('heading', { level: 2 })).toHaveText(['Exposição por ativo', 'Compra/Venda', 'Nova ordem']);
+  await expect(page.getByText('Resposta da ordem')).toHaveCount(0);
   await expect(page.getByRole('form', { name: 'Boleta de ordem' })).toBeVisible();
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await expect(page.getByRole('navigation')).toHaveCount(0);
-  await expect(page.getByRole('table')).toHaveCount(0);
+  // A lista de ordens agora existe (CA-11): é a tabela de Compra/Venda ou, com o banco vazio, o aviso de vazio.
+  const cartaoCompraVenda = page.getByRole('region', { name: 'Compra/Venda' });
+  await expect(cartaoCompraVenda.getByRole('table').or(cartaoCompraVenda.getByTestId('lista-de-ordens-vazia'))).toHaveCount(1);
+  await expect(page.getByRole('table')).toHaveCount(await cartaoCompraVenda.getByRole('table').count());
   // Os links do Datadog moram no topo (CA-9, F4); dentro do conteúdo não há link.
   await expect(page.getByRole('main').getByRole('link')).toHaveCount(0);
 });
 
 for (const larguraDaJanela of [375, 860]) {
-  test(`G-1 e CA-26: em ${larguraDaJanela} px a ordem empilhada é ativos, Nova ordem e resposta, sem nada fora da tela`, async ({ page }) => {
+  test(`G-1 e CA-26: em ${larguraDaJanela} px a ordem empilhada é ativos, Nova ordem e Compra/Venda, sem nada fora da tela`, async ({ page }) => {
+    // Com a lista cheia é que uma tabela larga poderia passar do cartão: garante ao menos uma ordem gravada.
+    const ordemGravada = await page.request.post('/api/orders', { data: { symbol: 'PETR4', side: 'buy', quantity: 1, price: 10 } });
+    expect(ordemGravada.status()).toBe(200);
     await page.setViewportSize({ width: larguraDaJanela, height: 900 });
     await page.goto('/');
     await expect(page.getByTestId('exposicao-PETR4')).toBeVisible();
@@ -116,7 +123,7 @@ for (const larguraDaJanela of [375, 860]) {
       return { problemasEncontrados, pecasConferidasPorCartao };
     }, larguraDaJanela);
     expect(conferenciaDosCartoes.problemasEncontrados).toEqual([]);
-    expect(Object.keys(conferenciaDosCartoes.pecasConferidasPorCartao)).toEqual(['painel exposicao', 'cartao resposta', 'cartao boleta']);
+    expect(Object.keys(conferenciaDosCartoes.pecasConferidasPorCartao)).toEqual(['painel exposicao', 'cartao resposta compra-venda', 'cartao boleta']);
 
     // Cada peça obrigatória, pelo nome: visível, com tamanho e inteira dentro do seu cartão e da janela.
     // Peça que sumisse (largura 0) não pode passar só porque as outras do cartão continuam lá.
@@ -131,8 +138,12 @@ for (const larguraDaJanela of [375, 860]) {
       ]),
       ['Título da Nova ordem', cartaoDaNovaOrdem.getByRole('heading', { name: 'Nova ordem' }), cartaoDaNovaOrdem],
       ...controlesDaBoleta(page).map(([nomeDoControle, controleDaBoleta]): [string, Locator, Locator] => [nomeDoControle, controleDaBoleta, cartaoDaNovaOrdem]),
-      ['Título da resposta', cartaoDaResposta.getByRole('heading', { name: 'Resposta da ordem' }), cartaoDaResposta],
-      ['Aviso sem ordem', cartaoDaResposta.getByText('Nenhuma ordem enviada ainda.', { exact: false }), cartaoDaResposta],
+      ['Título de Compra/Venda', cartaoDaResposta.getByRole('heading', { name: 'Compra/Venda' }), cartaoDaResposta],
+      ...['data', 'status', 'ativo', 'lado', 'quantidade', 'preco', 'numero-da-ordem', 'identificador-do-envio'].map((colunaDaLista): [string, Locator, Locator] => [
+        `Compra/Venda: ${colunaDaLista} da ordem do topo`,
+        cartaoDaResposta.getByTestId('linha-da-ordem').first().locator(`td[data-coluna="${colunaDaLista}"]`),
+        cartaoDaResposta,
+      ]),
     ];
     for (const [nomeDaPeca, pecaObrigatoria, cartaoDaPeca] of pecasObrigatorias) {
       await expect(pecaObrigatoria, nomeDaPeca).toHaveCount(1);
