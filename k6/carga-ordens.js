@@ -31,6 +31,7 @@ const INVALID_ORDER_QUANTITY = 100000;
 // the next one on the same side crosses the 100,000,000.00 limit.
 const LIMIT_FILL_ORDER_QUANTITY = 99999;
 const LIMIT_FILL_ORDER_PRICE = 999.99;
+const LIMIT_FILL_ORDER_VALUE = LIMIT_FILL_ORDER_QUANTITY * LIMIT_FILL_ORDER_PRICE;
 const MAX_LIMIT_FILL_ATTEMPTS = 3;
 const LIMIT_OVERFLOW_ROUNDS = 2;
 
@@ -88,10 +89,12 @@ export const options = {
       gracefulStop: '2m',
     },
   },
-  // The run fails on HTTP errors (400, the API's 429, 5xx), on a missing outcome kind for any symbol
-  // and on any symbol whose exposure did not return to its value before the run.
+  // The run fails on HTTP errors (400, the API's 429, 5xx), on iterations k6 had to drop because the
+  // arrival rate could not be kept, on a missing outcome kind for any symbol and on any symbol whose
+  // exposure did not return to its value before the run.
   thresholds: {
     http_req_failed: ['rate<0.01'],
+    dropped_iterations: ['count==0'],
     orders_unexpected_outcome: ['count==0'],
     exposure_restored_symbols: [`count==${FLOWA_SYMBOLS.length}`],
     ...orderCountThresholds,
@@ -133,7 +136,7 @@ function postOrder(order) {
   );
   ordersSent.add(1);
   orderLatency.add(orderResponse.timings.duration);
-  check(orderResponse, { 'order answered with 200': (answeredOrder) => answeredOrder.status === 200 });
+  check(orderResponse, { 'order answered with 200': (orderHttpResponse) => orderHttpResponse.status === 200 });
   return orderResponse.status === 200
     ? { status: orderResponse.json('data.status'), message: orderResponse.json('message') }
     : { status: null, message: null };
@@ -146,13 +149,15 @@ function classifyOrderOutcome(order, orderOutcome) {
   return 'unclassified';
 }
 
-function countOrderOutcome(symbol, outcomeKind) {
-  if (ORDER_OUTCOME_KINDS.includes(outcomeKind)) orderCountersBySymbolAndKind[symbol][outcomeKind].add(1);
+// Only an outcome the caller expects enters the per-symbol counts; anything else is unexpected.
+function countOrderOutcome(symbol, outcomeKind, expectedOutcomeKinds) {
+  if (expectedOutcomeKinds.includes(outcomeKind)) orderCountersBySymbolAndKind[symbol][outcomeKind].add(1);
+  else unexpectedOrderOutcomes.add(1);
 }
 
-function sendOrderAndCountOutcome(order) {
+function sendOrderAndCountOutcome(order, expectedOutcomeKinds) {
   const outcomeKind = classifyOrderOutcome(order, postOrder(order));
-  countOrderOutcome(order.symbol, outcomeKind);
+  countOrderOutcome(order.symbol, outcomeKind, expectedOutcomeKinds);
   return outcomeKind;
 }
 
@@ -182,46 +187,34 @@ export function sendBalancedPair(loadContext) {
   const pairSymbol = FLOWA_SYMBOLS[execution.scenario.iterationInTest % FLOWA_SYMBOLS.length];
   const openingSide = loadContext.pairFirstSideBySymbol[pairSymbol];
 
-  if (sendOrderAndCountOutcome(buildPairOrder(pairSymbol, openingSide)) !== 'accepted') {
-    unexpectedOrderOutcomes.add(1);
-    return;
-  }
-  if (sendOrderAndCountOutcome(buildPairOrder(pairSymbol, oppositeSideOf(openingSide))) !== 'accepted') {
-    unexpectedOrderOutcomes.add(1);
+  if (sendOrderAndCountOutcome(buildPairOrder(pairSymbol, openingSide), ['accepted']) !== 'accepted') return;
+  if (sendOrderAndCountOutcome(buildPairOrder(pairSymbol, oppositeSideOf(openingSide)), ['accepted']) !== 'accepted') {
     unbalancedOrders.add(1);
   }
 }
 
 export function sendInvalidFieldOrders() {
-  for (const symbol of FLOWA_SYMBOLS) {
-    if (sendOrderAndCountOutcome(buildInvalidQuantityOrder(symbol)) !== 'rejected_invalid_field') unexpectedOrderOutcomes.add(1);
-  }
+  for (const symbol of FLOWA_SYMBOLS) sendOrderAndCountOutcome(buildInvalidQuantityOrder(symbol), ['rejected_invalid_field']);
 }
 
 // Per symbol: fill on the side that moves the exposure away from zero until one order crosses the
-// limit, then send one opposite order for every accepted fill order.
+// limit, then unwind what the API really applied. The exposure is read again because a fill order
+// answered with an error (a 503 after 5 s, for example) may still have been accepted.
 export function sendLimitOverflowOrders() {
-  const currentExposureBySymbol = readExposureBySymbol('exposure_before_limit_round');
+  const exposureBeforeFillBySymbol = readExposureBySymbol('exposure_before_limit_round');
   for (const symbol of FLOWA_SYMBOLS) {
-    const fillSide = currentExposureBySymbol[symbol] >= 0 ? 'buy' : 'sell';
-    let acceptedFillOrders = 0;
-    let hasCrossedLimit = false;
-
-    for (let fillAttempt = 0; fillAttempt < MAX_LIMIT_FILL_ATTEMPTS && !hasCrossedLimit; fillAttempt += 1) {
-      const fillOutcomeKind = sendOrderAndCountOutcome(buildLimitFillOrder(symbol, fillSide));
-      if (fillOutcomeKind === 'accepted') {
-        acceptedFillOrders += 1;
-      } else if (fillOutcomeKind === 'rejected_limit') {
-        hasCrossedLimit = true;
-      } else {
-        break;
-      }
+    const fillSide = exposureBeforeFillBySymbol[symbol] >= 0 ? 'buy' : 'sell';
+    let fillOutcomeKind = 'accepted';
+    for (let fillAttempt = 0; fillAttempt < MAX_LIMIT_FILL_ATTEMPTS && fillOutcomeKind === 'accepted'; fillAttempt += 1) {
+      fillOutcomeKind = sendOrderAndCountOutcome(buildLimitFillOrder(symbol, fillSide), ['accepted', 'rejected_limit']);
     }
-    if (!hasCrossedLimit) unexpectedOrderOutcomes.add(1);
+    // Every fill order accepted without ever crossing the limit means the limit rule did not hold.
+    if (fillOutcomeKind === 'accepted') unexpectedOrderOutcomes.add(1);
 
-    for (let unwindIndex = 0; unwindIndex < acceptedFillOrders; unwindIndex += 1) {
-      if (sendOrderAndCountOutcome(buildLimitFillOrder(symbol, oppositeSideOf(fillSide))) !== 'accepted') {
-        unexpectedOrderOutcomes.add(1);
+    const exposureAfterFill = readExposureBySymbol('exposure_after_limit_fill')[symbol];
+    const appliedFillOrders = Math.round(Math.abs(exposureAfterFill - exposureBeforeFillBySymbol[symbol]) / LIMIT_FILL_ORDER_VALUE);
+    for (let unwindIndex = 0; unwindIndex < appliedFillOrders; unwindIndex += 1) {
+      if (sendOrderAndCountOutcome(buildLimitFillOrder(symbol, oppositeSideOf(fillSide)), ['accepted']) !== 'accepted') {
         unbalancedOrders.add(1);
       }
     }
@@ -318,7 +311,7 @@ export function handleSummary(testResult) {
   const markdownSummary = [
     '# Flowa load test (k6)',
     '',
-    `Against ${loadSummary.url}, ${loadSummary.durationSeconds} s at about 15 orders per second.`,
+    `Against ${loadSummary.url}, ${loadSummary.durationSeconds} s at ${(loadSummary.orderRequestsPerMinute / 60).toFixed(1)} orders per second (target: about 15).`,
     `Error rate below 1%: ${loadSummary.errorRateBelowLimit ? 'yes' : 'no'}.`,
     '',
     latencyTable,
