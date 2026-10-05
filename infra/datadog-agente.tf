@@ -106,6 +106,21 @@ locals {
           Exclude log (^|\s)(dbug|trce):\s|"(LogLevel|level|Level|@l)"\s*:\s*"(Debug|Trace|debug|trace|Verbose)"
 
       [FILTER]
+          Name         parser
+          Match        *-firelens-*
+          Key_Name     log
+          Parser       json
+          Reserve_Data On
+
+      # The .NET JSON console writes Message, LogLevel and the trace id (State or Scopes) under names Datadog does
+      # not read: rename them so search by clOrdId and the log-to-trace link work. Non-JSON lines keep their text.
+      [FILTER]
+          Name  lua
+          Match *-firelens-*
+          call  preparar_registro_do_app
+          code  function preparar_registro_do_app(tag, timestamp, registro) if registro["Message"] ~= nil then registro["message"] = registro["Message"]; registro["Message"] = nil elseif registro["log"] ~= nil then registro["message"] = registro["log"]; registro["log"] = nil end if registro["LogLevel"] ~= nil then registro["level"] = registro["LogLevel"]; registro["LogLevel"] = nil end local trace_id = type(registro["State"]) == "table" and registro["State"]["TraceId"] or nil local span_id = nil if type(registro["Scopes"]) == "table" then for _, escopo in ipairs(registro["Scopes"]) do if type(escopo) == "table" then trace_id = trace_id or escopo["dd_trace_id"] or escopo["TraceId"]; span_id = span_id or escopo["dd_span_id"] end end end if trace_id ~= nil then registro["dd"] = { trace_id = trace_id, span_id = span_id } end return 2, timestamp, registro end
+
+      [FILTER]
           Name         throttle
           Match        *-firelens-*
           Rate         ${local.orcamento_de_linhas_por_hora_do_app}
@@ -123,7 +138,6 @@ locals {
           dd_service     ${nome_no_datadog}
           dd_source      csharp
           dd_tags        env:${local.ambiente_dos_recursos_flowa},version:${local.versao_no_datadog_por_servico_flowa[servico_flowa]}
-          dd_message_key log
           provider       ecs
 
       [OUTPUT]
@@ -132,7 +146,6 @@ locals {
           region            ${var.region}
           log_group_name    ${local.log_group_por_servico_flowa[servico_flowa]}
           log_stream_prefix app/
-          log_key           log
           auto_create_group false
     CONF
   }
@@ -161,7 +174,7 @@ locals {
       environment = [
         { name = "CONFIGURACAO_DO_COLETOR", value = local.configuracao_do_coletor_por_servico_flowa[servico_flowa] },
       ]
-      command = ["sh", "-c", "printf '%s\\n' \"$CONFIGURACAO_DO_COLETOR\" > ${local.caminho_da_configuracao_do_coletor} && exec /fluent-bit/bin/fluent-bit -c /fluent-bit/etc/fluent-bit.conf"]
+      command = ["sh", "-c", "printf '%s\\n' \"$CONFIGURACAO_DO_COLETOR\" > ${local.caminho_da_configuracao_do_coletor} && exec /fluent-bit/bin/fluent-bit -c /fluent-bit/etc/fluent-bit.conf -R /fluent-bit/etc/parsers.conf"]
 
       secrets = [
         { name = "DD_API_KEY", valueFrom = aws_secretsmanager_secret.chave_api_do_datadog.arn },
