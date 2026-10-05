@@ -17,12 +17,12 @@ export function Paginacao({ paginaAtual, totalDeOrdens, quantidadeDeOrdensNaPagi
   const primeiraOrdemDaPagina = (paginaAtual - 1) * ORDENS_POR_PAGINA + 1;
   const ultimaOrdemDaPagina = primeiraOrdemDaPagina + quantidadeDeOrdensNaPagina - 1;
   const itensDaPaginacao = listarPaginasVisiveis(paginaAtual, totalDePaginas);
-  const estaCarregandoOutraPagina = paginaSendoCarregada !== undefined;
+  const estaCarregandoPaginaPedida = paginaSendoCarregada !== undefined;
 
   return (
-    <div className="paginacao" role="group" aria-label="Páginas da lista de ordens" aria-busy={estaCarregandoOutraPagina}>
+    <div className="paginacao" role="group" aria-label="Páginas da lista de ordens" aria-busy={estaCarregandoPaginaPedida}>
       <p className="paginacao-resumo num" data-testid="resumo-da-paginacao">
-        {estaCarregandoOutraPagina ? (
+        {estaCarregandoPaginaPedida ? (
           <>Carregando a página {formatarQuantidade(paginaSendoCarregada)}…</>
         ) : (
           <>

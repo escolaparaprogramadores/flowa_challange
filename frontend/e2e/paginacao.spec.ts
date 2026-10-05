@@ -140,7 +140,16 @@ async function conferirFileiraDentroDoCartaoSemRolarAPagina(paginaDaBoleta: Page
   }
 }
 
-// Maquete-02: o rodapé é a última faixa da moldura da tabela, colado nela, com a mesma largura.
+// Desligado aparece só como o símbolo apagado: sem caixa e sem borda em nenhum dos quatro lados.
+async function conferirBotaoDesligadoSemCaixa(botaoDesligado: Locator) {
+  await expect(botaoDesligado).toBeDisabled();
+  for (const ladoDaBorda of ['top', 'right', 'bottom', 'left']) {
+    await expect(botaoDesligado).toHaveCSS(`border-${ladoDaBorda}-color`, COR_TRANSPARENTE);
+  }
+  await expect(botaoDesligado).toHaveCSS('background-color', COR_TRANSPARENTE);
+}
+
+// O rodapé é a última faixa da moldura da tabela, colado nela, com a mesma largura.
 async function conferirRodapeFechandoAMoldura(paginaDaBoleta: Page) {
   const molduraDaTabela = localizarCartaoCompraVenda(paginaDaBoleta).locator('.tabela-de-ordens-moldura');
   const rodapeDaPaginacao = localizarPaginacaoDaLista(paginaDaBoleta);
@@ -151,6 +160,9 @@ async function conferirRodapeFechandoAMoldura(paginaDaBoleta: Page) {
   expect(caixaDoRodape!.width).toBeCloseTo(caixaDaMoldura!.width, 0);
   await expect(molduraDaTabela).toHaveCSS('border-bottom-style', 'none');
   await expect(molduraDaTabela).toHaveCSS('border-bottom-left-radius', '0px');
+  await expect(molduraDaTabela).toHaveCSS('border-bottom-right-radius', '0px');
+  await expect(rodapeDaPaginacao).toHaveCSS('border-left-color', COR_DA_BORDA_DO_TEMA);
+  await expect(rodapeDaPaginacao).toHaveCSS('border-right-color', COR_DA_BORDA_DO_TEMA);
   await expect(rodapeDaPaginacao).toHaveCSS('background-color', COR_DO_FUNDO_DO_RODAPE);
   await expect(rodapeDaPaginacao).toHaveCSS('border-top-color', COR_DO_DIVISOR_DO_RODAPE);
   await expect(rodapeDaPaginacao).toHaveCSS('border-bottom-color', COR_DA_BORDA_DO_TEMA);
@@ -316,6 +328,42 @@ test('RF-12: enquanto a página pedida não chega, a paginação avisa que está
   await expect(localizarBotaoDaPagina(page, 2)).not.toHaveAttribute('data-carregando');
 });
 
+for (const larguraEstreita of [375, 520, 640]) {
+  test(`RF-12: em ${larguraEstreita}px o aviso de carregando não muda a quebra do rodapé nem tira o botão tocado do lugar`, async ({ page }) => {
+    await page.setViewportSize({ width: larguraEstreita, height: 1000 });
+    let liberarRespostaDaPagina2 = () => {};
+    const respostaDaPagina2Liberada = new Promise<void>((resolver) => {
+      liberarRespostaDaPagina2 = resolver;
+    });
+    await page.route(
+      (urlPedida) => urlPedida.pathname === ROTA_DAS_ORDENS,
+      async (rotaDaListagem) => {
+        if (rotaDaListagem.request().method() !== 'GET') return rotaDaListagem.fallback();
+        const paginaPedida = Number(new URL(rotaDaListagem.request().url()).searchParams.get('page'));
+        if (paginaPedida === 2) await respostaDaPagina2Liberada;
+        await rotaDaListagem.fulfill({ json: montarPaginaSimuladaDeOrdens(paginaPedida, 25_000) });
+      },
+    );
+    await abrirTelaEEsperarPrimeiraPagina(page);
+    await localizarPaginacaoDaLista(page).scrollIntoViewIfNeeded();
+    const caixaDoBotaoAntesDoClique = await localizarBotaoDaPagina(page, 2).boundingBox();
+    const caixaDoRodapeAntesDoClique = await localizarPaginacaoDaLista(page).boundingBox();
+
+    const respostaDaPagina2 = esperarLeituraDaPagina(page, 2);
+    await localizarBotaoDaPagina(page, 2).click();
+    await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Carregando a página 2…');
+    const caixaDoBotaoDuranteACarga = await localizarBotaoDaPagina(page, 2).boundingBox();
+    const caixaDoRodapeDuranteACarga = await localizarPaginacaoDaLista(page).boundingBox();
+    expect(Math.abs(caixaDoBotaoDuranteACarga!.x - caixaDoBotaoAntesDoClique!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(caixaDoBotaoDuranteACarga!.y - caixaDoBotaoAntesDoClique!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(caixaDoRodapeDuranteACarga!.height - caixaDoRodapeAntesDoClique!.height)).toBeLessThanOrEqual(1);
+
+    liberarRespostaDaPagina2();
+    await respostaDaPagina2;
+    await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 11–20 de 25.000 ordens');
+  });
+}
+
 test('erro ao trocar de página mostra o aviso da lista no cartão e tira a paginação', async ({ page }) => {
   await criarOrdensPelaApi(page, 15);
   await abrirTelaEEsperarPrimeiraPagina(page);
@@ -341,10 +389,7 @@ test('CA-13: com 23 ordens a paginação vai à página 2, à 3 e volta à 1 mos
   await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 1–10 de 23 ordens');
   await conferirFileiraDaPaginacao(page, ['‹', '1', '2', '3', '›']);
   await conferirPaginaAtual(page, 1);
-  await expect(localizarBotaoPaginaAnterior(page)).toBeDisabled();
-  // Desligado aparece só como o símbolo apagado, sem caixa nem borda (maquete-02).
-  await expect(localizarBotaoPaginaAnterior(page)).toHaveCSS('border-top-color', COR_TRANSPARENTE);
-  await expect(localizarBotaoPaginaAnterior(page)).toHaveCSS('background-color', COR_TRANSPARENTE);
+  await conferirBotaoDesligadoSemCaixa(localizarBotaoPaginaAnterior(page));
   await expect(localizarBotaoProximaPagina(page)).toBeEnabled();
   await expect(localizarBotaoProximaPagina(page)).toHaveCSS('border-top-color', COR_DA_BORDA_DO_TEMA);
   await conferirLinhasIguaisAoServidor(page, 1);
@@ -361,7 +406,8 @@ test('CA-13: com 23 ordens a paginação vai à página 2, à 3 e volta à 1 mos
   await irParaPaginaPeloBotao(page, localizarBotaoProximaPagina(page), 3);
   await conferirPaginaAtual(page, 3);
   await expect(page.getByTestId('resumo-da-paginacao')).toHaveText('Mostrando 21–23 de 23 ordens');
-  await expect(localizarBotaoProximaPagina(page)).toBeDisabled();
+  await conferirBotaoDesligadoSemCaixa(localizarBotaoProximaPagina(page));
+  await expect(localizarBotaoPaginaAnterior(page)).toHaveCSS('border-left-color', COR_DA_BORDA_DO_TEMA);
   await conferirLinhasIguaisAoServidor(page, 3);
 
   await irParaPaginaPeloBotao(page, localizarBotaoPaginaAnterior(page), 2);

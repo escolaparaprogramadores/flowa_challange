@@ -1,4 +1,4 @@
-/* O rodapé é a última faixa da moldura da tabela (maquete-02): sobe o espaço do cartão e fecha a moldura,
+/* O rodapé é a última faixa da moldura da tabela: sobe o espaço do cartão e fecha a moldura,
    que perde a borda e os cantos de baixo só quando a paginação aparece. */
 .compra-venda .tabela-de-ordens-moldura:has(+ .paginacao) { border-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .paginacao {
@@ -37,9 +37,16 @@
 .paginacao-botao:disabled { background: transparent; border-color: transparent; color: var(--cor-desabilitado-texto); cursor: default; }
 .paginacao-reticencias { min-width: 20px; text-align: center; color: var(--cor-texto-apagado); font-size: var(--texto-rotulo); user-select: none; }
 
+/* Cartão estreito: o resumo fica sempre na própria linha, senão o "Carregando…", mais curto que o
+   "Mostrando…", muda a quebra e os botões pulam de lugar no meio do clique. */
+@container (max-width: 719px) {
+  .paginacao { justify-content: center; }
+  .paginacao-resumo { flex-basis: 100%; text-align: center; }
+}
+
 /* Em tela estreita a fileira (até 7 números + ‹ ›) encolhe para caber no cartão. */
 @media (max-width: 520px) {
-  .paginacao { justify-content: center; padding: var(--espaco-3); }
+  .paginacao { padding: var(--espaco-3); }
   .paginacao-botoes { gap: var(--espaco-1); }
   .paginacao-botao { min-width: 28px; height: 28px; padding: 0 var(--espaco-1-5); }
 }
