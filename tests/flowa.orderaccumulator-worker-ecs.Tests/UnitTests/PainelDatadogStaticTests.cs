@@ -157,12 +157,27 @@ public sealed class PainelDatadogStaticTests
     [Fact]
     public void Exposure_chart_marks_both_limits_of_the_exposure_rule()
     {
-        var exposureChart = Regex.Match(PainelTf, @"title\s+= ""Exposição por símbolo""\n(?<grafico>.*?)\n      widget \{\n", RegexOptions.Singleline).Groups["grafico"].Value;
+        var exposureChart = ReadChartDefinitionTitled("Exposição por símbolo");
         var exposureLimit = ExposureLimitPolicy.PerSymbol.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 
         Assert.Contains($"value        = \"y = {exposureLimit}\"\n", exposureChart);
         Assert.Contains($"value        = \"y = -{exposureLimit}\"\n", exposureChart);
     }
+
+    [Theory]
+    [InlineData("Taxa de aceite")]
+    [InlineData("Taxa de aceite (%)")]
+    public void Acceptance_rate_chart_divides_accepted_orders_by_accepted_plus_rejected_orders(string acceptanceRateChartTitle)
+    {
+        var acceptanceRateChart = ReadChartDefinitionTitled(acceptanceRateChartTitle);
+
+        Assert.Contains("formula_expression = \"100 * default_zero(a) / (default_zero(a) + default_zero(b))\"\n", acceptanceRateChart);
+        Assert.Matches(@"name\s+= ""a""\n\s+query\s+= ""sum:flowa\.ordens\.aceitas\{", acceptanceRateChart);
+        Assert.Matches(@"name\s+= ""b""\n\s+query\s+= ""sum:flowa\.ordens\.rejeitadas\{", acceptanceRateChart);
+    }
+
+    private static string ReadChartDefinitionTitled(string chartTitle) =>
+        Regex.Match(PainelTf, $@"title\s+= ""{Regex.Escape(chartTitle)}""\n(?<grafico>.*?)\n      widget \{{\n", RegexOptions.Singleline).Groups["grafico"].Value;
 
     [Fact]
     public void Every_output_of_the_painel_is_sensitive()
