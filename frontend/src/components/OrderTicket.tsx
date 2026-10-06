@@ -90,7 +90,7 @@ export function OrderTicket({ isSendingOrder, onSendOrder }: OrderTicketProps) {
   const { quantityError, priceError } = orderTicketFieldErrors;
 
   return (
-    <form className="card order-ticket" onSubmit={submitOrderTicket} noValidate aria-label="Boleta de ordem">
+    <form className={isTestModeOn ? 'card order-ticket test-mode-on' : 'card order-ticket'} onSubmit={submitOrderTicket} noValidate aria-label="Boleta de ordem">
       <div className="order-ticket-header">
         <h2 className="card-title">Nova ordem</h2>
         {isTestModeOn && <span className="test-mode-badge">Modo de teste</span>}

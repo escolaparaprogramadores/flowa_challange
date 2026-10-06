@@ -191,3 +191,28 @@ test('CA-2 (F5): Backspace moves the cents back to the right', async ({ page }) 
   await priceField.press('Backspace');
   await expect(priceField).toHaveValue('2,50');
 });
+
+// Counts the visual lines of an element's text: the total of the normal mode must never break between digits.
+async function countTextLines(orderTicketPage: Page, testId: string) {
+  return orderTicketPage.getByTestId(testId).evaluate((elementOnPage) => {
+    const textRange = document.createRange();
+    textRange.selectNodeContents(elementOnPage);
+    return new Set(Array.from(textRange.getClientRects()).map((lineRect) => Math.round(lineRect.top))).size;
+  });
+}
+
+const normalModeTotals: Array<[string, string, string]> = [
+  ['99999', '25,00', 'R$ 2.499.975,00'],
+  ['99999', '999,99', 'R$ 99.998.000,01'],
+];
+
+for (const viewportWidth of [375, 860, 1440, 1920]) {
+  test(`CA-2 (F5): at ${viewportWidth} px the normal mode total stays whole, on one line`, async ({ page }) => {
+    await page.setViewportSize({ width: viewportWidth, height: 1000 });
+    for (const [typedQuantity, typedPrice, expectedTotal] of normalModeTotals) {
+      await fillOrderTicket(page, typedQuantity, typedPrice);
+      await expect(page.getByTestId('total-estimado'), expectedTotal).toHaveText(expectedTotal);
+      expect(await countTextLines(page, 'total-estimado'), expectedTotal).toBe(1);
+    }
+  });
+}

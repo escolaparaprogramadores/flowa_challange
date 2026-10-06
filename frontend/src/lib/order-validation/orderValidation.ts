@@ -73,7 +73,6 @@ export function validateOrderPrice(typedPrice: string): PriceValidation {
   return { acceptedPriceInCents: priceInCents };
 }
 
-// The + stops at the largest quantity the normal mode accepts.
 export function canIncreaseQuantity(typedQuantity: string): boolean {
   return (parseTypedWholeQuantity(typedQuantity) ?? 0) < MAX_QUANTITY_EXCLUSIVE - 1;
 }

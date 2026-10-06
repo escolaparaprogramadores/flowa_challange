@@ -179,7 +179,8 @@ for (const viewportWidth of [375, 860, 1440, 1920]) {
     await locateTestModeSymbolField(page).fill('ITUB4');
     await locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true }).fill(LONGEST_TEST_MODE_QUANTITY);
     await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill(LONGEST_TEST_MODE_PRICE);
-    await expect(page.getByTestId('total-estimado')).not.toHaveText('—');
+    await expect(locateSummaryPrice(page)).toHaveText('R$ 99.999.999,123456');
+    await expect(page.getByTestId('total-estimado')).toHaveText('R$ 12.345.678.793.019.193.000.000,00');
     await expect(locateTestModeBadge(page)).toBeVisible();
     await expect(locateTestModeNotice(page)).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewportWidth);

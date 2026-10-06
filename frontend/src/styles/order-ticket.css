@@ -68,7 +68,9 @@
 .order-summary { margin: 0; padding: var(--space-2) var(--space-4); border-radius: var(--radius-tab); border: 1px solid var(--color-track-border); background: var(--color-sunken); }
 .order-summary-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); font-size: var(--font-size-body-small); color: var(--color-text-tertiary); padding: var(--space-2-5) 0; }
 .order-summary-row + .order-summary-row { border-top: 1px solid var(--color-divider); }
-.order-summary-row dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--color-text); font-weight: 700; text-align: right; }
+.order-summary-row dd { margin: 0; color: var(--color-text); font-weight: 700; text-align: right; }
+/* Only the test mode takes numbers of any length; breaking them there keeps the summary inside the ticket. */
+.order-ticket.test-mode-on .order-summary-row dd { min-width: 0; overflow-wrap: anywhere; }
 .order-summary-row .order-summary-total { font-family: var(--font-display); font-size: var(--font-size-large-figure); font-weight: 600; }
 .submit-order-button { height: var(--height-submit-button); border: 0; border-radius: var(--radius-field); font-size: var(--font-size-body); font-weight: 800; transition: filter var(--transition), background var(--transition), color var(--transition), box-shadow var(--transition); }
 .submit-order-button.buy { background: var(--color-accent); color: var(--color-text-on-accent); box-shadow: var(--glow-submit-buy); }
