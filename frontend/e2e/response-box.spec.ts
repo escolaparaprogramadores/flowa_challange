@@ -12,7 +12,8 @@ const SCREENSHOT_FOLDER = process.env.E2E_PROVAS_DIR;
 async function expectBorderOnEverySide(responseBox: Locator, expectedBorderColor: string) {
   for (const boxSide of ['top', 'right', 'bottom', 'left']) {
     await expect(responseBox).toHaveCSS(`border-${boxSide}-color`, expectedBorderColor);
-    await expect(responseBox).toHaveCSS(`border-${boxSide}-width`, '1px');
+    // 1px in the CSS; the page runs at 90% zoom, so the computed width is 1 / 0.9 px.
+    await expect(responseBox).toHaveCSS(`border-${boxSide}-width`, '1.11111px');
   }
 }
 
