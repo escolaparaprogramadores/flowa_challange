@@ -18,9 +18,6 @@ public sealed class DatabaseUnitOfWork : IUnitOfWork, IAsyncDisposable
     public async Task<DbConnection> GetOpenDatabaseConnectionAsync(CancellationToken cancellationToken = default) =>
         openDatabaseConnection ??= await databaseConnectionSource.OpenDatabaseConnectionAsync(cancellationToken);
 
-    public Task BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-        BeginTransactionAsync(IsolationLevel.Unspecified, cancellationToken);
-
     public async Task BeginTransactionAsync(IsolationLevel transactionIsolationLevel, CancellationToken cancellationToken = default)
     {
         var databaseConnection = await GetOpenDatabaseConnectionAsync(cancellationToken);

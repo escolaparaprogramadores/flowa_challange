@@ -49,11 +49,16 @@ services:
       ASPNETCORE_HTTP_PORTS: "8080"
       Fix__AcceptorHost: orderaccumulator
       Fix__AcceptorPort: "9876"
-      OrderAccumulator__BaseUrl: http://orderaccumulator:8081
+      # Mesmo usuário e senha do OrderAccumulator: o Generator lê a exposição e as ordens e apaga direto no banco.
+      ConnectionStrings__Flowa: "Host=postgres;Port=5432;Database=flowa;Username=flowa;Password=${POSTGRES_PASSWORD:-flowa_dev}"
+      Database__MaximumPoolSize: "10"
     ports:
       - "127.0.0.1:${FLOWA_HTTP_PORT:-8080}:8080"
     depends_on:
-      - orderaccumulator
+      postgres:
+        condition: service_healthy
+      orderaccumulator:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
