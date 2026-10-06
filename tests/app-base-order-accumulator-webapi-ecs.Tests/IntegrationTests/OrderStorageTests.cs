@@ -229,7 +229,8 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>();
         var registeredServicesOrderDecision = await new DecideIncomingOrderUseCase(
                 registeredUnitOfWork, registeredOrderRepository, new OrderDecisionDomainService(registeredSymbolExposureRepository),
-                new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics())
+                new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics(),
+                TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>())
             .DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
 
         Assert.IsType<OrderRepository>(registeredOrderRepository);

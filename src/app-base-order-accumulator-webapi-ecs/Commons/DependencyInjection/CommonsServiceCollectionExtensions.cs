@@ -1,5 +1,6 @@
 using Base.OrderAccumulator.Commons.Database;
 using Base.OrderAccumulator.Commons.Logging;
+using Base.OrderAccumulator.Commons.Observability;
 
 namespace Base.OrderAccumulator.Commons.DependencyInjection;
 
@@ -7,6 +8,9 @@ public static class CommonsServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationLogger(this IServiceCollection appServices) =>
         appServices.AddSingleton(typeof(IApplicationLogger<>), typeof(ApplicationLogger<>));
+
+    public static IServiceCollection AddOperationMonitoring(this IServiceCollection appServices) =>
+        appServices.AddSingleton<IOperationMonitoring, ActiveSpanOperationMonitoring>();
 
     public static IServiceCollection AddPostgresDatabase(this IServiceCollection appServices, string databaseConnectionString)
     {

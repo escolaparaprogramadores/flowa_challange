@@ -1,5 +1,6 @@
 using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Interfaces;
+using Base.OrderAccumulator.Commons.Logging;
 
 namespace Base.OrderAccumulator.Entrypoint.BackgroundService;
 
@@ -10,17 +11,24 @@ public sealed class SymbolExposureGaugeBackgroundService : Microsoft.Extensions.
     private readonly IOrderMetricsPort orderMetrics;
     private readonly ISymbolExposureMemoryPort symbolExposureMemory;
     private readonly TimeProvider gaugeClock;
+    private readonly IApplicationLogger<SymbolExposureGaugeBackgroundService> gaugeLogger;
 
-    public SymbolExposureGaugeBackgroundService(IOrderMetricsPort orderMetrics, ISymbolExposureMemoryPort symbolExposureMemory, TimeProvider gaugeClock)
+    public SymbolExposureGaugeBackgroundService(
+        IOrderMetricsPort orderMetrics,
+        ISymbolExposureMemoryPort symbolExposureMemory,
+        TimeProvider gaugeClock,
+        IApplicationLogger<SymbolExposureGaugeBackgroundService> gaugeLogger)
     {
         this.orderMetrics = orderMetrics ?? throw new ArgumentNullException(nameof(orderMetrics));
         this.symbolExposureMemory = symbolExposureMemory ?? throw new ArgumentNullException(nameof(symbolExposureMemory));
         this.gaugeClock = gaugeClock ?? throw new ArgumentNullException(nameof(gaugeClock));
+        this.gaugeLogger = gaugeLogger ?? throw new ArgumentNullException(nameof(gaugeLogger));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var symbolExposureGaugeTimer = new PeriodicTimer(SymbolExposureGaugeInterval, gaugeClock);
+        gaugeLogger.LogInformation("Symbol exposure gauge loop started.", new { IntervalSeconds = SymbolExposureGaugeInterval.TotalSeconds });
         do
         {
             SendSymbolExposureGauges();

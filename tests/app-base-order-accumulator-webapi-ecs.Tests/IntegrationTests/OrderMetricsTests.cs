@@ -5,6 +5,7 @@ using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Logging;
 using Base.OrderAccumulator.Commons.Observability;
 using Base.OrderAccumulator.Commons.Responses;
 using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
@@ -163,7 +164,8 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 300, 50.10m));
         await SendSentinelAndReadOrderMetricsAsync();
 
-        new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System).SendSymbolExposureGauges();
+        new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System,
+            TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>()).SendSymbolExposureGauges();
         var sentExposureGauges = await SendSentinelAndReadOrderMetricsAsync();
 
         Assert.Equal(
@@ -181,7 +183,8 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 2m));
         await SendSentinelAndReadOrderMetricsAsync();
         var manualGaugeClock = new ManualGaugeClock();
-        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock);
+        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock,
+            TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>());
         IReadOnlyList<DogStatsdMetricLine> expectedExposureGauges =
         [
             new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "20", "g", ExpectedTags("symbol:PETR4")),
@@ -201,6 +204,29 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal(expectedExposureGauges, gaugesAtStartup);
         Assert.Empty(gaugesBeforeTheTick);
         Assert.Equal(expectedExposureGauges, gaugesAfterTheTick);
+    }
+
+    // CA-28: the gauge loop writes one Information line when it starts and nothing on its 30-second ticks.
+    [Fact]
+    public async Task Exposure_gauge_logs_only_when_its_loop_starts_and_nothing_on_two_ticks()
+    {
+        var manualGaugeClock = new ManualGaugeClock();
+        var recordingGaugeLogger = new RecordingApplicationLogger<SymbolExposureGaugeBackgroundService>();
+        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(
+            new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock, recordingGaugeLogger);
+
+        await symbolExposureGaugeService.StartAsync(CancellationToken.None);
+        var gaugesAtStartup = await ReadThreeExposureGaugesAsync();
+        manualGaugeClock.TickGaugeTimer();
+        var gaugesAfterTheFirstTick = await ReadThreeExposureGaugesAsync();
+        manualGaugeClock.TickGaugeTimer();
+        var gaugesAfterTheSecondTick = await ReadThreeExposureGaugesAsync();
+        await symbolExposureGaugeService.StopAsync(CancellationToken.None);
+
+        Assert.Equal(3, gaugesAtStartup.Count);
+        Assert.Equal(3, gaugesAfterTheFirstTick.Count);
+        Assert.Equal(3, gaugesAfterTheSecondTick.Count);
+        Assert.Equal(["Information Symbol exposure gauge loop started."], recordingGaugeLogger.RecordedLogLines);
     }
 
     [Fact]
@@ -229,7 +255,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     [Fact]
-    public async Task Without_an_agent_the_app_processes_every_order_and_writes_no_log_line()
+    public async Task Without_an_agent_the_app_processes_every_order_and_writes_only_the_accepted_order_lines()
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
         var capturedAppLogs = new OrderAccumulatorCapturedLogs();
@@ -248,7 +274,9 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         appOrderMetricsClient.Dispose();
 
         Assert.Equal(20, orderDecisionsWithoutAgent.Count(orderDecision => orderDecision.Accepted));
-        Assert.Empty(capturedAppLogs.CapturedLogLines.Skip(logLinesBeforeTheOrders));
+        Assert.Equal(
+            Enumerable.Repeat("Information Base.OrderAccumulator.Application.Orders.UseCases.DecideIncomingOrderUseCase: Order accepted.", 20),
+            capturedAppLogs.CapturedLogLines.Skip(logLinesBeforeTheOrders));
         await using var startupDatabase = NpgsqlDataSource.Create(startupDatabaseConnectionString);
         await using var startupDatabaseConnection = await startupDatabase.OpenConnectionAsync();
         Assert.Equal(20m, await startupDatabaseConnection.ExecuteScalarAsync<decimal>("SELECT exposure FROM exposures WHERE symbol = 'PETR4'"));

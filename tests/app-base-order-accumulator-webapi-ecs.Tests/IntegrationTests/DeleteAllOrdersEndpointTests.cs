@@ -147,7 +147,8 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         await using var deleteFailureUnitOfWork = new DatabaseUnitOfWork(deleteFailureConnectionSource);
         var deleteFailureDatabase = new DapperDatabase(deleteFailureUnitOfWork);
         var deleteAllOrdersUseCase = new DeleteAllOrdersUseCase(
-            deleteFailureUnitOfWork, new OrderRepository(deleteFailureDatabase), new ExposureRepository(deleteFailureDatabase), symbolExposureMemory);
+            deleteFailureUnitOfWork, new OrderRepository(deleteFailureDatabase), new ExposureRepository(deleteFailureDatabase), symbolExposureMemory,
+            TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DeleteAllOrdersUseCase>());
 
         var refusedDeleteMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(CancellationToken.None);
 

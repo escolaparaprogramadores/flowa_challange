@@ -4,6 +4,8 @@ using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Application.Orders.UseCases;
 using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Logging;
+using Base.OrderAccumulator.Commons.Observability;
 using Base.OrderAccumulator.Commons.Responses;
 using Base.OrderAccumulator.Domain.DomainServices;
 using Base.OrderAccumulator.Domain.Orders.Interfaces;
@@ -21,7 +23,9 @@ public sealed class DecideIncomingOrderTestRunner(
     IDatabaseConnectionSource orderDatabaseConnectionSource,
     ISymbolExposureMemoryPort symbolExposureMemory,
     IOrderMetricsPort orderMetrics,
-    Func<IOrderRepository, IOrderRepository>? wrapOrderRepository = null)
+    Func<IOrderRepository, IOrderRepository>? wrapOrderRepository = null,
+    IOperationMonitoring? operationMonitoring = null,
+    IApplicationLogger<DecideIncomingOrderUseCase>? orderDecisionLogger = null)
 {
     public DecideIncomingOrderTestRunner(IDatabaseConnectionSource orderDatabaseConnectionSource)
         : this(orderDatabaseConnectionSource, new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics())
@@ -44,7 +48,9 @@ public sealed class DecideIncomingOrderTestRunner(
             orderRepository,
             new OrderDecisionDomainService(new ExposureRepository(orderDatabase)),
             symbolExposureMemory,
-            orderMetrics);
+            orderMetrics,
+            operationMonitoring ?? TestObservability.CreateOperationMonitoring(),
+            orderDecisionLogger ?? TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());
         return await decideIncomingOrderUseCase.DecideIncomingOrderAsync(incomingOrder, cancellationToken);
     }
 }

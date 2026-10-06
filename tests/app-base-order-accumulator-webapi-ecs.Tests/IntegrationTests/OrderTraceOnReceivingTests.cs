@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Base.OrderAccumulator.Commons.Observability;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
@@ -37,8 +38,15 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         Assert.Equal(orderSending.TraceId, orderReceiving.TraceId);
         Assert.Equal(orderSending.SpanId, orderReceiving.ParentSpanId);
         Assert.Equal(ActivityKind.Consumer, orderReceiving.Kind);
-        // No tag on the span: span names and shape stay as they were (CA-34).
-        Assert.Empty(orderReceiving.TagObjects);
+        // Span names and shape stay as they were (CA-34); the only tags are the closed measurement of the order use case
+        // written on this span already open (CA-22, decision 16, G-10).
+        Assert.Equal(
+            [ActiveSpanOperationMonitoring.OperationDurationTag, ActiveSpanOperationMonitoring.OperationResultTag, ActiveSpanOperationMonitoring.OperationNameTag],
+            orderReceiving.TagObjects.Select(spanTag => spanTag.Key).Order(StringComparer.Ordinal));
+        Assert.Equal("orders.decide-incoming-order", orderReceiving.GetTagItem(ActiveSpanOperationMonitoring.OperationNameTag));
+        Assert.Equal("accepted", orderReceiving.GetTagItem(ActiveSpanOperationMonitoring.OperationResultTag));
+        Assert.IsType<double>(orderReceiving.GetTagItem(ActiveSpanOperationMonitoring.OperationDurationTag));
+        Assert.Equal(ActivityStatusCode.Unset, orderReceiving.Status);
     }
 
     [Fact]
@@ -65,9 +73,16 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
             Assert.Equal(orderSending.TraceId, Assert.Single(capturedOrderTraceSpans.OrderReceivingSpans).TraceId);
         }
 
-        // An accepted order leaves exactly two lines in the OrderAccumulator: the FIX message in and the answer out.
+        // An accepted order leaves exactly three lines in the OrderAccumulator: the FIX message in, the end of the use case
+        // with the accepted order (CA-21) and the answer out.
         var orderLogLines = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.TraceId == orderClOrdId).ToList();
-        Assert.Equal(2, orderLogLines.Count);
+        Assert.Equal(3, orderLogLines.Count);
+        var acceptedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "Order accepted.");
+        Assert.Equal(
+            ("Information", "Base.OrderAccumulator.Application.Orders.UseCases.DecideIncomingOrderUseCase", "PETR4", "1", "100", "10.50"),
+            (acceptedOrderLine.LogLevel, acceptedOrderLine.Category, acceptedOrderLine.ReadLogField("Symbol"),
+                acceptedOrderLine.ReadLogField("Side"), acceptedOrderLine.ReadLogField("Quantity"), acceptedOrderLine.ReadLogField("Price")));
+        Assert.Matches("^[0-9a-f]{32}$", acceptedOrderLine.ReadLogField("OrderId"));
         var receivedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message received.");
         Assert.Contains("|35=D|", receivedOrderLine.ReadLogField("FixMessage"));
         Assert.Contains($"|5100={orderTraceParent}|", receivedOrderLine.ReadLogField("FixMessage"));
