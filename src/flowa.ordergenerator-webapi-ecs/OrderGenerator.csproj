@@ -17,7 +17,7 @@
     <InternalsVisibleTo Include="OrderGenerator.Tests" />
   </ItemGroup>
 
-  <!-- The FIX session sits next to the executable; the FIX 4.4 dictionary with tag 5100 comes from the Commons. -->
+  <!-- A sessão FIX fica ao lado do executável; o dicionário FIX 4.4 com a tag 5100 vem da Commons. -->
   <ItemGroup>
     <!-- The Vite build (F5) also goes to the output, so dotnet run and the plain build serve the page. -->
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
