@@ -102,5 +102,6 @@ describe('test mode numbers', () => {
     expect(formatTestModeReais(10.005).replace(/\s/g, ' ')).toBe('R$ 10,005');
     expect(formatTestModeReais(1.5 * 10.005).replace(/\s/g, ' ')).toBe('R$ 15,0075');
     expect(formatTestModeReais(25).replace(/\s/g, ' ')).toBe('R$ 25,00');
+    expect(formatTestModeReais(0.1 * 3).replace(/\s/g, ' ')).toBe('R$ 0,30');
   });
 });

@@ -37,7 +37,8 @@ const testModeReaisFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
   minimumFractionDigits: 2,
-  maximumFractionDigits: 20,
+  // Eight places keep 10,005 and 15,0075 whole and hide float noise such as 0,30000000000000004.
+  maximumFractionDigits: 8,
 });
 
 export function formatTestModeReais(amountInReais: number): string {
