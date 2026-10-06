@@ -70,7 +70,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal(firstOrderDecision with { IsRepeat = true }, repeatedOrderDecision);
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync(invalidOrder.ClOrdId));
         Assert.Equal(
-            [new SymbolExposure("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)],
+            [new StoredSymbolExposure("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)],
             await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
     }
 
@@ -150,7 +150,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         await orderAccumulatorDatabase.OrderDatabaseConnectionSource.ApplyOrderAccumulatorSchemaAsync();
 
         Assert.Equal(
-            [new SymbolExposure("PETR4", 100.00m), new("VALE3", 0m), new("VIIA4", 0m)],
+            [new StoredSymbolExposure("PETR4", 100.00m), new("VALE3", 0m), new("VIIA4", 0m)],
             await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
         Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }

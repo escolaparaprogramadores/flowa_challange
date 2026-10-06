@@ -109,17 +109,19 @@ public static class TestOrders
             (int)orderDecision.Quantity, orderDecision.Price);
 }
 
+public sealed record StoredSymbolExposure(string Symbol, decimal Exposure);
+
 // Reads the stored exposure of the three symbols straight from the table, on a connection of its own per call,
 // in the order of the symbol rule: a test can read while other orders use their own connections.
 public sealed class StoredSymbolExposureReader(NpgsqlDataSource orderDatabaseDataSource)
 {
-    public async Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync()
+    public async Task<IReadOnlyList<StoredSymbolExposure>> GetSymbolExposuresAsync()
     {
         await using var orderDatabaseConnection = await orderDatabaseDataSource.OpenConnectionAsync();
         var exposureBySymbol = (await orderDatabaseConnection.QueryAsync<(string Symbol, decimal Exposure)>("SELECT symbol, exposure FROM exposures"))
             .ToDictionary(storedExposureRow => storedExposureRow.Symbol, storedExposureRow => storedExposureRow.Exposure);
         return OrderFieldPolicy.AllowedOrderSymbols
-            .Select(allowedSymbol => new SymbolExposure(allowedSymbol, exposureBySymbol[allowedSymbol]))
+            .Select(allowedSymbol => new StoredSymbolExposure(allowedSymbol, exposureBySymbol[allowedSymbol]))
             .ToList();
     }
 }

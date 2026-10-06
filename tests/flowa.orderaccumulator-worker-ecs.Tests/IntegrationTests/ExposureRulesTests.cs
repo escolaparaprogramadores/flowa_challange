@@ -18,7 +18,7 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
         await ProcessExpectingAcceptanceAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
 
         Assert.Equal(
-            [new SymbolExposure("PETR4", 1_050.00m), new("VALE3", 0m), new("VIIA4", 0m)],
+            [new StoredSymbolExposure("PETR4", 1_050.00m), new("VALE3", 0m), new("VIIA4", 0m)],
             await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
 
         await ProcessExpectingAcceptanceAsync(TestOrders.NewBuyOrder("VALE3", 200, 20.00m));
@@ -29,7 +29,7 @@ public sealed class ExposureRulesTests(OrderAccumulatorPostgresFixture orderAccu
 
         // PETR4: 1.050 - 500 · VALE3: 4.000 - 2.000 · VIIA4: -1.575 + 100
         Assert.Equal(
-            [new SymbolExposure("PETR4", 550.00m), new("VALE3", 2_000.00m), new("VIIA4", -1_475.00m)],
+            [new StoredSymbolExposure("PETR4", 550.00m), new("VALE3", 2_000.00m), new("VIIA4", -1_475.00m)],
             await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
     }
 

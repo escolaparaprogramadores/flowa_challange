@@ -33,7 +33,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
 
     private static readonly TimeSpan ConcurrencyStepDeadline = TimeSpan.FromSeconds(30);
 
-    private static readonly SymbolExposure[] ZeroedSymbolExposures =
+    private static readonly StoredSymbolExposure[] ZeroedSymbolExposures =
         [new("PETR4", 0m), new("VALE3", 0m), new("VIIA4", 0m)];
 
     [Fact]
