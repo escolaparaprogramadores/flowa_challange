@@ -51,13 +51,24 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     }
 
     [Fact]
-    public async Task OrderAccumulator_only_starts_after_postgres_is_healthy()
+    public async Task Both_apps_only_start_after_postgres_is_healthy()
     {
         using var resolvedComposeConfig = await composeUnderTest.ReadResolvedComposeConfigAsync();
         var composeServices = resolvedComposeConfig.RootElement.GetProperty("services");
 
         var accumulatorDependsOnPostgres = composeServices.GetProperty("orderaccumulator").GetProperty("depends_on").GetProperty("postgres");
         Assert.Equal("service_healthy", accumulatorDependsOnPostgres.GetProperty("condition").GetString());
+        var generatorDependencies = composeServices.GetProperty("ordergenerator").GetProperty("depends_on");
+        Assert.Equal("service_healthy", generatorDependencies.GetProperty("postgres").GetProperty("condition").GetString());
+        Assert.Equal("service_started", generatorDependencies.GetProperty("orderaccumulator").GetProperty("condition").GetString());
+
+        // CA-32: the OrderGenerator uses the same database user as the OrderAccumulator, with its pool limit outside the secret.
+        var generatorEnvironment = composeServices.GetProperty("ordergenerator").GetProperty("environment");
+        Assert.Equal(composeServices.GetProperty("orderaccumulator").GetProperty("environment").GetProperty("ConnectionStrings__Flowa").GetString(),
+            generatorEnvironment.GetProperty("ConnectionStrings__Flowa").GetString());
+        Assert.Equal("10", generatorEnvironment.GetProperty("Database__MaximumPoolSize").GetString());
+        Assert.DoesNotContain("Pool", generatorEnvironment.GetProperty("ConnectionStrings__Flowa").GetString());
+        Assert.False(generatorEnvironment.TryGetProperty("OrderAccumulator__BaseUrl", out _));
 
         var postgresHealthcheck = composeServices.GetProperty("postgres").GetProperty("healthcheck").GetProperty("test")
             .EnumerateArray().Select(healthcheckCommandPart => healthcheckCommandPart.GetString()).ToArray();
@@ -341,54 +352,48 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", apiErrorTraceId, "Warning", "Expected error in request.", expectedProblemType);
     }
 
-    // The exception path of the GlobalErrorHandler, outside an order: with the OrderAccumulator paused the 5 s of the
-    // HttpClient run out and GET /api/exposures answers 503.
+    // CA-31 and decision 13 on the API: with the OrderAccumulator paused the OrderGenerator still reads the exposure and
+    // the orders from the PostgreSQL; only the order sending depends on the OrderAccumulator.
     [Fact]
-    public async Task OrderGenerator_503_without_orderaccumulator_answers_and_logs_the_trace_id_of_the_real_tracer()
+    public async Task With_the_orderaccumulator_paused_exposures_and_orders_still_answer_from_postgres()
     {
-        const string expectedProblemType = "urn:base-investimentos:problem:order-accumulator-unavailable";
-        string unavailableTraceId;
+        HttpStatusCode exposuresStatus;
+        HttpStatusCode ordersPageStatus;
+        string[] exposureSymbols;
+        int ordersPageNumber;
         await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "pause", "orderaccumulator");
         try
         {
-            using var unavailableResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/exposures");
-            unavailableTraceId = await ReadProblemTraceIdAsync(unavailableResponse, HttpStatusCode.ServiceUnavailable, expectedProblemType);
+            using var exposuresResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/exposures");
+            exposuresStatus = exposuresResponse.StatusCode;
+            exposureSymbols = ReadSuccessData(await exposuresResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("exposures").EnumerateArray()
+                .Select(symbolExposureRow => symbolExposureRow.GetProperty("symbol").GetString()!).ToArray();
+            using var ordersPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=1");
+            ordersPageStatus = ordersPageResponse.StatusCode;
+            ordersPageNumber = ReadSuccessData(await ordersPageResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("page").GetInt32();
         }
         finally
         {
             await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "unpause", "orderaccumulator");
         }
 
-        await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", unavailableTraceId, "Warning", "Expected error in request.", expectedProblemType);
+        Assert.Equal((HttpStatusCode.OK, HttpStatusCode.OK), (exposuresStatus, ordersPageStatus));
+        Assert.Equal(new[] { "PETR4", "VALE3", "VIIA4" }, exposureSymbols);
+        Assert.Equal(1, ordersPageNumber);
     }
 
-    // The OrderAccumulator port is not open on the host: the request leaves from inside its container. The 400 of the
-    // page comes from the problem writer, without exception.
+    // The exception path of the OrderGenerator handler, outside an order: with the Postgres stopped the page read fails
+    // and the 500 leaves one Error line in the trace the answer carries.
     [Fact]
-    public async Task OrderAccumulator_400_answers_and_logs_the_trace_id_of_the_real_tracer()
-    {
-        const string expectedProblemType = "urn:base-investimentos:problem:invalid-page";
-        var (invalidPageStatus, invalidPageProblem) = await RequestOrderAccumulatorFromInsideItsContainerAsync("/api/orders?page=0");
-        Assert.Equal(400, invalidPageStatus);
-        Assert.Equal(expectedProblemType, invalidPageProblem.GetProperty("type").GetString());
-        var invalidPageTraceId = invalidPageProblem.GetProperty("traceId").GetString()!;
-        Assert.Matches("^[0-9a-f]{32}$", invalidPageTraceId);
-
-        await AssertSingleErrorLineCarriesTheTraceIdAsync("orderaccumulator", invalidPageTraceId, "Warning", "Expected error in request.", expectedProblemType);
-    }
-
-    // The exception path of the OrderAccumulator GlobalErrorHandler: with the Postgres stopped the page read fails and
-    // the 500 leaves one Error line in the trace the answer carries.
-    [Fact]
-    public async Task OrderAccumulator_500_without_postgres_answers_and_logs_the_trace_id_of_the_real_tracer()
+    public async Task OrderGenerator_500_without_postgres_answers_and_logs_the_trace_id_of_the_real_tracer()
     {
         const string expectedProblemType = "urn:base-investimentos:problem:internal-error";
-        int ordersPageStatus;
-        JsonElement ordersPageProblem;
+        string ordersPageTraceId;
         await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "stop", "postgres");
         try
         {
-            (ordersPageStatus, ordersPageProblem) = await RequestOrderAccumulatorFromInsideItsContainerAsync("/api/orders?page=1");
+            using var ordersPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=1");
+            ordersPageTraceId = await ReadProblemTraceIdAsync(ordersPageResponse, HttpStatusCode.InternalServerError, expectedProblemType);
         }
         finally
         {
@@ -396,12 +401,81 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
             await WaitForOrdersPageToAnswerAsync();
         }
 
-        Assert.Equal(500, ordersPageStatus);
-        Assert.Equal(expectedProblemType, ordersPageProblem.GetProperty("type").GetString());
-        var ordersPageTraceId = ordersPageProblem.GetProperty("traceId").GetString()!;
-        Assert.Matches("^[0-9a-f]{32}$", ordersPageTraceId);
+        await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", ordersPageTraceId, "Error", "Unexpected application error.", expectedProblemType);
+    }
 
-        await AssertSingleErrorLineCarriesTheTraceIdAsync("orderaccumulator", ordersPageTraceId, "Error", "Unexpected application error.", expectedProblemType);
+    // CA-7 and CA-17: the exposure lives only in the database. Near the limit the next big sale is rejected; after
+    // DELETE /api/orders on the OrderGenerator the exposure is zero and the OrderAccumulator accepts the same big sale.
+    [Fact]
+    public async Task Delete_on_the_OrderGenerator_zeroes_the_exposure_the_OrderAccumulator_decides_with()
+    {
+        await DeleteAllOrdersThroughTheOrderGeneratorAsync();
+        try
+        {
+            var firstBigSale = await PostOrderAsync("VIIA4", "sell", 99999, 999.99m);
+            Assert.Equal("accepted", firstBigSale.GetProperty("status").GetString());
+            var (secondBigSale, _) = await PostOrderReadingTheMessageAsync("VIIA4", "sell", 99999, 999.99m);
+            Assert.Equal("rejected", secondBigSale.GetProperty("status").GetString());
+
+            await DeleteAllOrdersThroughTheOrderGeneratorAsync();
+            Assert.Equal([0m, 0m, 0m], await ReadSymbolExposuresAsync());
+            var ordersPageAfterDeletion = ReadSuccessData(await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/orders?page=1"));
+            Assert.Equal(0, ordersPageAfterDeletion.GetProperty("total").GetInt64());
+
+            var bigSaleAfterDeletion = await PostOrderAsync("VIIA4", "sell", 99999, 999.99m);
+            Assert.Equal("accepted", bigSaleAfterDeletion.GetProperty("status").GetString());
+            Assert.Equal(-99_998_000.01m, await ReadSymbolExposureAsync("VIIA4"));
+        }
+        finally
+        {
+            await DeleteAllOrdersThroughTheOrderGeneratorAsync();
+        }
+    }
+
+    // CA-42 and decision 19: the delete runs on the OrderGenerator and the decisions on the OrderAccumulator, two
+    // processes, with no lock in memory between them. With orders and a delete at the same time, repeated, at the end
+    // the exposure of each symbol is the sum of the accepted orders that stayed stored.
+    [Fact]
+    public async Task Delete_and_orders_at_the_same_time_end_with_the_exposure_equal_to_the_stored_accepted_orders()
+    {
+        const int ConcurrencyRounds = 5;
+        const int OrdersPerRound = 30;
+        string[] roundSymbols = ["PETR4", "VALE3", "VIIA4"];
+        var roundRandom = new Random(4242);
+        try
+        {
+            for (var concurrencyRound = 1; concurrencyRound <= ConcurrencyRounds; concurrencyRound++)
+            {
+                var roundOrders = Enumerable.Range(0, OrdersPerRound).Select(orderIndex => new
+                {
+                    symbol = roundSymbols[orderIndex % roundSymbols.Length],
+                    side = roundRandom.Next(2) == 0 ? "buy" : "sell",
+                    quantity = orderIndex % 5 == 0 ? 99999 : roundRandom.Next(1, 1000),
+                    price = orderIndex % 5 == 0 ? 999.99m : 10.01m
+                }).ToList();
+
+                var roundOrderCalls = roundOrders.Select(async roundOrder =>
+                {
+                    using var orderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync("/api/orders", roundOrder);
+                    return orderResponse.StatusCode;
+                }).ToList();
+                await Task.Delay(TimeSpan.FromMilliseconds(roundRandom.Next(20, 200)));
+                using var roundDeletionResponse = await composeUnderTest.OrderGeneratorHttp.DeleteAsync("/api/orders");
+                var roundOrderStatuses = await Task.WhenAll(roundOrderCalls);
+
+                Assert.Equal(HttpStatusCode.NoContent, roundDeletionResponse.StatusCode);
+                Assert.All(roundOrderStatuses, roundOrderStatus => Assert.Equal(HttpStatusCode.OK, roundOrderStatus));
+                var acceptedOrdersExposureBySymbol = await ReadStoredAcceptedOrdersExposureBySymbolAsync();
+                var symbolExposures = await ReadSymbolExposuresAsync();
+                Assert.True(
+                    roundSymbols.Select(roundSymbol => acceptedOrdersExposureBySymbol.GetValueOrDefault(roundSymbol)).SequenceEqual(symbolExposures),
+                    $"round {concurrencyRound}: stored accepted orders {string.Join(" ", acceptedOrdersExposureBySymbol)}, exposure {string.Join(" ", symbolExposures)}");
+            }
+        }
+        finally
+        {
+            await DeleteAllOrdersThroughTheOrderGeneratorAsync();
+        }
     }
 
     private static async Task<string> ReadProblemTraceIdAsync(HttpResponseMessage apiErrorResponse, HttpStatusCode expectedHttpStatus, string expectedProblemType)
@@ -426,14 +500,28 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal(apiErrorTraceId, apiErrorLine.ReadLogField("dd_trace_id"));
     }
 
-    // The aspnet image has no curl: the GET goes by the /dev/tcp of bash, to the 8081 of the OrderAccumulator.
-    private async Task<(int HttpStatus, JsonElement Body)> RequestOrderAccumulatorFromInsideItsContainerAsync(string pathAndQuery)
+    private async Task DeleteAllOrdersThroughTheOrderGeneratorAsync()
     {
-        var rawHttpResponse = await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "bash", "-c",
-            $"exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET {pathAndQuery} HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && cat <&3");
-        var httpStatus = int.Parse(rawHttpResponse.Split(' ', 3)[1]);
-        using var bodyDocument = JsonDocument.Parse(rawHttpResponse[rawHttpResponse.IndexOf('{')..]);
-        return (httpStatus, bodyDocument.RootElement.Clone());
+        using var ordersDeletionResponse = await composeUnderTest.OrderGeneratorHttp.DeleteAsync("/api/orders");
+        Assert.Equal(HttpStatusCode.NoContent, ordersDeletionResponse.StatusCode);
+    }
+
+    private async Task<decimal[]> ReadSymbolExposuresAsync()
+    {
+        var exposuresBody = ReadSuccessData(await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures"));
+        return exposuresBody.GetProperty("exposures").EnumerateArray().Select(symbolExposureRow => symbolExposureRow.GetProperty("exposure").GetDecimal()).ToArray();
+    }
+
+    // The Postgres port is not open on the host: the sum is read by psql inside its container, straight from the orders table.
+    private async Task<Dictionary<string, decimal>> ReadStoredAcceptedOrdersExposureBySymbolAsync()
+    {
+        var acceptedOrdersExposureRows = await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", "postgres",
+            "psql", "-U", "flowa", "-d", "flowa", "-At", "-F", ";", "-c",
+            "SELECT symbol, sum(CASE WHEN side = '1' THEN price * quantity ELSE -(price * quantity) END) FROM orders WHERE accepted GROUP BY symbol");
+        return acceptedOrdersExposureRows
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(acceptedOrdersExposureRow => acceptedOrdersExposureRow.Split(';'))
+            .ToDictionary(symbolAndExposure => symbolAndExposure[0], symbolAndExposure => decimal.Parse(symbolAndExposure[1], System.Globalization.CultureInfo.InvariantCulture));
     }
 
     // The tests after this one send orders, which the OrderAccumulator stores in the Postgres.

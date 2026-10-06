@@ -128,7 +128,8 @@ public sealed class ComposeFixture : IAsyncLifetime
     }
 
     // The OrderAccumulator has no healthcheck, so `up --force-recreate --wait` only waits for the new container to run.
-    // Ready means the new container logged the OrderGenerator logon and its HTTP answers through the OrderGenerator.
+    // Ready means the new container logged the OrderGenerator logon: FIX is the only way the OrderGenerator reaches it
+    // (the exposure and the orders are read straight from the PostgreSQL).
     // The bound is the same as the first start of the compose (AppStartTimeout). Nothing is retried once ready: a
     // container that restarted fails here, with the logs of both services, instead of breaking the next test.
     public async Task WaitForRecreatedOrderAccumulatorReadyAsync()
@@ -136,7 +137,7 @@ public sealed class ComposeFixture : IAsyncLifetime
         var orderAccumulatorReadyDeadline = DateTime.UtcNow + AppStartTimeout;
         while (DateTime.UtcNow < orderAccumulatorReadyDeadline)
         {
-            if (await IsOrderGeneratorLogonLoggedByOrderAccumulatorAsync() && await IsOrderAccumulatorAnsweringThroughOrderGeneratorAsync())
+            if (await IsOrderGeneratorLogonLoggedByOrderAccumulatorAsync())
             {
                 var orderAccumulatorRestartCount = await ReadOrderAccumulatorRestartCountAsync();
                 if (orderAccumulatorRestartCount != 0)
@@ -151,12 +152,6 @@ public sealed class ComposeFixture : IAsyncLifetime
     private async Task<bool> IsOrderGeneratorLogonLoggedByOrderAccumulatorAsync() =>
         FixLog.ParseFixMessages(await ReadServiceStdoutAsync("orderaccumulator"))
             .Any(fixMessage => fixMessage.ReadFixTagValue(35) == "A" && fixMessage.ReadFixTagValue(49) == "ORDERGENERATOR");
-
-    private async Task<bool> IsOrderAccumulatorAnsweringThroughOrderGeneratorAsync()
-    {
-        using var exposuresResponse = await OrderGeneratorHttp.GetAsync("/api/exposures");
-        return exposuresResponse.StatusCode == System.Net.HttpStatusCode.OK;
-    }
 
     private async Task<int> ReadOrderAccumulatorRestartCountAsync()
     {
