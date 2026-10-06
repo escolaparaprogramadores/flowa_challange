@@ -1,11 +1,12 @@
-export const MAX_TYPED_PRICE_IN_CENTS = 99_999;
-export const MAX_TYPED_QUANTITY = 99_999;
+import { MAX_PRICE_EXCLUSIVE_IN_CENTS, MAX_QUANTITY_EXCLUSIVE } from '../order-validation/orderValidation';
+
+export const MAX_TYPED_PRICE_IN_CENTS = MAX_PRICE_EXCLUSIVE_IN_CENTS - 1;
+export const MAX_TYPED_QUANTITY = MAX_QUANTITY_EXCLUSIVE - 1;
 
 const NON_DIGIT_CHARACTERS = /\D/g;
 
-// Bank-style mask: every digit of the new text is read as cents, so typing
-// 2, 5, 0, 0 fills from the right (0,02 → 0,25 → 2,50 → 25,00). A change that would
-// pass the maximum is refused and the previous price stays.
+// Reading every digit of the new text, and not only the key just pressed, keeps paste and
+// fill('10,00') working with the bank-style mask.
 export function readTypedPriceInCents(typedPriceText: string, previousPriceInCents: number): number {
   const typedPriceDigits = typedPriceText.replace(NON_DIGIT_CHARACTERS, '');
   if (typedPriceDigits === '') return 0;

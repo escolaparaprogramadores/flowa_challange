@@ -1,9 +1,11 @@
+import type { OrderToSend } from '../../services/ordersService';
+
 export const ORDER_TICKET_SYMBOLS = ['PETR4', 'VALE3', 'VIIA4'] as const;
 export type OrderTicketSymbol = (typeof ORDER_TICKET_SYMBOLS)[number];
 export type OrderSide = 'buy' | 'sell';
 
 export const MAX_QUANTITY_EXCLUSIVE = 100_000;
-const MAX_PRICE_EXCLUSIVE_IN_CENTS = 100_000;
+export const MAX_PRICE_EXCLUSIVE_IN_CENTS = 100_000;
 
 // Brazilian format: a comma separates the cents and a dot only shows up as the
 // thousands separator in groups of three ("1.000" is one thousand, not one point zero).
@@ -69,4 +71,41 @@ export function validateOrderPrice(typedPrice: string): PriceValidation {
   if (priceInCents <= 0) return { errorMessage: 'O preço deve ser maior que zero.' };
   if (priceInCents >= MAX_PRICE_EXCLUSIVE_IN_CENTS) return { errorMessage: 'O preço deve ser menor que 1.000,00.' };
   return { acceptedPriceInCents: priceInCents };
+}
+
+// The + stops at the largest quantity the normal mode accepts.
+export function canIncreaseQuantity(typedQuantity: string): boolean {
+  return (parseTypedWholeQuantity(typedQuantity) ?? 0) < MAX_QUANTITY_EXCLUSIVE - 1;
+}
+
+export type OrderTicketFieldErrors = { quantityError?: string; priceError?: string };
+
+export type OrderTicketEntry =
+  | { mode: 'normal'; symbol: OrderTicketSymbol; side: OrderSide; typedQuantity: string; typedPrice: string }
+  | { mode: 'test'; symbolText: string; side: OrderSide; quantityText: string; priceText: string };
+
+export type OrderTicketSubmission =
+  | { orderToSend: OrderToSend; fieldErrors?: undefined }
+  | { orderToSend?: undefined; fieldErrors: OrderTicketFieldErrors };
+
+// The test mode checks nothing and hands the texts over exactly as typed: the server is the one that decides.
+export function prepareOrderTicketSubmission(orderTicketEntry: OrderTicketEntry): OrderTicketSubmission {
+  if (orderTicketEntry.mode === 'test') {
+    const { symbolText, side, quantityText, priceText } = orderTicketEntry;
+    return { orderToSend: { mode: 'test', symbol: symbolText, side, quantityText, priceText } };
+  }
+  const quantityValidation = validateOrderQuantity(orderTicketEntry.typedQuantity);
+  const priceValidation = validateOrderPrice(orderTicketEntry.typedPrice);
+  if (quantityValidation.acceptedQuantity === undefined || priceValidation.acceptedPriceInCents === undefined) {
+    return { fieldErrors: { quantityError: quantityValidation.errorMessage, priceError: priceValidation.errorMessage } };
+  }
+  return {
+    orderToSend: {
+      mode: 'normal',
+      symbol: orderTicketEntry.symbol,
+      side: orderTicketEntry.side,
+      quantity: quantityValidation.acceptedQuantity,
+      priceInCents: priceValidation.acceptedPriceInCents,
+    },
+  };
 }

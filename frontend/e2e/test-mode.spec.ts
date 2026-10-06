@@ -143,6 +143,56 @@ test('CA-7: the test mode symbol field has a yellow border and a yellow ring on 
   await expect.poll(async () => (await readComputedStyle(testModeSymbolField, ['box-shadow']))['box-shadow']).toBe(YELLOW_FOCUS_RING);
 });
 
+// The border is yellow with and without focus, so the keyboard focus has to show as a solid outline (RNF-02).
+test('CA-7 (RNF-02): with the keyboard, the focus of the test mode symbol field shows as a solid yellow outline, absent without focus', async ({ page }) => {
+  await locateSymbolButton(page, 'PETR4').dblclick();
+  const testModeSymbolField = locateTestModeSymbolField(page);
+  const decreaseQuantityButton = locateOrderTicketForm(page).getByRole('button', { name: 'Diminuir quantidade' });
+  await decreaseQuantityButton.focus();
+  await expect.poll(async () => (await readComputedStyle(testModeSymbolField, ['outline-style']))['outline-style']).toBe('none');
+  await page.keyboard.press('Shift+Tab');
+  await expect(testModeSymbolField).toBeFocused();
+  const focusOutline = await readComputedStyle(testModeSymbolField, ['outline-style', 'outline-color', 'outline-width']);
+  expect(focusOutline).toMatchObject({ 'outline-style': 'solid', 'outline-color': WARNING_TEXT_COLOR });
+  // With the page at 90% the browser snaps the 2px outline to the screen pixel (1.11px), as in order-ticket.spec.ts.
+  expect(parseFloat(focusOutline['outline-width'])).toBeGreaterThanOrEqual(1);
+  const cardColor = (await readComputedStyle(locateOrderTicketForm(page), ['background-color']))['background-color'];
+  expect(calculateWcagContrast(focusOutline['outline-color'], cardColor)).toBeGreaterThanOrEqual(3);
+});
+
+test('CA-7: in test mode the empty price shows no 0,00 hint, because an empty price is sent empty', async ({ page }) => {
+  const priceField = locateOrderTicketForm(page).getByLabel('Preço por ação (R$)');
+  await expect(priceField).toHaveAttribute('placeholder', '0,00');
+  await locateSymbolButton(page, 'PETR4').dblclick();
+  await priceField.fill('');
+  await expect(priceField).toHaveValue('');
+  await expect(priceField).not.toHaveAttribute('placeholder');
+});
+
+const LONGEST_TEST_MODE_QUANTITY = '123456789012345';
+const LONGEST_TEST_MODE_PRICE = '99999999,123456';
+
+for (const viewportWidth of [375, 860, 1440, 1920]) {
+  test(`CA-7 (RNF-03): at ${viewportWidth} px the test mode with very long numbers fits in the ticket, without horizontal scrolling`, async ({ page }) => {
+    await page.setViewportSize({ width: viewportWidth, height: 1000 });
+    await locateSymbolButton(page, 'PETR4').dblclick();
+    await locateTestModeSymbolField(page).fill('ITUB4');
+    await locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true }).fill(LONGEST_TEST_MODE_QUANTITY);
+    await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill(LONGEST_TEST_MODE_PRICE);
+    await expect(page.getByTestId('total-estimado')).not.toHaveText('—');
+    await expect(locateTestModeBadge(page)).toBeVisible();
+    await expect(locateTestModeNotice(page)).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewportWidth);
+    const orderTicketBox = (await locateOrderTicketForm(page).boundingBox())!;
+    for (const [summaryName, summaryValue] of [['Preço por ação', locateSummaryPrice(page)], ['Valor total estimado', page.getByTestId('total-estimado')]] as const) {
+      const summaryBox = (await summaryValue.boundingBox())!;
+      expect(summaryBox.x, `${summaryName}: left`).toBeGreaterThanOrEqual(orderTicketBox.x);
+      expect(summaryBox.x + summaryBox.width, `${summaryName}: right`).toBeLessThanOrEqual(orderTicketBox.x + orderTicketBox.width);
+      expect(await summaryValue.evaluate((summaryOnPage) => summaryOnPage.scrollWidth <= summaryOnPage.clientWidth), `${summaryName}: whole text`).toBe(true);
+    }
+  });
+}
+
 test('CA-7: in test mode symbol, quantity and price take any text, and the summary follows without rounding', async ({ page }) => {
   await locateSymbolButton(page, 'PETR4').dblclick();
   await locateTestModeSymbolField(page).fill('ITUB4');
@@ -233,6 +283,19 @@ test('CA-26: in test mode the screen blocks nothing and the request leaves with 
   const createOrderRequest = page.waitForRequest((httpRequest) => httpRequest.method() === 'POST' && new URL(httpRequest.url()).pathname === CREATE_ORDER_ROUTE);
   await locateOrderTicketForm(page).getByRole('button', { name: 'Enviar ordem de compra' }).click();
   expect((await createOrderRequest).postDataJSON()).toEqual({ symbol: 'ITUB4', side: 'buy', quantity: '1.5', price: '10.005' });
+  await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveCount(0);
+  await rereadAfterSend;
+});
+
+test('CA-26: in test mode spaces at the ends are kept, only the decimal comma becomes a dot', async ({ page }) => {
+  await locateSymbolButton(page, 'PETR4').dblclick();
+  await locateTestModeSymbolField(page).fill(' ITUB4 ');
+  await locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true }).fill(' 1,5 ');
+  await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill(' 10,005 ');
+  const rereadAfterSend = waitForRereadAfterSend(page);
+  const createOrderRequest = page.waitForRequest((httpRequest) => httpRequest.method() === 'POST' && new URL(httpRequest.url()).pathname === CREATE_ORDER_ROUTE);
+  await locateOrderTicketForm(page).getByRole('button', { name: 'Enviar ordem de compra' }).click();
+  expect((await createOrderRequest).postDataJSON()).toEqual({ symbol: ' ITUB4 ', side: 'buy', quantity: ' 1.5 ', price: ' 10.005 ' });
   await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveCount(0);
   await rereadAfterSend;
 });

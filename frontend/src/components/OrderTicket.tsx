@@ -3,10 +3,11 @@ import { ShieldIcon } from './Icons';
 import {
   MAX_QUANTITY_EXCLUSIVE,
   ORDER_TICKET_SYMBOLS,
+  canIncreaseQuantity,
   parseTypedWholeQuantity,
-  validateOrderPrice,
-  validateOrderQuantity,
+  prepareOrderTicketSubmission,
   type OrderSide,
+  type OrderTicketFieldErrors,
   type OrderTicketSymbol,
 } from '../lib/order-validation/orderValidation';
 import {
@@ -24,8 +25,6 @@ type OrderTicketProps = {
   onSendOrder: (orderToSend: OrderToSend) => void;
 };
 
-type OrderTicketFieldErrors = { quantityError?: string; priceError?: string };
-
 type TestModeTexts = { symbolText: string; quantityText: string; priceText: string };
 
 const TEST_MODE_NOTICE = 'Modo de teste: a tela não confere os campos e envia como está. Duplo clique no símbolo para sair.';
@@ -41,10 +40,8 @@ export function OrderTicket({ isSendingOrder, onSendOrder }: OrderTicketProps) {
   const isTestModeOn = testModeTexts !== undefined;
 
   const shownPriceText = formatPriceInCentsForInput(typedPriceInCents);
-  const quantityValidation = validateOrderQuantity(typedQuantityDigits);
-  const priceValidation = validateOrderPrice(shownPriceText);
   const typedWholeQuantity = parseTypedWholeQuantity(typedQuantityDigits);
-  const isQuantityAtMaximum = !isTestModeOn && (typedWholeQuantity ?? 0) >= MAX_QUANTITY_EXCLUSIVE - 1;
+  const isQuantityAtMaximum = !isTestModeOn && !canIncreaseQuantity(typedQuantityDigits);
 
   const testModePrice = testModeTexts && readTestModeNumberText(testModeTexts.priceText);
   const testModeQuantity = testModeTexts && readTestModeNumberText(testModeTexts.quantityText);
@@ -81,16 +78,13 @@ export function OrderTicket({ isSendingOrder, onSendOrder }: OrderTicketProps) {
   function submitOrderTicket(orderTicketSubmitEvent: FormEvent<HTMLFormElement>) {
     orderTicketSubmitEvent.preventDefault();
     if (isSendingOrder) return;
-    if (testModeTexts) {
-      onSendOrder({ mode: 'test', symbol: testModeTexts.symbolText, side: orderSide, quantityText: testModeTexts.quantityText, priceText: testModeTexts.priceText });
-      return;
-    }
-    setOrderTicketFieldErrors({
-      quantityError: quantityValidation.errorMessage,
-      priceError: priceValidation.errorMessage,
-    });
-    if (quantityValidation.acceptedQuantity === undefined || priceValidation.acceptedPriceInCents === undefined) return;
-    onSendOrder({ mode: 'normal', symbol: orderSymbol, side: orderSide, quantity: quantityValidation.acceptedQuantity, priceInCents: priceValidation.acceptedPriceInCents });
+    const orderTicketSubmission = prepareOrderTicketSubmission(
+      testModeTexts
+        ? { mode: 'test', side: orderSide, ...testModeTexts }
+        : { mode: 'normal', symbol: orderSymbol, side: orderSide, typedQuantity: typedQuantityDigits, typedPrice: shownPriceText },
+    );
+    setOrderTicketFieldErrors(orderTicketSubmission.fieldErrors ?? {});
+    if (orderTicketSubmission.orderToSend) onSendOrder(orderTicketSubmission.orderToSend);
   }
 
   const { quantityError, priceError } = orderTicketFieldErrors;
@@ -180,7 +174,7 @@ export function OrderTicket({ isSendingOrder, onSendOrder }: OrderTicketProps) {
           className="text-input numeric"
           inputMode={isTestModeOn ? 'text' : 'numeric'}
           autoComplete="off"
-          placeholder="0,00"
+          placeholder={isTestModeOn ? undefined : '0,00'}
           value={testModeTexts ? testModeTexts.priceText : shownPriceText}
           aria-invalid={priceError ? true : undefined}
           aria-describedby={priceError ? 'price-error' : undefined}
