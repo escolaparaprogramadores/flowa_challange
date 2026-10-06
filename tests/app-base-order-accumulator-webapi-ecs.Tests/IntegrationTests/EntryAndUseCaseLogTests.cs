@@ -46,6 +46,22 @@ public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orde
         Assert.Equal([GaugeCategory, ProgramCategory], appLogLines.Select(appLogLine => appLogLine.Category).Order(StringComparer.Ordinal));
     }
 
+    // Regression of the F4 review finding, applied to the Accumulator: the request line carries the route template, never
+    // the text the caller typed, and a path no route answers writes only its 404 Warning.
+    [Fact]
+    public async Task Unknown_api_path_writes_no_request_line_and_never_copies_the_caller_text()
+    {
+        var appLogLines = await RunAppAndReadAppLogLinesAsync(async orderAccumulatorTestApp =>
+            Assert.Equal(HttpStatusCode.NotFound, (await orderAccumulatorTestApp.CreateClient().GetAsync("/api/injected-caller-text?x=forged")).StatusCode));
+
+        var requestLines = WithoutStartLines(appLogLines);
+        var notFoundLine = Assert.Single(requestLines);
+        Assert.Equal(
+            ("Warning", "Base.OrderAccumulator.Entrypoint.ErrorHandling.GlobalErrorHandler", "Expected error in request."),
+            (notFoundLine.LogLevel, notFoundLine.Category, notFoundLine.Message));
+        Assert.DoesNotContain(appLogLines, appLogLine => appLogLine.Category == RequestReceivedCategory);
+    }
+
     [Fact]
     public async Task Order_list_request_writes_one_request_line_and_one_use_case_line()
     {
@@ -101,11 +117,14 @@ public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orde
         Assert.All(requestLines, requestLine => Assert.Matches("^[0-9a-f]{16}$", requestLine.ReadLogField("SpanId")));
     }
 
-    private static void AssertRequestReceivedLine(JsonLogLine requestReceivedLine, string expectedMethod, string expectedPath) =>
+    private static void AssertRequestReceivedLine(JsonLogLine requestReceivedLine, string expectedMethod, string expectedRoute)
+    {
         Assert.Equal(
-            ("Information", RequestReceivedCategory, "Request received.", expectedMethod, expectedPath),
+            ("Information", RequestReceivedCategory, "Request received.", expectedMethod, expectedRoute),
             (requestReceivedLine.LogLevel, requestReceivedLine.Category, requestReceivedLine.Message,
-                requestReceivedLine.ReadLogField("Method"), requestReceivedLine.ReadLogField("Path")));
+                requestReceivedLine.ReadLogField("Method"), requestReceivedLine.ReadLogField("Route")));
+        Assert.Null(requestReceivedLine.ReadLogField("Path"));
+    }
 
     private static List<JsonLogLine> WithoutStartLines(IReadOnlyList<JsonLogLine> appLogLines) =>
         appLogLines.Where(appLogLine => appLogLine.Category is not (ProgramCategory or GaugeCategory)).ToList();

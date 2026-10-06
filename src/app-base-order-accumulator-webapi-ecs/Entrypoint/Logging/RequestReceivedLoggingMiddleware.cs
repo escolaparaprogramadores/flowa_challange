@@ -1,4 +1,5 @@
 using Base.OrderAccumulator.Commons.Logging;
+using Base.OrderAccumulator.Entrypoint.ErrorHandling;
 
 namespace Base.OrderAccumulator.Entrypoint.Logging;
 
@@ -19,8 +20,9 @@ public sealed class RequestReceivedLoggingMiddleware
     {
         ArgumentNullException.ThrowIfNull(httpContext);
 
-        if (httpContext.Request.Path.StartsWithSegments(ApiRoutesPrefix, StringComparison.OrdinalIgnoreCase))
-            requestLogger.LogInformation("Request received.", new { Method = httpContext.Request.Method, Path = httpContext.Request.Path.Value });
+        if (httpContext.Request.Path.StartsWithSegments(ApiRoutesPrefix, StringComparison.OrdinalIgnoreCase)
+            && ApiProblemDetailsExtensions.ReadRouteTemplate(httpContext) is { } matchedApiRoute)
+            requestLogger.LogInformation("Request received.", new { Method = httpContext.Request.Method, Route = matchedApiRoute });
 
         return nextMiddleware(httpContext);
     }
