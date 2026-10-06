@@ -1,5 +1,4 @@
-using Base.OrderGenerator.Commons;
-using Base.OrderGenerator.Infrastructure;
+using Base.OrderGenerator.Infrastructure.Orders.Adapters;
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
@@ -118,7 +117,7 @@ public sealed class ExposureProxyTests
         JsonElement unexpectedErrorProblem;
         await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort()).WithWebHostBuilder(orderGeneratorWebHostBuilder =>
             orderGeneratorWebHostBuilder.ConfigureTestServices(testServices => testServices
-                .AddHttpClient<IOrderAccumulatorHttpClient, OrderAccumulatorHttpClient>(OrderAccumulatorHttpClient.OrderAccumulatorHttpClientName)
+                .AddHttpClient(HttpStoredOrdersAdapter.OrderAccumulatorApiName)
                 .ConfigurePrimaryHttpMessageHandler(() => new ExplodingAccumulatorHandler()))))
         {
             using var orderGeneratorClient = orderGeneratorFactory.CreateClient();

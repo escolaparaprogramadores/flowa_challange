@@ -13,7 +13,7 @@ namespace Base.OrderGenerator.Tests;
 // Each test builds its own host inside the capture, because the console logger keeps the stdout it found.
 public sealed class OrderLogTests
 {
-    private const string GlobalErrorHandlerCategory = "Base.OrderGenerator.Entrypoint.Errors.GlobalErrorHandler";
+    private const string GlobalErrorHandlerCategory = "Base.OrderGenerator.Entrypoint.ErrorHandling.GlobalErrorHandler";
     private const string FixSessionLogCategory = "Base.OrderGenerator.Infrastructure.Fix.FixSessionLog";
     private const string ValidOrderJson = """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.50}""";
 
@@ -123,7 +123,7 @@ public sealed class OrderLogTests
         Assert.Empty(unexpectedErrorProblem.GetProperty("errors").EnumerateArray());
         var unexpectedAnswerError = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Error", "Unexpected application error.",
             "urn:base-investimentos:problem:internal-error", "POST", "/api/orders", answeredClOrdId);
-        Assert.StartsWith("Base.OrderGenerator.Commons.UnexpectedExecutionReportException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
+        Assert.StartsWith("Base.OrderGenerator.Domain.Orders.Exceptions.UnexpectedExecutionReportException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
     }
 
     // Route is the route template, not the path the caller typed: the path can vary (case), the template cannot.
