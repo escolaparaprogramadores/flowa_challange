@@ -6,8 +6,8 @@ const generatorPort = 8080 + Number(process.env.E2E_PORTA_DESLOCO ?? 0);
 
 export default defineConfig({
   testDir: './e2e',
-  // The scenario with the OrderAccumulator stopped has its own config (playwright.without-accumulator.config.ts).
-  testIgnore: ['**/without-accumulator.spec.ts'],
+  // The scenario with the OrderAccumulator stopped and the one that pauses the database have their own configs.
+  testIgnore: ['**/without-accumulator.spec.ts', '**/slow-answer.spec.ts'],
   fullyParallel: false,
   workers: 1,
   retries: 0,
