@@ -11,4 +11,7 @@ internal sealed class FixOptions
 
     [Range(1, 65535)]
     public int AcceptorPort { get; init; }
+
+    [Range(1, 9)]
+    public int ExecutionReportTimeoutSeconds { get; init; } = 5;
 }

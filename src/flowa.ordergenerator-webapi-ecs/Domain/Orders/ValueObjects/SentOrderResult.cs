@@ -35,8 +35,12 @@ public sealed record SentOrderResult
         {
             case SentOrderStatus.Accepted or SentOrderStatus.Rejected:
                 return;
+            case SentOrderStatus.RejectedByFixReject:
+                throw new OrderRejectedByFixRejectException(ClOrdId, RejectionText ?? RejectedOrderWithoutTextMessage);
             case SentOrderStatus.NoLoggedOnSession:
                 throw new OrderNotAnsweredException(ClOrdId, OrderNotAnsweredException.FixSessionNotLoggedOnErrorCode);
+            case SentOrderStatus.FixSessionLost:
+                throw new OrderNotAnsweredException(ClOrdId, OrderNotAnsweredException.FixSessionLostErrorCode);
             case SentOrderStatus.ExecutionReportTimeout:
                 throw new OrderNotAnsweredException(ClOrdId, OrderNotAnsweredException.ExecutionReportTimeoutErrorCode);
             default:

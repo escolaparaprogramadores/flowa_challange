@@ -127,7 +127,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
         ReceivedOrders.Enqueue(receivedFixApplicationMessage);
         var strayExecutionReport = StrayExecutionReport(receivedFixApplicationMessage);
         if (strayExecutionReport is not null)
-            SendExecutionReport(strayExecutionReport, orderGeneratorFixSessionId);
+            SendAnswerToOrder(strayExecutionReport, orderGeneratorFixSessionId);
 
         var executionReport = ExecutionReportResponder(receivedFixApplicationMessage);
         if (executionReport is null)
@@ -135,16 +135,45 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
 
         var executionReportDelay = ExecutionReportDelay(receivedFixApplicationMessage);
         if (executionReportDelay == TimeSpan.Zero)
-            SendExecutionReport(executionReport, orderGeneratorFixSessionId);
+            SendAnswerToOrder(executionReport, orderGeneratorFixSessionId);
         else
             // Off the session thread, so the other orders keep arriving while this one waits.
-            _ = Task.Delay(executionReportDelay).ContinueWith(_ => SendExecutionReport(executionReport, orderGeneratorFixSessionId), TaskScheduler.Default);
+            _ = Task.Delay(executionReportDelay).ContinueWith(_ => SendAnswerToOrder(executionReport, orderGeneratorFixSessionId), TaskScheduler.Default);
     }
 
-    private void SendExecutionReport(Message executionReport, SessionID orderGeneratorFixSessionId)
+    // Session Reject (35=3) pointing at the sequence number of the received order.
+    public Message BuildSessionReject(Message receivedOrder, string? rejectText, int? sessionRejectReason)
     {
-        SentExecutionReports[executionReport.GetString(Tags.ClOrdID)] = executionReport;
-        Session.SendToTarget(executionReport, orderGeneratorFixSessionId);
+        var sessionReject = new QuickFix.FIX44.Reject(new RefSeqNum(receivedOrder.Header.GetULong(Tags.MsgSeqNum)));
+        if (rejectText is not null)
+            sessionReject.SetField(new Text(rejectText));
+        if (sessionRejectReason is not null)
+            sessionReject.SetField(new SessionRejectReason(sessionRejectReason.Value));
+        return sessionReject;
+    }
+
+    // BusinessMessageReject (35=j): by ClOrdID in BusinessRejectRefID (379) or, without it, by RefSeqNum (45).
+    public Message BuildBusinessMessageReject(Message receivedOrder, string? rejectText, int businessRejectReason, string? businessRejectRefId)
+    {
+        var businessMessageReject = new QuickFix.FIX44.BusinessMessageReject(new RefMsgType(MsgType.NEW_ORDER_D), new BusinessRejectReason(businessRejectReason));
+        if (businessRejectRefId is not null)
+            businessMessageReject.SetField(new BusinessRejectRefID(businessRejectRefId));
+        else
+            businessMessageReject.SetField(new RefSeqNum(receivedOrder.Header.GetULong(Tags.MsgSeqNum)));
+        if (rejectText is not null)
+            businessMessageReject.SetField(new Text(rejectText));
+        return businessMessageReject;
+    }
+
+    // Logout (35=5) sent right away; Session.Logout would only send it on the next session tick.
+    public bool SendLogoutToOrderGenerator() =>
+        Session.SendToTarget(new QuickFix.FIX44.Logout(), new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR"));
+
+    private void SendAnswerToOrder(Message orderAnswer, SessionID orderGeneratorFixSessionId)
+    {
+        if (orderAnswer.Header.GetString(Tags.MsgType) == MsgType.EXECUTION_REPORT)
+            SentExecutionReports[orderAnswer.GetString(Tags.ClOrdID)] = orderAnswer;
+        Session.SendToTarget(orderAnswer, orderGeneratorFixSessionId);
     }
 
     public void OnLogon(SessionID orderGeneratorFixSessionId) => _acceptorLogon.TrySetResult();
@@ -176,9 +205,12 @@ public static class OrderGeneratorTestHost
         return freeTcpPort;
     }
 
-    public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixAcceptorPort, string accumulatorBaseUrl = "http://127.0.0.1:1", string? orderGeneratorWebRoot = null) =>
+    public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixAcceptorPort, string accumulatorBaseUrl = "http://127.0.0.1:1",
+        string? orderGeneratorWebRoot = null, string? executionReportTimeoutSeconds = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(orderGeneratorWebHostBuilder =>
         {
+            if (executionReportTimeoutSeconds is not null)
+                orderGeneratorWebHostBuilder.UseSetting("Fix:ExecutionReportTimeoutSeconds", executionReportTimeoutSeconds);
             // In Development ASP.NET puts the project wwwroot (static web assets) in front of the test root;
             // with the screen build present, the real index.html would win. Production is how the app really runs.
             orderGeneratorWebHostBuilder.UseEnvironment(Environments.Production);
