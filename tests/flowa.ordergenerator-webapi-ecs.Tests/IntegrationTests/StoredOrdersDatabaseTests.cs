@@ -50,7 +50,7 @@ public sealed class StoredOrdersDatabaseTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task Orders_list_maps_the_stored_status_and_side_as_the_accumulator_did()
+    public async Task Orders_list_maps_the_stored_status_side_and_reject_reason_as_the_accumulator_does()
     {
         await _orderGeneratorPostgres.InsertStoredOrderAsync(new StoredOrderTestRow(
             "cl-rejected", "order-rejected", "exec-rejected", null, "2", 0m, 0m, false, "Símbolo inválido.", FirstOrderReceivedAt));
@@ -62,7 +62,7 @@ public sealed class StoredOrdersDatabaseTests : IAsyncLifetime, IDisposable
         var ordersPageDataMessage = await OrderApiTests.ReadSuccessDataMessageAsync(await orderGeneratorClient.GetAsync("/api/orders"));
 
         Assert.Equal(
-            """{"page":1,"pageSize":10,"total":2,"orders":[{"receivedAt":"2026-10-04T12:01:00Z","status":"rejected","symbol":"VALE3","side":null,"quantity":5,"price":1.25,"orderId":"order-unknown-side","clOrdId":"cl-unknown-side"},{"receivedAt":"2026-10-04T12:00:00Z","status":"rejected","symbol":null,"side":"sell","quantity":0,"price":0,"orderId":"order-rejected","clOrdId":"cl-rejected"}]}""",
+            """{"page":1,"pageSize":10,"total":2,"orders":[{"receivedAt":"2026-10-04T12:01:00Z","status":"rejected","symbol":"VALE3","side":null,"quantity":5,"price":1.25,"orderId":"order-unknown-side","clOrdId":"cl-unknown-side","rejectReason":"Lado inválido."},{"receivedAt":"2026-10-04T12:00:00Z","status":"rejected","symbol":null,"side":"sell","quantity":0,"price":0,"orderId":"order-rejected","clOrdId":"cl-rejected","rejectReason":"Símbolo inválido."}]}""",
             ordersPageDataMessage.GetProperty("data").GetRawText());
     }
 
@@ -448,7 +448,7 @@ public sealed class StoredOrdersDatabaseTests : IAsyncLifetime, IDisposable
         $$"""{"page":{{ordersPage}},"pageSize":10,"total":{{totalOrders}},"orders":[{{string.Join(",", orderNumbersNewestFirst.Select(BuildExpectedListedOrderJson))}}]}""";
 
     private static string BuildExpectedListedOrderJson(int orderNumber) =>
-        $$"""{"receivedAt":"2026-10-04T12:{{orderNumber:00}}:00Z","status":"accepted","symbol":"PETR4","side":"buy","quantity":100,"price":10.5,"orderId":"order-{{orderNumber}}","clOrdId":"cl-{{orderNumber}}"}""";
+        $$"""{"receivedAt":"2026-10-04T12:{{orderNumber:00}}:00Z","status":"accepted","symbol":"PETR4","side":"buy","quantity":100,"price":10.5,"orderId":"order-{{orderNumber}}","clOrdId":"cl-{{orderNumber}}","rejectReason":null}""";
 
     private sealed class OrderGeneratorLogCaptureProvider : ILoggerProvider
     {
