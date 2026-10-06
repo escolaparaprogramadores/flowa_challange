@@ -131,30 +131,6 @@ public sealed class OrderLogTests
         Assert.StartsWith("Flowa.OrderGenerator.Domain.Orders.Exceptions.UnexpectedExecutionReportException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
     }
 
-    // Route is the route template, not the path the caller typed: the path can vary (case), the template cannot.
-    [Theory]
-    [InlineData("GET", "/api/exposures", "/api/exposures")]
-    [InlineData("GET", "/api/orders?page=2", "/api/orders")]
-    [InlineData("DELETE", "/api/orders", "/api/orders")]
-    [InlineData("GET", "/API/Exposures", "/api/exposures")]
-    public async Task Forwarded_call_with_the_order_accumulator_down_logs_one_warning(string forwardedHttpMethod, string requestedPath, string expectedRouteTemplate)
-    {
-        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
-        var accumulatorBaseUrlWithNobodyListening = $"http://127.0.0.1:{OrderGeneratorTestHost.FindFreeTcpPort()}";
-        JsonElement unavailableProblem;
-        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), accumulatorBaseUrlWithNobodyListening))
-        {
-            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
-            var forwardedCallResponse = await orderGeneratorClient.SendAsync(new HttpRequestMessage(new HttpMethod(forwardedHttpMethod), requestedPath));
-            unavailableProblem = await OrderApiTests.ReadProblemDetailsAsync(forwardedCallResponse, HttpStatusCode.ServiceUnavailable);
-        }
-
-        // The support finds the log line by the traceId of the answer.
-        AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Warning", "Expected error in request.",
-            "urn:base-investimentos:problem:order-accumulator-unavailable", forwardedHttpMethod, expectedRouteTemplate,
-            unavailableProblem.GetProperty("traceId").GetString());
-    }
-
     // RF-10 without anybody listening to the order trace (decision 21: the ClOrdID is then a random GUID): the answer
     // and the log line still carry that ClOrdID, the one the OrderAccumulator received in tag 11.
     [Fact]

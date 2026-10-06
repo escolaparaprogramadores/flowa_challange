@@ -19,8 +19,6 @@ public sealed class OrderRepository : IOrderRepository
         WHERE cl_ord_id = @ClOrdId
         """;
 
-    private const string DeleteAllStoredOrdersSql = "DELETE FROM orders";
-
     private readonly IDatabase orderDatabase;
 
     public OrderRepository(IDatabase orderDatabase)
@@ -44,9 +42,6 @@ public sealed class OrderRepository : IOrderRepository
         var insertedOrders = await orderDatabase.ExecuteSqlCommandAsync(InsertOrderSql, ToOrderInsertParameters(answeredOrder), cancellationToken);
         return insertedOrders == 1;
     }
-
-    public async Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
-        await orderDatabase.ExecuteSqlCommandAsync(DeleteAllStoredOrdersSql, null, cancellationToken);
 
     private static object ToOrderInsertParameters(Order answeredOrder) => new
     {

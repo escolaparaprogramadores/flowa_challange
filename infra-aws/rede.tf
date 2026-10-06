@@ -137,15 +137,6 @@ resource "aws_vpc_security_group_ingress_rule" "accumulator_fix" {
   referenced_security_group_id = aws_security_group.generator.id
 }
 
-resource "aws_vpc_security_group_ingress_rule" "accumulator_http" {
-  security_group_id            = aws_security_group.accumulator.id
-  description                  = "GET /api/exposures repassado pelo generator"
-  ip_protocol                  = "tcp"
-  from_port                    = local.porta_http_do_accumulator
-  to_port                      = local.porta_http_do_accumulator
-  referenced_security_group_id = aws_security_group.generator.id
-}
-
 resource "aws_vpc_security_group_ingress_rule" "banco_postgres" {
   security_group_id            = aws_security_group.banco.id
   description                  = "PostgreSQL vindo do accumulator"
@@ -153,6 +144,15 @@ resource "aws_vpc_security_group_ingress_rule" "banco_postgres" {
   from_port                    = local.banco_porta
   to_port                      = local.banco_porta
   referenced_security_group_id = aws_security_group.accumulator.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "banco_postgres_do_generator" {
+  security_group_id            = aws_security_group.banco.id
+  description                  = "PostgreSQL vindo do generator"
+  ip_protocol                  = "tcp"
+  from_port                    = local.banco_porta
+  to_port                      = local.banco_porta
+  referenced_security_group_id = aws_security_group.generator.id
 }
 
 # Saída só do necessário. HTTPS para fora: puxar imagem do ECR, ler o segredo e mandar log passam pela
@@ -176,13 +176,13 @@ resource "aws_vpc_security_group_egress_rule" "generator_fix" {
   referenced_security_group_id = aws_security_group.accumulator.id
 }
 
-resource "aws_vpc_security_group_egress_rule" "generator_http" {
+resource "aws_vpc_security_group_egress_rule" "generator_postgres" {
   security_group_id            = aws_security_group.generator.id
-  description                  = "GET /api/exposures do generator para o accumulator"
+  description                  = "PostgreSQL do generator para o banco"
   ip_protocol                  = "tcp"
-  from_port                    = local.porta_http_do_accumulator
-  to_port                      = local.porta_http_do_accumulator
-  referenced_security_group_id = aws_security_group.accumulator.id
+  from_port                    = local.banco_porta
+  to_port                      = local.banco_porta
+  referenced_security_group_id = aws_security_group.banco.id
 }
 
 resource "aws_vpc_security_group_egress_rule" "accumulator_https" {

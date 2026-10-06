@@ -1,5 +1,5 @@
 # A única porta de entrada pública: HTTP API do API Gateway -> VPC Link -> Cloud Map -> generator na 8080.
-# Sem ALB, NLB nem NAT. O accumulator (9876 e 8081) e o banco não têm caminho vindo de fora.
+# Sem ALB, NLB nem NAT. O accumulator (só a 9876) e o banco não têm caminho vindo de fora.
 
 variable "limite_requisicoes_por_segundo" {
   description = "Throttling do stage (R-02): requisições por segundo, em média. O teste de carga ajusta aqui."

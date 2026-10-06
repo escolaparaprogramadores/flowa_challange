@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Flowa.Commons.Observability;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 
 namespace Flowa.OrderAccumulator.Tests;
 
@@ -26,7 +25,7 @@ public sealed class OrderDecisionMeasurementTests(OrderAccumulatorPostgresFixtur
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         ActivitySource.AddActivityListener(orderReceivingListener);
         orderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics());
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new UncountedOrderMetrics());
     }
 
     public Task DisposeAsync()

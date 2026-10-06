@@ -9,18 +9,18 @@ public sealed class SymbolExposureGaugeBackgroundService : Microsoft.Extensions.
     public static readonly TimeSpan SymbolExposureGaugeInterval = TimeSpan.FromSeconds(30);
 
     private readonly IOrderMetricsPort orderMetrics;
-    private readonly ISymbolExposureMemoryPort symbolExposureMemory;
+    private readonly IServiceScopeFactory exposureReadScopeFactory;
     private readonly TimeProvider gaugeClock;
     private readonly IApplicationLogger<SymbolExposureGaugeBackgroundService> gaugeLogger;
 
     public SymbolExposureGaugeBackgroundService(
         IOrderMetricsPort orderMetrics,
-        ISymbolExposureMemoryPort symbolExposureMemory,
+        IServiceScopeFactory exposureReadScopeFactory,
         TimeProvider gaugeClock,
         IApplicationLogger<SymbolExposureGaugeBackgroundService> gaugeLogger)
     {
         this.orderMetrics = orderMetrics ?? throw new ArgumentNullException(nameof(orderMetrics));
-        this.symbolExposureMemory = symbolExposureMemory ?? throw new ArgumentNullException(nameof(symbolExposureMemory));
+        this.exposureReadScopeFactory = exposureReadScopeFactory ?? throw new ArgumentNullException(nameof(exposureReadScopeFactory));
         this.gaugeClock = gaugeClock ?? throw new ArgumentNullException(nameof(gaugeClock));
         this.gaugeLogger = gaugeLogger ?? throw new ArgumentNullException(nameof(gaugeLogger));
     }
@@ -31,14 +31,24 @@ public sealed class SymbolExposureGaugeBackgroundService : Microsoft.Extensions.
         gaugeLogger.LogInformation("Symbol exposure gauge loop started.", new { IntervalSeconds = SymbolExposureGaugeInterval.TotalSeconds });
         do
         {
-            SendSymbolExposureGauges();
+            await SendSymbolExposureGaugesAsync(stoppingToken);
         }
         while (await symbolExposureGaugeTimer.WaitForNextTickAsync(stoppingToken));
     }
 
-    public void SendSymbolExposureGauges()
+    public async Task SendSymbolExposureGaugesAsync(CancellationToken cancellationToken = default)
     {
-        foreach (var currentSymbolExposure in symbolExposureMemory.ReadCurrentSymbolExposures())
-            orderMetrics.SendSymbolExposureGauge(currentSymbolExposure.Symbol, currentSymbolExposure.Exposure);
+        try
+        {
+            await using var exposureReadScope = exposureReadScopeFactory.CreateAsyncScope();
+            var storedSymbolExposures = await exposureReadScope.ServiceProvider.GetRequiredService<ISymbolExposureReadRepository>()
+                .GetSymbolExposuresAsync(cancellationToken);
+            foreach (var storedSymbolExposure in storedSymbolExposures)
+                orderMetrics.SendSymbolExposureGauge(storedSymbolExposure.Symbol, storedSymbolExposure.Exposure);
+        }
+        catch (Exception exposureReadFailure) when (!cancellationToken.IsCancellationRequested)
+        {
+            gaugeLogger.LogError(exposureReadFailure, "Symbol exposure gauge could not read the stored exposures.");
+        }
     }
 }

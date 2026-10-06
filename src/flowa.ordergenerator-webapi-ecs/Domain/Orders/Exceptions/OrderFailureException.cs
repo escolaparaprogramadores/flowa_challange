@@ -11,6 +11,17 @@ public sealed class OrderNotAnsweredException(string clOrdId, string errorCode)
 {
     public const string FixSessionNotLoggedOnErrorCode = "fix-session-not-logged-on";
     public const string ExecutionReportTimeoutErrorCode = "execution-report-timeout";
+    public const string FixSessionLostErrorCode = "fix-session-lost";
+
+    public bool OrderMayHaveBeenAccepted => ErrorCode != FixSessionNotLoggedOnErrorCode;
+}
+
+public sealed class OrderRejectedByFixRejectException(string clOrdId, string rejectText)
+    : OrderFailureException(clOrdId, FixOrderRejectedErrorCode, "The order came back in a FIX Reject or BusinessMessageReject.")
+{
+    public const string FixOrderRejectedErrorCode = "fix-order-rejected";
+
+    public string RejectText { get; } = rejectText;
 }
 
 public sealed class UnexpectedExecutionReportException(string clOrdId)

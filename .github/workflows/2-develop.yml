@@ -278,9 +278,11 @@ jobs:
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
           # Plan guard: only the two task definitions may be destroyed or replaced (every image deploy replaces
-          # them); only they and the log collector's task roles may be created, and those roles may only be
-          # removed when Datadog is switched off. Anything else stops the run here, before apply. The plan JSON
-          # stays on the runner. New resources in infra-aws/ must be added to these lists.
+          # them); only they, the log collector's task roles and the OrderGenerator's database rules may be
+          # created, and those roles may only be removed when Datadog is switched off. The two HTTP rules from
+          # the OrderGenerator to the OrderAccumulator may only be deleted (the OrderAccumulator is a worker
+          # without HTTP). Anything else stops the run here, before apply. The plan JSON stays on the runner.
+          # New resources in infra-aws/ must be added to these lists.
           terraform show -json tfplan > "$RUNNER_TEMP/deploy-plan.json"
           jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
             | "plan: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/deploy-plan.json"
@@ -290,10 +292,16 @@ jobs:
             "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"accumulator\"]",
             "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"generator\"]",
             "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"accumulator\"]"]'
+          generator_database_rules='["aws_vpc_security_group_ingress_rule.banco_postgres_do_generator",
+            "aws_vpc_security_group_egress_rule.generator_postgres"]'
+          removed_accumulator_http_rules='["aws_vpc_security_group_ingress_rule.accumulator_http",
+            "aws_vpc_security_group_egress_rule.generator_http"]'
           disallowed_plan_changes=$(jq -r --arg datadog_enabled "$AGENTE_DATADOG_LIGADO" \
             --argjson replaceable "$replaceable_task_definitions" --argjson collector_roles "$log_collector_roles" \
-            '($replaceable + (if $datadog_enabled == "true" then [] else $collector_roles end)) as $deletable
-            | ($replaceable + $collector_roles) as $creatable
+            --argjson generator_database_rules "$generator_database_rules" \
+            --argjson removed_accumulator_http_rules "$removed_accumulator_http_rules" \
+            '($replaceable + $removed_accumulator_http_rules + (if $datadog_enabled == "true" then [] else $collector_roles end)) as $deletable
+            | ($replaceable + $collector_roles + $generator_database_rules) as $creatable
             | .resource_changes[]
             | select(((.change.actions | index("delete")) and (.address | IN($deletable[]) | not))
               or ((.change.actions | index("create")) and (.address | IN($creatable[]) | not)))

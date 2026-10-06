@@ -10,10 +10,10 @@ using Flowa.OrderAccumulator.Domain.Orders.Enums;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using Flowa.OrderAccumulator.Infrastructure.Exposures.Repositories;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Flowa.OrderAccumulator.Tests;
@@ -185,7 +185,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     [Fact]
-    public async Task Reader_returns_exposure_and_remaining_room_for_each_symbol()
+    public async Task Reader_returns_the_exposure_of_each_symbol()
     {
         await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
         await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VIIA4", 50, 4.00m));
@@ -193,12 +193,8 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var symbolExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
 
         Assert.Equal(
-            [
-                ("PETR4", 1_000.00m, ExposureLimitPolicy.PerSymbol - 1_000m),
-                ("VALE3", 0m, ExposureLimitPolicy.PerSymbol),
-                ("VIIA4", -200.00m, ExposureLimitPolicy.PerSymbol - 200m)
-            ],
-            symbolExposures.Select(symbolExposure => (symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)));
+            [("PETR4", 1_000.00m), ("VALE3", 0m), ("VIIA4", -200.00m)],
+            symbolExposures.Select(symbolExposure => (symbolExposure.Symbol, symbolExposure.Exposure)));
     }
 
     [Theory]
@@ -217,7 +213,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task Services_registered_for_the_app_process_orders_against_the_database()
     {
         var orderAccumulatorAppServices = new ServiceCollection()
-            .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString);
+            .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString, new ConfigurationBuilder().Build());
         await using var orderAccumulatorServiceProvider = orderAccumulatorAppServices.BuildServiceProvider();
 
         await using var orderOperationScope = orderAccumulatorServiceProvider.CreateAsyncScope();
@@ -229,14 +225,13 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>();
         var registeredServicesOrderDecision = await new DecideIncomingOrderUseCase(
                 registeredUnitOfWork, registeredOrderRepository, new OrderDecisionDomainService(registeredSymbolExposureRepository),
-                new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics(),
+                new UncountedOrderMetrics(),
                 TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>())
             .DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
 
         Assert.IsType<OrderRepository>(registeredOrderRepository);
         Assert.IsType<ExposureRepository>(registeredSymbolExposureRepository);
         Assert.IsType<SymbolExposureReadRepository>(registeredExposureReader);
-        Assert.IsType<OrderListReadRepository>(orderAccumulatorServiceProvider.GetRequiredService<IOrderListReadRepository>());
         Assert.Same(orderOperationServices.GetRequiredService<DatabaseUnitOfWork>(), registeredUnitOfWork);
         Assert.NotSame(registeredUnitOfWork, otherOrderOperationScope.ServiceProvider.GetRequiredService<IUnitOfWork>());
         Assert.True(registeredServicesOrderDecision.Data!.Accepted);

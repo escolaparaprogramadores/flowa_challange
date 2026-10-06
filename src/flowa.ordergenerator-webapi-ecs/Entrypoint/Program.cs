@@ -31,7 +31,7 @@ orderGeneratorBuilder.Services.AddOperationMonitoring(
     OrderGeneratorUseCaseDurationMetric.MeterName, OrderGeneratorUseCaseDurationMetric.MetricName);
 orderGeneratorBuilder.Services.AddSingleton<DistributedContextPropagator>(new IncomingTraceContextIgnoringPropagator());
 
-orderGeneratorBuilder.Services.AddOrderGeneratorInfrastructure();
+orderGeneratorBuilder.Services.AddOrderGeneratorInfrastructure(orderGeneratorBuilder.Configuration);
 orderGeneratorBuilder.Services.AddScoped<SendOrderUseCase>();
 orderGeneratorBuilder.Services.AddScoped<GetExposuresUseCase>();
 orderGeneratorBuilder.Services.AddScoped<ListOrdersUseCase>();

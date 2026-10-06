@@ -1,0 +1,235 @@
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
+import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/services/ordersService';
+
+// CA-3 against the real OrderGenerator and OrderAccumulator: the box above the "Compra/Venda" table shows the answer of
+// every send. The test starts from "Deletar tudo" so the PETR4 exposure is zero and the second big buy breaks the limit.
+
+// Light border of maquete-01 (theme tokens --color-side-long-border and --color-side-short-border), strong text in the pill.
+const ACCEPTED_BOX_COLORS = { border: 'rgba(111, 235, 192, 0.38)', text: 'rgb(111, 235, 192)', background: 'rgba(79, 227, 176, 0.13)' };
+const REJECTED_BOX_COLORS = { border: 'rgba(255, 164, 151, 0.38)', text: 'rgb(255, 164, 151)', background: 'rgba(255, 138, 122, 0.12)' };
+const SCREENSHOT_FOLDER = process.env.E2E_PROVAS_DIR;
+
+async function expectBorderOnEverySide(responseBox: Locator, expectedBorderColor: string) {
+  for (const boxSide of ['top', 'right', 'bottom', 'left']) {
+    await expect(responseBox).toHaveCSS(`border-${boxSide}-color`, expectedBorderColor);
+    // 1px in the CSS; the page runs at 90% zoom, so the computed width is 1 / 0.9 px.
+    await expect(responseBox).toHaveCSS(`border-${boxSide}-width`, '1.11111px');
+  }
+}
+
+// RNF-02: nothing in the box or in the card is wider than its own frame (a hidden overflow would cut the text).
+async function expectNothingWiderThanItsFrame(frameElement: Locator) {
+  const hiddenWidth = await frameElement.evaluate((measuredElement) => measuredElement.scrollWidth - measuredElement.clientWidth);
+  expect(hiddenWidth).toBe(0);
+}
+
+function locateOrderListCard(orderTicketPage: Page) {
+  return orderTicketPage.getByRole('region', { name: 'Compra/Venda' });
+}
+
+async function deleteAllOrdersOnServer(orderTicketPage: Page) {
+  const deleteResponse = await orderTicketPage.request.delete(ORDERS_ROUTE);
+  expect(deleteResponse.status()).toBe(204);
+}
+
+async function sendPetr4BigBuy(orderTicketPage: Page) {
+  await orderTicketPage.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'PETR4', exact: true }).click();
+  await orderTicketPage.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: 'Compra' }).click();
+  await orderTicketPage.getByLabel(/^Quantidade de/).fill('99.999');
+  await orderTicketPage.getByLabel('Preço por ação (R$)').fill('999,99');
+  const createOrderResponse = orderTicketPage.waitForResponse(
+    (httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE,
+  );
+  await orderTicketPage.getByRole('button', { name: /^Enviar ordem/ }).click();
+  const orderDataMessage = (await (await createOrderResponse).json()) as { message: string; data: { status: string } };
+  await expect(orderTicketPage.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled();
+  return orderDataMessage;
+}
+
+async function expectBoxAboveTable(orderTicketPage: Page, responseBoxTestId: string) {
+  const responseBox = locateOrderListCard(orderTicketPage).getByTestId(responseBoxTestId);
+  const boxBottom = (await responseBox.boundingBox())!;
+  const tableTop = (await locateOrderListCard(orderTicketPage).getByRole('table').boundingBox())!.y;
+  expect(boxBottom.y + boxBottom.height).toBeLessThanOrEqual(tableTop);
+}
+
+for (const viewportWidth of [1920, 1440, 860, 375]) {
+  test(`CA-3 at ${viewportWidth}px: the box shows "Aceita" and then "Rejeitada" with the order and the reason when PETR4 breaks the limit`, async ({ page }) => {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    // Deleting before the page opens: a reload would cut the opening reads still in flight.
+    await deleteAllOrdersOnServer(page);
+    await page.goto('/');
+    await expect(locateOrderListCard(page).getByTestId('caixa-de-resposta')).toHaveCount(0);
+
+    const acceptedAnswer = await sendPetr4BigBuy(page);
+    expect(acceptedAnswer.data.status).toBe('accepted');
+    const acceptedBox = locateOrderListCard(page).getByTestId('caixa-de-resposta');
+    await expect(acceptedBox).toHaveCount(1);
+    await expect(acceptedBox).toBeVisible();
+    await expect(acceptedBox.getByTestId('status-da-ordem')).toHaveText('Aceita');
+    await expect(acceptedBox.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 99.999 × R$ 999,99');
+    await expect(acceptedBox.getByTestId('mensagem-da-ordem')).toHaveText('Ordem aceita.');
+    await expect(acceptedBox.getByTestId('status-da-ordem')).toHaveCSS('color', ACCEPTED_BOX_COLORS.text);
+    await expectBorderOnEverySide(acceptedBox, ACCEPTED_BOX_COLORS.border);
+    await expect(acceptedBox).toHaveCSS('background-color', ACCEPTED_BOX_COLORS.background);
+    await expectBoxAboveTable(page, 'caixa-de-resposta');
+
+    const rejectedAnswer = await sendPetr4BigBuy(page);
+    expect(rejectedAnswer.data.status).toBe('rejected');
+    const rejectedBox = locateOrderListCard(page).getByTestId('caixa-de-resposta');
+    await expect(rejectedBox).toHaveCount(1);
+    await expect(rejectedBox).toBeVisible();
+    await expect(rejectedBox.getByTestId('status-da-ordem')).toHaveText('Rejeitada');
+    await expect(rejectedBox.getByTestId('status-da-ordem')).toHaveCSS('color', REJECTED_BOX_COLORS.text);
+    await expect(rejectedBox.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 99.999 × R$ 999,99');
+    await expect(rejectedBox.getByTestId('ordem-da-resposta')).toHaveCSS('font-weight', '800');
+    await expect(rejectedBox.getByTestId('mensagem-da-ordem')).toHaveText('Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.');
+    await expectBorderOnEverySide(rejectedBox, REJECTED_BOX_COLORS.border);
+    await expect(rejectedBox).toHaveCSS('background-color', REJECTED_BOX_COLORS.background);
+    await expectBoxAboveTable(page, 'caixa-de-resposta');
+
+    // maquete-01: from 860 up the pill sits on the left of the order line; at 375 the text wraps below the pill.
+    const pillBox = (await rejectedBox.getByTestId('status-da-ordem').boundingBox())!;
+    const orderLineBox = (await rejectedBox.getByTestId('ordem-da-resposta').boundingBox())!;
+    if (viewportWidth >= 860) {
+      expect(pillBox.x + pillBox.width).toBeLessThan(orderLineBox.x);
+      expect(Math.abs(pillBox.y - orderLineBox.y)).toBeLessThan(pillBox.height);
+    } else {
+      expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(orderLineBox.y);
+    }
+
+    // RNF-02: no horizontal scroll of the page, of the card or of the box.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+    await expectNothingWiderThanItsFrame(locateOrderListCard(page));
+    await expectNothingWiderThanItsFrame(rejectedBox);
+    await expectNothingWiderThanItsFrame(rejectedBox.getByTestId('ordem-da-resposta'));
+
+    if (SCREENSHOT_FOLDER) {
+      await locateOrderListCard(page).screenshot({ path: `${SCREENSHOT_FOLDER}/06-caixa-rejeitada-${viewportWidth}.png` });
+    }
+  });
+}
+
+test('RF-04: the box of the previous answer goes away as soon as a new send starts', async ({ page }) => {
+  await deleteAllOrdersOnServer(page);
+  await page.goto('/');
+  await sendPetr4BigBuy(page);
+  await expect(locateOrderListCard(page).getByTestId('caixa-de-resposta')).toBeVisible();
+  // The real send is only held for 1.5 s so the instant between the click and the answer can be seen.
+  await page.route('**' + CREATE_ORDER_ROUTE, async (heldOrderCreationRoute) => {
+    await new Promise((releaseHeldRequest) => setTimeout(releaseHeldRequest, 1_500));
+    await heldOrderCreationRoute.continue();
+  });
+  await page.getByLabel(/^Quantidade de/).fill('1');
+  await page.getByLabel('Preço por ação (R$)').fill('10,00');
+  await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+  await expect(locateOrderListCard(page).getByTestId('selo-enviando')).toBeVisible();
+  await expect(locateOrderListCard(page).getByTestId('caixa-de-resposta')).toHaveCount(0);
+  await expect(locateOrderListCard(page).getByTestId('selo-enviando')).toHaveCount(0);
+  const answerOfTheSmallBuy = locateOrderListCard(page).getByTestId('caixa-de-resposta');
+  await expect(answerOfTheSmallBuy.getByTestId('status-da-ordem')).toHaveText('Aceita');
+  await expect(answerOfTheSmallBuy.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 1 × R$ 10,00');
+});
+
+test('P02-10: the box shows the answer of the POST without waiting for the list and exposure reads after it', async ({ page }) => {
+  await deleteAllOrdersOnServer(page);
+  await page.goto('/');
+  // The opening reads must be over before the hold starts, or they would be held too (F-07).
+  await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
+  await expect(page.getByTestId('exposicao-VALE3').getByTestId('exposicao-atual')).toHaveText('R$ 0,00');
+  // Only the real reads of list and exposure that start after the click are held for 4 s, as a slow database would hold them.
+  let hasClickedSend = false;
+  let heldReadsStillPending = 0;
+  const holdReadAfterSend = async (heldReadRoute: Route) => {
+    if (!hasClickedSend) return heldReadRoute.continue();
+    heldReadsStillPending += 1;
+    await new Promise((releaseHeldRead) => setTimeout(releaseHeldRead, 4_000));
+    heldReadsStillPending -= 1;
+    await heldReadRoute.continue();
+  };
+  await page.route(`**${ORDERS_ROUTE}?page=*`, holdReadAfterSend);
+  await page.route(`**${EXPOSURES_ROUTE}`, holdReadAfterSend);
+
+  const createOrderResponse = page.waitForResponse(
+    (httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE,
+  );
+  await page.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'VALE3', exact: true }).click();
+  await page.getByLabel(/^Quantidade de/).fill('3');
+  await page.getByLabel('Preço por ação (R$)').fill('3,33');
+  hasClickedSend = true;
+  await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+  expect((await createOrderResponse).status()).toBe(200);
+
+  const answerBox = locateOrderListCard(page).getByTestId('caixa-de-resposta');
+  await expect(answerBox.getByTestId('status-da-ordem')).toHaveText('Aceita', { timeout: 2_000 });
+  await expect(answerBox.getByTestId('ordem-da-resposta')).toHaveText('VALE3 · Compra · 3 × R$ 3,33');
+  await expect(page.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled({ timeout: 2_000 });
+  expect(heldReadsStillPending).toBe(2);
+  await expect(page.getByTestId('linha-da-ordem')).toHaveCount(0);
+
+  // When the reads are released, the row arrives at the list as before.
+  await expect(page.getByTestId('linha-da-ordem')).toHaveCount(1, { timeout: 10_000 });
+});
+
+// G-2: the FIX session refused the order (Reject 35=3 or 35=j) and the OrderGenerator answers 422 fix-order-rejected
+// with the reject text. The real OrderAccumulator never sends a Reject for an order the screen can build, so only the
+// answer of the POST is replaced, with the exact body of the F3 (ApiProblemDetailsExtensions, UseCaseFailureDataMessageMapper).
+const FIX_REJECT_TEXT = 'Required tag missing (35=3, 371=54)';
+const FIX_ORDER_REJECTED_ANSWER = {
+  status: 422,
+  contentType: 'application/problem+json',
+  body: JSON.stringify({
+    type: 'urn:base-investimentos:problem:fix-order-rejected', title: 'Regra de negócio violada', status: 422,
+    detail: FIX_REJECT_TEXT, success: false, statusResultado: 'BusinessRuleViolated', errors: [],
+  }),
+};
+
+for (const viewportWidth of [1440, 375]) {
+  test(`RF-08 and G-2 at ${viewportWidth}px: the 422 shows "Não entrou" with the reject text, without the delay warning nor extra reads`, async ({ page }) => {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    await deleteAllOrdersOnServer(page);
+    await page.goto('/');
+    await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
+    await page.route('**' + CREATE_ORDER_ROUTE, (orderCreationRoute) => orderCreationRoute.fulfill(FIX_ORDER_REJECTED_ANSWER));
+    const listReadsAfterSend: string[] = [];
+    let hasClickedSend = false;
+    page.on('request', (pageRequest) => {
+      const requestRoute = new URL(pageRequest.url()).pathname;
+      if (hasClickedSend && pageRequest.method() === 'GET' && (requestRoute === ORDERS_ROUTE || requestRoute === EXPOSURES_ROUTE)) {
+        listReadsAfterSend.push(requestRoute);
+      }
+    });
+
+    await page.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'PETR4', exact: true }).click();
+    await page.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: 'Compra' }).click();
+    await page.getByLabel(/^Quantidade de/).fill('100');
+    await page.getByLabel('Preço por ação (R$)').fill('10,00');
+    const createOrderResponse = page.waitForResponse(
+      (httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE,
+    );
+    hasClickedSend = true;
+    await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+    expect((await createOrderResponse).status()).toBe(422);
+
+    const refusalBox = locateOrderListCard(page).getByTestId('faixa-da-falha-no-envio');
+    await expect(refusalBox).toHaveCount(1);
+    await expect(refusalBox).toBeVisible();
+    await expect(refusalBox).toHaveAttribute('role', 'alert');
+    await expect(refusalBox.getByTestId('status-da-ordem')).toHaveText('Não entrou');
+    await expect(refusalBox.getByTestId('status-da-ordem')).toHaveCSS('color', REJECTED_BOX_COLORS.text);
+    await expect(refusalBox.getByTestId('mensagem-da-ordem')).toHaveText(FIX_REJECT_TEXT);
+    await expect(refusalBox.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 100 × R$ 10,00');
+    await expectBorderOnEverySide(refusalBox, REJECTED_BOX_COLORS.border);
+    await expect(locateOrderListCard(page)).not.toContainText('A ordem pode ter sido aceita');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+
+    // Only the one read every send makes (list and exposure); the 422 never starts the recheck cycle of RF-11.
+    await page.waitForTimeout(6_000);
+    expect(listReadsAfterSend.filter((readRoute) => readRoute === ORDERS_ROUTE)).toHaveLength(1);
+    expect(listReadsAfterSend.filter((readRoute) => readRoute === EXPOSURES_ROUTE)).toHaveLength(1);
+    await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
+    if (SCREENSHOT_FOLDER) {
+      await locateOrderListCard(page).screenshot({ path: `${SCREENSHOT_FOLDER}/06-caixa-nao-entrou-${viewportWidth}.png` });
+    }
+  });
+}
