@@ -87,6 +87,10 @@
   --height-limit-usage-bar: 6px;
   --limit-usage-bar: linear-gradient(90deg, #2fc795, #4fe3b0);
   --limit-usage-bar-near-limit: linear-gradient(90deg, #e9a73c, #f4c56a);
+  --color-side-long-border: rgba(111, 235, 192, 0.38);
+  --color-side-short-border: rgba(255, 164, 151, 0.38);
+  --color-side-flat-background: rgba(157, 176, 174, 0.12);
+  --color-side-flat-border: rgba(157, 176, 174, 0.38);
 }
 * { box-sizing: border-box; }
 /* The page opens at 90% without the person touching the browser zoom. Zoom breaks 100dvh and position: sticky:
@@ -141,14 +145,23 @@ button { cursor: pointer; }
 .exposure-asset { display: flex; align-items: center; gap: var(--space-3); }
 .exposure-icon { display: inline-grid; place-items: center; flex: none; width: var(--size-asset-icon); height: var(--size-asset-icon); background: var(--color-sunken); border: 1px solid var(--color-border); border-radius: var(--radius-asset-icon); color: var(--color-accent); }
 .exposure-icon svg { width: 16px; height: 16px; }
+/* Sold: the same rising chart, mirrored so it points down, in the sell color. */
+.exposure-icon-short { color: var(--color-sell); }
+.exposure-icon-short svg { transform: scaleY(-1); }
 .exposure-symbol { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: var(--font-size-body); }
-/* The two figures sit side by side; without room, "Falta até o limite" wraps as a whole, and no number breaks in the middle. */
+/* Side badge: text in the side color, over a tint and a thin border of that same color. */
+.exposure-side { display: inline-flex; align-items: center; padding: var(--space-1) var(--space-2-5); border: 1px solid; border-radius: var(--radius-pill); font-size: var(--font-size-caption); font-weight: 700; line-height: 1; white-space: nowrap; }
+.exposure-side-long { background: var(--color-success-background); border-color: var(--color-side-long-border); color: var(--color-success-text); }
+.exposure-side-short { background: var(--color-danger-background); border-color: var(--color-side-short-border); color: var(--color-danger-text); }
+.exposure-side-flat { background: var(--color-side-flat-background); border-color: var(--color-side-flat-border); color: var(--color-text-muted); }
+/* "Exposição atual" takes the top line; the two remaining figures sit side by side below it. Without room, a figure wraps as a whole, and no number breaks in the middle. */
 .exposure-figures { margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-3) var(--space-6); }
 /* Labels on top and figures at the bottom of the same column: with line height 1, the 20 px and 15 px digits sit on the same baseline. */
 .exposure-figures > div { flex: 1 1 0; min-width: max-content; display: flex; flex-direction: column; gap: var(--space-1-5); }
 .exposure-figures dt { font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-label); white-space: nowrap; }
 .exposure-figures dd { margin: auto 0 0; font-family: var(--font-display); font-weight: 600; font-size: var(--font-size-body); line-height: 1; white-space: nowrap; }
 .exposure-figures .exposure-current { font-size: var(--font-size-asset-figure); }
+.exposure-figures > .exposure-current-figure { flex-basis: 100%; }
 .limit-usage { display: flex; flex-direction: column; gap: var(--space-2); }
 .limit-usage-track { height: var(--height-limit-usage-bar); background: var(--color-divider); border-radius: var(--radius-pill); overflow: hidden; }
 .limit-usage-fill { display: block; height: 100%; background-image: var(--limit-usage-bar); border-radius: var(--radius-pill); }

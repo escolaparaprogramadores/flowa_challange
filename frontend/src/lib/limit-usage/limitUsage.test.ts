@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateLimitUsage } from './limitUsage';
+import { calculateLimitUsage, calculateRemainingToLimitBySide, findExposureSide } from './limitUsage';
 
 describe('calculateLimitUsage', () => {
   it.each([
@@ -62,6 +62,38 @@ describe('calculateLimitUsage', () => {
       shownPercentage: '100,5%',
       barWidthInPercent: 100,
       isNearLimit: true,
+    });
+  });
+});
+
+describe('findExposureSide', () => {
+  it.each([
+    [99_999_000.01, 'long'],
+    [0.01, 'long'],
+    [0, 'flat'],
+    [-0, 'flat'],
+    [0.004, 'flat'],
+    [-0.004, 'flat'],
+    [-0.01, 'short'],
+    [-39_999_535.62, 'short'],
+  ])('exposure %d is %s', (exposureInReais, expectedExposureSide) => {
+    expect(findExposureSide(exposureInReais)).toBe(expectedExposureSide);
+  });
+});
+
+describe('calculateRemainingToLimitBySide', () => {
+  it.each([
+    // Example checked in CA-5: VALE3 sold.
+    [-39_999_535.62, 139_999_535.62, 60_000_464.38],
+    [99_999_000.01, 999.99, 199_999_000.01],
+    [0, 100_000_000, 100_000_000],
+    [-99_998_000.01, 199_998_000.01, 1_999.99],
+    [100_000_000, 0, 200_000_000],
+    [-100_000_000, 200_000_000, 0],
+  ])('exposure %d leaves %d to buy and %d to sell', (exposureInReais, expectedRemainingToBuy, expectedRemainingToSell) => {
+    expect(calculateRemainingToLimitBySide(exposureInReais)).toEqual({
+      remainingToBuyInReais: expectedRemainingToBuy,
+      remainingToSellInReais: expectedRemainingToSell,
     });
   });
 });
