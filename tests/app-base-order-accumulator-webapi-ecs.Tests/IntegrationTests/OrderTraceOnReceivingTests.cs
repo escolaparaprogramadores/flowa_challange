@@ -65,9 +65,14 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
             Assert.Equal(orderSending.TraceId, Assert.Single(capturedOrderTraceSpans.OrderReceivingSpans).TraceId);
         }
 
-        // An accepted order leaves exactly two lines in the OrderAccumulator: the FIX message in and the answer out.
+        // An accepted order leaves exactly three lines in the OrderAccumulator: the FIX message in, the end of the use case
+        // with the accepted order (CA-21) and the answer out.
         var orderLogLines = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.TraceId == orderClOrdId).ToList();
-        Assert.Equal(2, orderLogLines.Count);
+        Assert.Equal(3, orderLogLines.Count);
+        var acceptedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "Order accepted.");
+        Assert.Equal(
+            ("Information", "Base.OrderAccumulator.Application.Orders.UseCases.DecideIncomingOrderUseCase", "PETR4"),
+            (acceptedOrderLine.LogLevel, acceptedOrderLine.Category, acceptedOrderLine.ReadLogField("Symbol")));
         var receivedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message received.");
         Assert.Contains("|35=D|", receivedOrderLine.ReadLogField("FixMessage"));
         Assert.Contains($"|5100={orderTraceParent}|", receivedOrderLine.ReadLogField("FixMessage"));

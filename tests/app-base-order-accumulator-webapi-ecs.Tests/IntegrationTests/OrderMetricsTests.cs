@@ -5,6 +5,7 @@ using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Logging;
 using Base.OrderAccumulator.Commons.Observability;
 using Base.OrderAccumulator.Commons.Responses;
 using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
@@ -163,7 +164,8 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 300, 50.10m));
         await SendSentinelAndReadOrderMetricsAsync();
 
-        new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System).SendSymbolExposureGauges();
+        new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System,
+            TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>()).SendSymbolExposureGauges();
         var sentExposureGauges = await SendSentinelAndReadOrderMetricsAsync();
 
         Assert.Equal(
@@ -181,7 +183,8 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 2m));
         await SendSentinelAndReadOrderMetricsAsync();
         var manualGaugeClock = new ManualGaugeClock();
-        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock);
+        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock,
+            TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>());
         IReadOnlyList<DogStatsdMetricLine> expectedExposureGauges =
         [
             new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "20", "g", ExpectedTags("symbol:PETR4")),
@@ -201,6 +204,29 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal(expectedExposureGauges, gaugesAtStartup);
         Assert.Empty(gaugesBeforeTheTick);
         Assert.Equal(expectedExposureGauges, gaugesAfterTheTick);
+    }
+
+    // CA-28: the gauge loop writes one Information line when it starts and nothing on its 30-second ticks.
+    [Fact]
+    public async Task Exposure_gauge_logs_only_when_its_loop_starts_and_nothing_on_two_ticks()
+    {
+        var manualGaugeClock = new ManualGaugeClock();
+        var recordingGaugeLogger = new RecordingApplicationLogger<SymbolExposureGaugeBackgroundService>();
+        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(
+            new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock, recordingGaugeLogger);
+
+        await symbolExposureGaugeService.StartAsync(CancellationToken.None);
+        var gaugesAtStartup = await ReadThreeExposureGaugesAsync();
+        manualGaugeClock.TickGaugeTimer();
+        var gaugesAfterTheFirstTick = await ReadThreeExposureGaugesAsync();
+        manualGaugeClock.TickGaugeTimer();
+        var gaugesAfterTheSecondTick = await ReadThreeExposureGaugesAsync();
+        await symbolExposureGaugeService.StopAsync(CancellationToken.None);
+
+        Assert.Equal(3, gaugesAtStartup.Count);
+        Assert.Equal(3, gaugesAfterTheFirstTick.Count);
+        Assert.Equal(3, gaugesAfterTheSecondTick.Count);
+        Assert.Equal(["Information Symbol exposure gauge loop started."], recordingGaugeLogger.RecordedLogLines);
     }
 
     [Fact]
@@ -369,6 +395,19 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     // A clock that only moves when the test says so: the gauge PeriodicTimer asks for its timer here.
+    private sealed class RecordingApplicationLogger<T> : IApplicationLogger<T>
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> recordedLogLines = new();
+
+        public IReadOnlyList<string> RecordedLogLines => recordedLogLines.ToList();
+
+        public void LogInformation(string message, object? context = null) => recordedLogLines.Enqueue($"Information {message}");
+
+        public void LogWarning(string message, object? context = null) => recordedLogLines.Enqueue($"Warning {message}");
+
+        public void LogError(Exception exception, string message, object? context = null) => recordedLogLines.Enqueue($"Error {message}");
+    }
+
     private sealed class ManualGaugeClock : TimeProvider
     {
         private ManualGaugeTimer? gaugeTimer;

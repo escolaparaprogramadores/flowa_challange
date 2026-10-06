@@ -19,10 +19,10 @@ internal static class OrderMetricTagMapper
 
     public static string[] BuildSymbolExposureTags(string orderSymbol) => [$"symbol:{orderSymbol}"];
 
-    private static string ToOrderSideTagValue(char orderSide) => orderSide switch
+    private static string ToOrderSideTagValue(char orderSide) => OrderSideCodes.ConvertFixCodeToOrderSide(orderSide) switch
     {
-        OrderSideCodes.BuyOrderSideFixCode => BuyOrderSideTagValue,
-        OrderSideCodes.SellOrderSideFixCode => SellOrderSideTagValue,
+        OrderSide.Buy => BuyOrderSideTagValue,
+        OrderSide.Sell => SellOrderSideTagValue,
         _ => InvalidTagValue
     };
 }

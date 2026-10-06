@@ -37,6 +37,7 @@ public sealed class LayerDependencyTests
         AssertLayerOnlyDependsOn("Commons.Logging", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Logging"));
         AssertLayerOnlyDependsOn(
             "Commons.DependencyInjection", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Database"), LayerNamespace("Commons.Logging"),
+            LayerNamespace("Commons.Observability"),
             LayerNamespace("Commons.DependencyInjection"));
     }
 
@@ -55,6 +56,31 @@ public sealed class LayerDependencyTests
 
         Assert.NotEmpty(infrastructureTypes.GetTypes());
         Assert.True(infrastructureDependencyResult.IsSuccessful, DescribeFailingTypes(infrastructureDependencyResult));
+    }
+
+    // P-01-10 (rule 39 of the owner): the Infrastructure reaches the database and the Datadog agent only through the
+    // Commons; QuickFIX/n stays as the written exception of decision 13 and is not on this list.
+    [Fact]
+    public void Infrastructure_does_not_use_a_technical_library_directly()
+    {
+        var infrastructureTypes = TypesOfLayer("Infrastructure");
+        var infrastructureTechnicalLibraryResult = infrastructureTypes.ShouldNot()
+            .HaveDependencyOnAny("Dapper", "Npgsql", "StatsdClient", "Polly", "Amazon").GetResult();
+
+        Assert.NotEmpty(infrastructureTypes.GetTypes());
+        Assert.True(infrastructureTechnicalLibraryResult.IsSuccessful, DescribeFailingTypes(infrastructureTechnicalLibraryResult));
+    }
+
+    // P-01-10: SQL belongs to the Infrastructure repositories; the Application orchestrates through the unit of work only.
+    [Fact]
+    public void Application_does_not_use_the_database_directly()
+    {
+        var applicationTypes = TypesOfLayer("Application");
+        var applicationDatabaseResult = applicationTypes.ShouldNot()
+            .HaveDependencyOnAny(LayerNamespace("Commons.Database.IDatabase"), LayerNamespace("Commons.Database.DapperDatabase")).GetResult();
+
+        Assert.NotEmpty(applicationTypes.GetTypes());
+        Assert.True(applicationDatabaseResult.IsSuccessful, DescribeFailingTypes(applicationDatabaseResult));
     }
 
     [Fact]

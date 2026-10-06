@@ -166,7 +166,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             var storedOrderHeldUntilReleased = new StoredOrderHeldUntilReleased();
             var decideIncomingOrderUseCase = new DecideIncomingOrderUseCase(
                 new UnitOfWorkWithoutDatabase(), storedOrderHeldUntilReleased, new OrderDecisionDomainService(new SymbolExposureAlwaysWithinLimit()),
-                symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient));
+                symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
+                TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());
 
             var orderInProgress = decideIncomingOrderUseCase.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
             await storedOrderHeldUntilReleased.OrderStored.WaitAsync(ConcurrencyStepDeadline);

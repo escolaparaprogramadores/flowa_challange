@@ -44,7 +44,9 @@ public sealed class DecideIncomingOrderTestRunner(
             orderRepository,
             new OrderDecisionDomainService(new ExposureRepository(orderDatabase)),
             symbolExposureMemory,
-            orderMetrics);
+            orderMetrics,
+            TestObservability.CreateOperationMonitoring(),
+            TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());
         return await decideIncomingOrderUseCase.DecideIncomingOrderAsync(incomingOrder, cancellationToken);
     }
 }
