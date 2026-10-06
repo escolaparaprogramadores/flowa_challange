@@ -4,10 +4,10 @@ using Microsoft.Extensions.Options;
 
 namespace Base.OrderGenerator.Entrypoint.ErrorHandling;
 
-public sealed class ProblemDetailsForAnyClientWriter(
+public sealed class AnyClientProblemDetailsWriter(
     IOptions<ProblemDetailsOptions> problemDetailsOptions,
     IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions,
-    IApplicationLogger<GlobalErrorHandler> httpErrorLogger) : IProblemDetailsWriter
+    IApplicationLogger<OrderGeneratorExceptionHandler> httpErrorLogger) : IProblemDetailsWriter
 {
     public bool CanWrite(ProblemDetailsContext problemDetailsContext) => true;
 

@@ -34,9 +34,9 @@ orderGeneratorBuilder.Services.AddScoped<ListOrdersUseCase>();
 orderGeneratorBuilder.Services.AddScoped<DeleteAllOrdersUseCase>();
 
 orderGeneratorBuilder.Services.ConfigureHttpJsonOptions(jsonOptions => jsonOptions.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
-orderGeneratorBuilder.Services.AddSingleton<IProblemDetailsWriter, ProblemDetailsForAnyClientWriter>();
+orderGeneratorBuilder.Services.AddSingleton<IProblemDetailsWriter, AnyClientProblemDetailsWriter>();
 orderGeneratorBuilder.Services.AddProblemDetails(problemDetailsOptions => problemDetailsOptions.CustomizeProblemDetails = ApiProblemDetailsExtensions.CompleteProblemDetails);
-orderGeneratorBuilder.Services.AddExceptionHandler<GlobalErrorHandler>();
+orderGeneratorBuilder.Services.AddExceptionHandler<OrderGeneratorExceptionHandler>();
 
 var orderGeneratorApp = orderGeneratorBuilder.Build();
 

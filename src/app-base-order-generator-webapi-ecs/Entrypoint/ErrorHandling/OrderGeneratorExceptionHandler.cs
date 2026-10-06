@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Diagnostics;
 
 namespace Base.OrderGenerator.Entrypoint.ErrorHandling;
 
-public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsService, IApplicationLogger<GlobalErrorHandler> httpErrorLogger) : IExceptionHandler
+public sealed class OrderGeneratorExceptionHandler(IProblemDetailsService problemDetailsService, IApplicationLogger<OrderGeneratorExceptionHandler> httpErrorLogger) : IExceptionHandler
 {
     public const string InvalidRequestMessage = "Dados inválidos";
     public const string UnexpectedErrorMessage = "Aconteceu um erro inesperado. Informe o traceId ao suporte.";
