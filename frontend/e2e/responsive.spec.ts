@@ -222,7 +222,7 @@ for (const viewportWidth of [390, 1024, 1179, 1280]) {
     await page.setViewportSize({ width: viewportWidth, height: 900 });
     await page.goto('/');
     for (const exposureSymbol of ['PETR4', 'VALE3', 'VIIA4']) {
-      for (const exposureLabel of ['Exposição atual', 'Falta até o limite']) {
+      for (const exposureLabel of ['Exposição atual', 'Falta para comprar', 'Falta para vender']) {
         const symbolLabel = page.getByTestId('exposicao-' + exposureSymbol).locator('dt', { hasText: exposureLabel });
         await expect(symbolLabel).toHaveCount(1);
         // One line is shorter than twice the font size; wrapped onto two lines, it goes beyond that.

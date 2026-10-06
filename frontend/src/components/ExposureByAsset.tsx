@@ -1,8 +1,16 @@
 import { RisingChartIcon } from './Icons';
 import type { ExposuresState } from '../hooks/useOrdersAndExposures';
-import { calculateLimitUsage, EXPOSURE_LIMIT_PER_ASSET_IN_REAIS } from '../lib/limit-usage/limitUsage';
+import {
+  calculateLimitUsage,
+  calculateRemainingToLimitBySide,
+  EXPOSURE_LIMIT_PER_ASSET_IN_REAIS,
+  findExposureSide,
+  type ExposureSide,
+} from '../lib/limit-usage/limitUsage';
 import { formatBrazilianReais } from '../lib/number-format/brazilianNumberFormat';
 import type { SymbolExposure } from '../services/ordersService';
+
+const EXPOSURE_SIDE_LABELS: Record<ExposureSide, string> = { long: 'Comprado', short: 'Vendido', flat: 'Zerado' };
 
 // The section keeps the "panel" class because the grid tests check the cards through it; the panel
 // look is removed in CSS, since each asset is now its own card.
@@ -30,6 +38,8 @@ export function ExposureByAsset({ exposuresState }: { exposuresState: ExposuresS
 
 function AssetCard({ symbolExposure }: { symbolExposure: SymbolExposure }) {
   const limitUsage = calculateLimitUsage(symbolExposure.exposure);
+  const exposureSide = findExposureSide(symbolExposure.exposure);
+  const remainingToLimitBySide = calculateRemainingToLimitBySide(symbolExposure.exposure);
   const limitUsageFillClasses = [
     'limit-usage-fill',
     symbolExposure.exposure !== 0 && 'has-exposure',
@@ -40,20 +50,31 @@ function AssetCard({ symbolExposure }: { symbolExposure: SymbolExposure }) {
   return (
     <li className="exposure-item" data-testid={`exposicao-${symbolExposure.symbol}`}>
       <div className="exposure-asset">
-        <span className="exposure-icon">
+        <span className={`exposure-icon exposure-icon-${exposureSide}`}>
           <RisingChartIcon />
         </span>
         <h3 className="exposure-symbol">{symbolExposure.symbol}</h3>
+        <span className={`exposure-side exposure-side-${exposureSide}`} data-testid="exposicao-lado">
+          {EXPOSURE_SIDE_LABELS[exposureSide]}
+        </span>
       </div>
       <dl className="exposure-figures">
-        <div>
+        <div className="exposure-current-figure">
           <dt>Exposição atual</dt>
           <dd className="numeric exposure-current" data-testid="exposicao-atual">{formatBrazilianReais(symbolExposure.exposure)}</dd>
         </div>
-        <div>
-          <dt>Falta até o limite</dt>
-          <dd className="numeric exposure-remaining" data-testid="exposicao-restante">{formatBrazilianReais(symbolExposure.remainingToLimit)}</dd>
-        </div>
+        <RemainingToLimitFigure
+          figureLabel="Falta para comprar"
+          figureTestId="falta-para-comprar"
+          remainingInReais={remainingToLimitBySide.remainingToBuyInReais}
+          isOnPositionSide={exposureSide !== 'short'}
+        />
+        <RemainingToLimitFigure
+          figureLabel="Falta para vender"
+          figureTestId="falta-para-vender"
+          remainingInReais={remainingToLimitBySide.remainingToSellInReais}
+          isOnPositionSide={exposureSide === 'short'}
+        />
       </dl>
       <div className="limit-usage">
         <div
@@ -79,5 +100,29 @@ function AssetCard({ symbolExposure }: { symbolExposure: SymbolExposure }) {
         </p>
       </div>
     </li>
+  );
+}
+
+// "exposicao-restante" marks the figure on the side the position already is: it equals 100.000.000 − |exposure|,
+// the "remaining" the API sends, and the older E2E files read the card through it.
+function RemainingToLimitFigure({
+  figureLabel,
+  figureTestId,
+  remainingInReais,
+  isOnPositionSide,
+}: {
+  figureLabel: string;
+  figureTestId: string;
+  remainingInReais: number;
+  isOnPositionSide: boolean;
+}) {
+  const shownRemaining = formatBrazilianReais(remainingInReais);
+  return (
+    <div>
+      <dt>{figureLabel}</dt>
+      <dd className="numeric exposure-remaining" data-testid={figureTestId}>
+        {isOnPositionSide ? <span data-testid="exposicao-restante">{shownRemaining}</span> : shownRemaining}
+      </dd>
+    </div>
   );
 }
