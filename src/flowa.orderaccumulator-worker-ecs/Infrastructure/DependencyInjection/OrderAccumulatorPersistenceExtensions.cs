@@ -1,7 +1,7 @@
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
-using Flowa.OrderAccumulator.Commons.Database;
-using Flowa.OrderAccumulator.Commons.DependencyInjection;
+using Flowa.Commons.Database;
+using Flowa.Commons.DependencyInjection;
 using Flowa.OrderAccumulator.Domain.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;

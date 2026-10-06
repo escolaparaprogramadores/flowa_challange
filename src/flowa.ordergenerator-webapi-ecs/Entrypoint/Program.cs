@@ -3,13 +3,14 @@ using System.Reflection;
 using System.Text.Json.Serialization;
 using Flowa.OrderGenerator.Application.Exposures.UseCases;
 using Flowa.OrderGenerator.Application.Orders.UseCases;
-using Flowa.OrderGenerator.Commons.DependencyInjection;
-using Flowa.OrderGenerator.Commons.Logging;
-using Flowa.OrderGenerator.Commons.Observability;
+using Flowa.Commons.DependencyInjection;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
 using Flowa.OrderGenerator.Entrypoint.DependencyInjection;
 using Flowa.OrderGenerator.Entrypoint.ErrorHandling;
 using Flowa.OrderGenerator.Entrypoint.Exposures.Endpoints;
 using Flowa.OrderGenerator.Entrypoint.Logging;
+using Flowa.OrderGenerator.Entrypoint.Observability;
 using Flowa.OrderGenerator.Entrypoint.Orders.Endpoints;
 using Flowa.OrderGenerator.Infrastructure.DependencyInjection;
 
@@ -26,7 +27,8 @@ var orderGeneratorBuilder = WebApplication.CreateBuilder(new WebApplicationOptio
 orderGeneratorBuilder.UseDefaultHttpPortWhenMissing();
 orderGeneratorBuilder.Logging.AddJsonLogsWithTraceId();
 orderGeneratorBuilder.Services.AddApplicationLogger();
-orderGeneratorBuilder.Services.AddOperationMonitoring();
+orderGeneratorBuilder.Services.AddOperationMonitoring(
+    OrderGeneratorUseCaseDurationMetric.MeterName, OrderGeneratorUseCaseDurationMetric.MetricName);
 orderGeneratorBuilder.Services.AddSingleton<DistributedContextPropagator>(new IncomingTraceContextIgnoringPropagator());
 
 orderGeneratorBuilder.Services.AddOrderGeneratorInfrastructure();

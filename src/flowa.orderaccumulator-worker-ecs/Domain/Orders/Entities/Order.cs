@@ -1,4 +1,4 @@
-using Flowa.OrderAccumulator.Commons.Entities;
+using Flowa.Commons.Entities;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Domain.Orders.Enums;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;

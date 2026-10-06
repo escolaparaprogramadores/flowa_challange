@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using Flowa.OrderAccumulator.Commons.Logging;
+using Flowa.Commons.Logging;
 using QuickFix.Logger;
 
 namespace Flowa.OrderAccumulator.Infrastructure.Fix;

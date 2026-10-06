@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Flowa.OrderGenerator.Application.ErrorHandling;
 using Flowa.OrderGenerator.Application.Exposures.Interfaces;
-using Flowa.OrderGenerator.Commons.Logging;
-using Flowa.OrderGenerator.Commons.Observability;
-using Flowa.OrderGenerator.Commons.Responses;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
+using Flowa.Commons.Responses;
 
 namespace Flowa.OrderGenerator.Application.Exposures.UseCases;
 

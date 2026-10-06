@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Flowa.OrderGenerator.Commons.Responses;
+using Flowa.Commons.Responses;
 
 namespace Flowa.OrderGenerator.Application.Exposures.Interfaces;
 

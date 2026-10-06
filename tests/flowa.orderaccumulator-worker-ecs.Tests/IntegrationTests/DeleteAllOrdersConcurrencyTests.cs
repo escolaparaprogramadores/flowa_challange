@@ -1,7 +1,7 @@
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Database;
+using Flowa.Commons.Database;
 using Flowa.OrderAccumulator.Domain.DomainServices;
 using Flowa.OrderAccumulator.Domain.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;

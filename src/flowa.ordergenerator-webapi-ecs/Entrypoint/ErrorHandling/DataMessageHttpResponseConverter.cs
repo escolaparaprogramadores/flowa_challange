@@ -1,5 +1,5 @@
-using Flowa.OrderGenerator.Commons.Logging;
-using Flowa.OrderGenerator.Commons.Responses;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Responses;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Flowa.OrderGenerator.Entrypoint.ErrorHandling;

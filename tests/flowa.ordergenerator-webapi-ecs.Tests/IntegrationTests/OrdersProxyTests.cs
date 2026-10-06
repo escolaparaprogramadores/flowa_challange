@@ -261,7 +261,7 @@ public sealed class OrdersProxyTests : IDisposable
     private const string OrderGeneratorExceptionHandlerCategory = "Flowa.OrderGenerator.Entrypoint.ErrorHandling.OrderGeneratorExceptionHandler";
     private const string RequestReceivedInformationLine =
         "Information Flowa.OrderGenerator.Entrypoint.Logging.RequestReceivedLoggingMiddleware: Request received.";
-    private const string HttpCallCompletedInformationLine = "Information Flowa.OrderGenerator.Commons.Http.HttpRequestClient: HTTP call completed.";
+    private const string HttpCallCompletedInformationLine = "Information Flowa.Commons.Http.HttpRequestClient: HTTP call completed.";
     private const string StoredOrdersPageReadInformationLine =
         "Information Flowa.OrderGenerator.Application.Orders.UseCases.ListOrdersUseCase: Stored orders page read.";
     private const string AllStoredOrdersDeletedInformationLine =

@@ -28,8 +28,10 @@ RUN case "$TARGETARCH" in \
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY Directory.Build.props ./
+COPY src/flowa.commons/Commons.csproj src/flowa.commons/
 COPY src/flowa.ordergenerator-webapi-ecs/OrderGenerator.csproj src/flowa.ordergenerator-webapi-ecs/
 RUN dotnet restore src/flowa.ordergenerator-webapi-ecs/OrderGenerator.csproj
+COPY src/flowa.commons/ src/flowa.commons/
 COPY src/flowa.ordergenerator-webapi-ecs/ src/flowa.ordergenerator-webapi-ecs/
 COPY --from=front /repo/src/flowa.ordergenerator-webapi-ecs/wwwroot/ src/flowa.ordergenerator-webapi-ecs/wwwroot/
 # The apps only start with the commit recorded at build time (route /version). The build needs .git in the context:

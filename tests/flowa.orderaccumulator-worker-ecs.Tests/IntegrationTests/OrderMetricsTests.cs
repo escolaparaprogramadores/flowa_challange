@@ -4,10 +4,10 @@ using System.Text;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
-using Flowa.OrderAccumulator.Commons.Database;
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Observability;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Database;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Domain.Orders.Entities;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
@@ -152,7 +152,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.False(failedOrderDecisionMessage.Success);
         Assert.Equal(ResultStatus.InternalError, failedOrderDecisionMessage.Status);
         Assert.Equal("internal-error", failedOrderDecisionMessage.ErrorCode);
-        Assert.Same(databaseFailure, failedOrderDecisionMessage.UnexpectedFailure);
+        Assert.Same(databaseFailure, failedOrderDecisionMessage.Failure);
         Assert.Empty(sentOrderMetrics);
         Assert.Equal(0m, ExposureInMemory("PETR4"));
     }

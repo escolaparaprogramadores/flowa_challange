@@ -3,10 +3,10 @@ using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Database;
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Observability;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Database;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.DomainServices;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
@@ -81,7 +81,7 @@ public static class DecidedOrderMessages
 {
     public static DecideIncomingOrderResponse ReadDecidedOrder(DataMessage<DecideIncomingOrderResponse> orderDecisionMessage)
     {
-        if (orderDecisionMessage.UnexpectedFailure is { } orderDecisionFailure)
+        if (orderDecisionMessage.Failure is { } orderDecisionFailure)
             ExceptionDispatchInfo.Throw(orderDecisionFailure);
         return orderDecisionMessage.Data!;
     }

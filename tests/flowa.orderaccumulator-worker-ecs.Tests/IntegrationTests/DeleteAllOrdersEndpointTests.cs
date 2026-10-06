@@ -3,8 +3,8 @@ using System.Text.Json;
 using System.Text;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Database;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Database;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
@@ -153,7 +153,7 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         var refusedDeleteMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(CancellationToken.None);
 
         Assert.Equal((false, ResultStatus.InternalError, "internal-error"), (refusedDeleteMessage.Success, refusedDeleteMessage.Status, refusedDeleteMessage.ErrorCode));
-        var refusedDeleteException = Assert.IsType<PostgresException>(refusedDeleteMessage.UnexpectedFailure);
+        var refusedDeleteException = Assert.IsType<PostgresException>(refusedDeleteMessage.Failure);
         Assert.Equal("P0001", refusedDeleteException.SqlState);
         SymbolExposure[] exposuresBeforeTheFailedDelete = [new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
         Assert.Equal(exposuresBeforeTheFailedDelete, await deleteFailureExposureReader.GetSymbolExposuresAsync());

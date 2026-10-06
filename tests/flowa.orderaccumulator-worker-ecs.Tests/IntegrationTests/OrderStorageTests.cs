@@ -1,8 +1,8 @@
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Database;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Database;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.DomainServices;
 using Flowa.OrderAccumulator.Domain.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
@@ -167,7 +167,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
 
         Assert.Equal((false, ResultStatus.InternalError, "internal-error"),
             (missingRowDecisionMessage.Success, missingRowDecisionMessage.Status, missingRowDecisionMessage.ErrorCode));
-        var missingRowError = Assert.IsType<InvalidOperationException>(missingRowDecisionMessage.UnexpectedFailure);
+        var missingRowError = Assert.IsType<InvalidOperationException>(missingRowDecisionMessage.Failure);
         Assert.Equal("The symbol VIIA4 has no exposure row. The database migration was not applied.", missingRowError.Message);
         Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }

@@ -2,9 +2,9 @@ using Flowa.OrderGenerator.Application.ErrorHandling;
 using Flowa.OrderGenerator.Application.Orders.Commands;
 using Flowa.OrderGenerator.Application.Orders.Interfaces;
 using Flowa.OrderGenerator.Application.Orders.Responses;
-using Flowa.OrderGenerator.Commons.Logging;
-using Flowa.OrderGenerator.Commons.Observability;
-using Flowa.OrderGenerator.Commons.Responses;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
+using Flowa.Commons.Responses;
 using Flowa.OrderGenerator.Domain.Orders.ValueObjects;
 
 namespace Flowa.OrderGenerator.Application.Orders.UseCases;

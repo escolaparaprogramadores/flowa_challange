@@ -1,6 +1,7 @@
 using System.Diagnostics.Metrics;
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Observability;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
+using Flowa.OrderAccumulator.Entrypoint.Observability;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -10,7 +11,9 @@ namespace Flowa.OrderAccumulator.Tests;
 public static class TestObservability
 {
     public static IOperationMonitoring CreateOperationMonitoring() =>
-        new ActiveSpanOperationMonitoring(new ServiceCollection().AddMetrics().BuildServiceProvider().GetRequiredService<IMeterFactory>());
+        new ActiveSpanOperationMonitoring(
+            new ServiceCollection().AddMetrics().BuildServiceProvider().GetRequiredService<IMeterFactory>(),
+            OrderAccumulatorUseCaseDurationMetric.MeterName, OrderAccumulatorUseCaseDurationMetric.MetricName);
 
     public static IApplicationLogger<T> CreateDiscardingLogger<T>() => new ApplicationLogger<T>(NullLogger<T>.Instance);
 }

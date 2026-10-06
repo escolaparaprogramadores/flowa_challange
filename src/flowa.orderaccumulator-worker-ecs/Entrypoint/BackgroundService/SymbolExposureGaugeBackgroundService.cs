@@ -1,6 +1,6 @@
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
-using Flowa.OrderAccumulator.Commons.Logging;
+using Flowa.Commons.Logging;
 
 namespace Flowa.OrderAccumulator.Entrypoint.BackgroundService;
 

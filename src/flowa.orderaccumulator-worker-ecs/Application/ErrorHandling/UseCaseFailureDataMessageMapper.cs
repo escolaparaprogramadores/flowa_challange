@@ -1,4 +1,4 @@
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Responses;
 
 namespace Flowa.OrderAccumulator.Application.ErrorHandling;
 
@@ -8,5 +8,5 @@ public static class UseCaseFailureDataMessageMapper
     public const string UnexpectedErrorCode = "internal-error";
 
     public static DataMessage<TResponseData> MapUseCaseFailureToDataMessage<TResponseData>(Exception useCaseFailure) =>
-        DataMessage<TResponseData>.CreateUnexpectedFailureMessage(useCaseFailure, UnexpectedErrorMessage, UnexpectedErrorCode);
+        DataMessage<TResponseData>.CreateFailureMessage(useCaseFailure, UnexpectedErrorMessage, ResultStatus.InternalError, UnexpectedErrorCode);
 }

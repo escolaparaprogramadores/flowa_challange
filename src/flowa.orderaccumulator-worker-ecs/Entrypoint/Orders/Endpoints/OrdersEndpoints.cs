@@ -1,7 +1,7 @@
 using System.Globalization;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
 using Flowa.OrderAccumulator.Entrypoint.ErrorHandling;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;

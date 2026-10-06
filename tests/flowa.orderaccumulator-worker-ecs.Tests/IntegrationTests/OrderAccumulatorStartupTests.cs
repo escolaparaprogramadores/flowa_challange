@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Net;
-using Flowa.OrderAccumulator.Commons.Database;
+using Flowa.Commons.Database;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 using Dapper;
 using Microsoft.AspNetCore.Mvc.Testing;

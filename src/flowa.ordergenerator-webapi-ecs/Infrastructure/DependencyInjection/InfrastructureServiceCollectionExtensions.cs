@@ -1,6 +1,6 @@
 using Flowa.OrderGenerator.Application.Exposures.Interfaces;
 using Flowa.OrderGenerator.Application.Orders.Interfaces;
-using Flowa.OrderGenerator.Commons.Http;
+using Flowa.Commons.Http;
 using Flowa.OrderGenerator.Infrastructure.Exposures.Adapters;
 using Flowa.OrderGenerator.Infrastructure.Fix;
 using Flowa.OrderGenerator.Infrastructure.Orders.Adapters;

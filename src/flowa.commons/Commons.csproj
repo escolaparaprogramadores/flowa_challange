@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Flowa.Commons</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Log em JSON, injeção de dependência e fábrica de HttpClient vêm do framework compartilhado do ASP.NET Core, como nas apps. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.89" />
+    <PackageReference Include="DogStatsD-CSharp-Client" Version="9.2.1" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+</Project>

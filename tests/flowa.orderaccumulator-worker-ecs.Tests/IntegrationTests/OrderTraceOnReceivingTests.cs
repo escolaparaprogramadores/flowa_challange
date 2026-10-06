@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using Flowa.OrderAccumulator.Commons.Observability;
+using Flowa.Commons.Observability;
 using Flowa.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Fields;
 using QuickFix.FIX44;

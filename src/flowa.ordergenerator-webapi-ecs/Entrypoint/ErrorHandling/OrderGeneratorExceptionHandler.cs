@@ -1,5 +1,5 @@
 using Flowa.OrderGenerator.Application.ErrorHandling;
-using Flowa.OrderGenerator.Commons.Responses;
+using Flowa.Commons.Responses;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace Flowa.OrderGenerator.Entrypoint.ErrorHandling;

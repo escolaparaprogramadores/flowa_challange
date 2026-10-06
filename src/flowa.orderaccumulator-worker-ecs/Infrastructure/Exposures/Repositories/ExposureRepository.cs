@@ -1,4 +1,4 @@
-using Flowa.OrderAccumulator.Commons.Database;
+using Flowa.Commons.Database;
 using Flowa.OrderAccumulator.Domain.Exposures.Interfaces;
 
 namespace Flowa.OrderAccumulator.Infrastructure.Exposures.Repositories;

@@ -1,5 +1,5 @@
-using Flowa.OrderGenerator.Commons.Http;
-using Flowa.OrderGenerator.Commons.Responses;
+using Flowa.Commons.Http;
+using Flowa.Commons.Responses;
 using Flowa.OrderGenerator.Domain.Orders.Exceptions;
 
 namespace Flowa.OrderGenerator.Application.ErrorHandling;

@@ -3,7 +3,7 @@ using Flowa.OrderAccumulator.Application.Exposures.UseCases;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Database;
+using Flowa.Commons.Database;
 using Flowa.OrderAccumulator.Domain.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Domain.Orders.Entities;
@@ -42,7 +42,7 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
         await orderDecisionRunner.DecideIncomingOrderMessageAsync(TestOrders.NewBuyOrder("ITUB4", 100, 10.00m));
         var failedOrderDecision = await failingOrderDecisionRunner.DecideIncomingOrderMessageAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m));
 
-        Assert.Same(UseCaseFailure, failedOrderDecision.UnexpectedFailure);
+        Assert.Same(UseCaseFailure, failedOrderDecision.Failure);
         Assert.Equal(
             [
                 ("orders.decide-incoming-order", "accepted"),
@@ -64,7 +64,7 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
         await new ListOrdersUseCase(new OrderListReadRepositoryAnswering(null), recordingMonitoring, recordingLogger).ListOrdersAsync(1);
         var failedOrderList = await new ListOrdersUseCase(new OrderListReadRepositoryAnswering(UseCaseFailure), recordingMonitoring, recordingLogger).ListOrdersAsync(1);
 
-        Assert.Same(UseCaseFailure, failedOrderList.UnexpectedFailure);
+        Assert.Same(UseCaseFailure, failedOrderList.Failure);
         Assert.Equal([("orders.list-orders", "succeeded"), ("orders.list-orders", "failed")], recordingMonitoring.RecordedOperations);
         Assert.Equal(["Information Stored orders page read."], recordingLogger.RecordedLogLines);
     }
@@ -78,7 +78,7 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
         await new GetExposuresUseCase(new SymbolExposureReadRepositoryAnswering(null), recordingMonitoring, recordingLogger).GetExposuresAsync();
         var failedExposuresRead = await new GetExposuresUseCase(new SymbolExposureReadRepositoryAnswering(UseCaseFailure), recordingMonitoring, recordingLogger).GetExposuresAsync();
 
-        Assert.Same(UseCaseFailure, failedExposuresRead.UnexpectedFailure);
+        Assert.Same(UseCaseFailure, failedExposuresRead.Failure);
         Assert.Equal([("exposures.get-exposures", "succeeded"), ("exposures.get-exposures", "failed")], recordingMonitoring.RecordedOperations);
         Assert.Equal(["Information Symbol exposures read."], recordingLogger.RecordedLogLines);
     }
@@ -98,7 +98,7 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
                 new InMemorySymbolExposureAdapter(), recordingMonitoring, recordingLogger)
             .DeleteAllOrdersAsync();
 
-        Assert.Same(UseCaseFailure, failedDeleteAll.UnexpectedFailure);
+        Assert.Same(UseCaseFailure, failedDeleteAll.Failure);
         Assert.Equal([("orders.delete-all-orders", "succeeded"), ("orders.delete-all-orders", "failed")], recordingMonitoring.RecordedOperations);
         Assert.Equal(["Information All orders deleted and symbol exposures zeroed."], recordingLogger.RecordedLogLines);
     }

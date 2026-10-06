@@ -9,11 +9,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper" Version="2.1.89" />
-    <PackageReference Include="DogStatsD-CSharp-Client" Version="9.2.1" />
-    <PackageReference Include="Npgsql" Version="10.0.3" />
     <PackageReference Include="QuickFIXn.Core" Version="1.14.1" />
     <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\flowa.commons\Commons.csproj" />
   </ItemGroup>
 
   <!-- The FIX session and the FIX 4.4 dictionaries (the package one and the one with tag 5100) sit next to the executable. -->

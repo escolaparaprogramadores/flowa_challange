@@ -1,4 +1,4 @@
-using Flowa.OrderAccumulator.Commons.Logging;
+using Flowa.Commons.Logging;
 using QuickFix.Logger;
 using QuickFix;
 

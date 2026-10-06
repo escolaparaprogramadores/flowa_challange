@@ -1,5 +1,5 @@
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
-using Flowa.OrderAccumulator.Commons.Observability;
+using Flowa.Commons.Observability;
 
 namespace Flowa.OrderAccumulator.Infrastructure.Orders.Adapters;
 
