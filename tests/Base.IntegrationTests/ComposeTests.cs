@@ -119,8 +119,11 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         var receivedExecutionReport = Assert.Single(generatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message received.");
         Assert.Contains("|35=8|", receivedExecutionReport.ReadLogField("FixMessage"));
 
+        // The accepted order also writes the end of its use case inside the order span (CA-21, G-6): FIX in, accepted, FIX out.
         var accumulatorOrderLines = await ReadOrderLogLinesAsync("orderaccumulator", clOrdId);
-        Assert.Equal(2, accumulatorOrderLines.Count);
+        Assert.Equal(3, accumulatorOrderLines.Count);
+        var acceptedOrderLine = Assert.Single(accumulatorOrderLines, orderLogLine => orderLogLine.Message == "Order accepted.");
+        Assert.Equal(("PETR4", "7"), (acceptedOrderLine.ReadLogField("Symbol"), acceptedOrderLine.ReadLogField("Quantity")));
         var receivedNewOrderSingle = Assert.Single(accumulatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message received.");
         Assert.Contains("|35=D|", receivedNewOrderSingle.ReadLogField("FixMessage"));
         var sentExecutionReport = Assert.Single(accumulatorOrderLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
