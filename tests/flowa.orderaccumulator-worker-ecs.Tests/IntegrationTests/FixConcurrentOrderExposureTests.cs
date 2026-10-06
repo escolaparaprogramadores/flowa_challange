@@ -75,7 +75,10 @@ public sealed class FixConcurrentOrderExposureTests(OrderAccumulatorPostgresFixt
     }
 
     private static decimal CalculateExposureDeltaOfFixOrder(NewOrderSingle fixOrder) =>
-        ExposureLimitPolicy.CalculateAcceptedOrderExposureDelta(fixOrder.Side.Value, fixOrder.OrderQty.Value, fixOrder.Price.Value);
+        ExposureLimitPolicy.CalculateOrderExposureDelta(
+            OrderSideCodes.ConvertFixCodeToOrderSide(fixOrder.Side.Value)
+                ?? throw new InvalidOperationException($"The FIX order {fixOrder.ClOrdID.Value} has the side {fixOrder.Side.Value}, which is neither buy nor sell."),
+            (int)fixOrder.OrderQty.Value, fixOrder.Price.Value);
 
     private static async Task<decimal> ReadExposureShownByTheAppAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp, string symbol)
     {

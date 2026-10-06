@@ -3,7 +3,6 @@ using Dapper;
 using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using QuickFix.Fields;
 using QuickFix.FIX44;
 
@@ -100,7 +99,7 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
         var recordingOrderMetrics = new RecordingOrderMetrics();
         var recordingUseCaseLogger = new RecordingApplicationLogger<DecideIncomingOrderUseCase>();
         var measuredOrderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new InMemorySymbolExposureAdapter(), recordingOrderMetrics,
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, recordingOrderMetrics,
             operationMonitoring: recordingOperationMonitoring, orderDecisionLogger: recordingUseCaseLogger);
         await measuredOrderDecisionRunner.DecideIncomingOrderMessageAsync(new(OriginalClOrdId, "PETR4", '1', 100, 10.50m));
 
