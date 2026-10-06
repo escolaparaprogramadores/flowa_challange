@@ -1,4 +1,4 @@
-namespace Base.OrderAccumulator.Infrastructure.DependencyInjection;
+namespace Base.OrderAccumulator.Infrastructure.Orders.Options;
 
 public static class OrderAccumulatorConfigurationKeys
 {

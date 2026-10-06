@@ -1,6 +1,5 @@
 using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Commons.Observability;
-using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 
 namespace Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 

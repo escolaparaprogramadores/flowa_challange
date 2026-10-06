@@ -19,8 +19,8 @@ public sealed class DataMessage<T>
         ErrorCode = errorCode;
     }
 
-    public static DataMessage<T> CreateSuccessMessage(T data, string message, ResultStatus status = ResultStatus.Ok) =>
-        new(true, status, message, data, Array.Empty<string>(), null);
+    public static DataMessage<T> CreateSuccessMessage(T responseData, string message, ResultStatus status = ResultStatus.Ok) =>
+        new(true, status, message, responseData, Array.Empty<string>(), null);
 
     public static DataMessage<T> CreateErrorMessage(string message, ResultStatus status = ResultStatus.InvalidInput, IReadOnlyCollection<string>? errors = null, string? errorCode = null) =>
         new(false, status, message, default, errors ?? Array.Empty<string>(), errorCode);

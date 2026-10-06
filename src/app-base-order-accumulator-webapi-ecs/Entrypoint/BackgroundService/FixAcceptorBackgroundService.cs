@@ -1,5 +1,5 @@
 using Base.OrderAccumulator.Entrypoint.Fix;
-using Base.OrderAccumulator.Infrastructure.DependencyInjection;
+using Base.OrderAccumulator.Infrastructure.Orders.Options;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Store;
 using QuickFix;

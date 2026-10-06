@@ -2,6 +2,7 @@ using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Commons.Observability;
 using Base.OrderAccumulator.Infrastructure.Orders.Adapters;
+using Base.OrderAccumulator.Infrastructure.Orders.Options;
 
 namespace Base.OrderAccumulator.Infrastructure.DependencyInjection;
 

@@ -4,6 +4,7 @@ using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Exposures.UseCases;
 using Base.OrderAccumulator.Application.Orders.UseCases;
 using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.DependencyInjection;
 using Base.OrderAccumulator.Commons.Logging;
 using Base.OrderAccumulator.Domain.DomainServices;
 using Base.OrderAccumulator.Entrypoint.BackgroundService;
@@ -14,10 +15,12 @@ using Base.OrderAccumulator.Entrypoint.Orders.Endpoints;
 using Base.OrderAccumulator.Infrastructure.DependencyInjection;
 using Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using Base.OrderAccumulator.Infrastructure.Fix;
+using Base.OrderAccumulator.Infrastructure.Orders.Options;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var orderAccumulatorWebBuilder = WebApplication.CreateBuilder(args);
-orderAccumulatorWebBuilder.AddApplicationLogging();
+orderAccumulatorWebBuilder.Logging.AddJsonLogsWithTraceId();
+orderAccumulatorWebBuilder.Services.AddApplicationLogger();
 
 var buildCommitSha = ReadBuildCommitSha() is { Length: 40 } shaFromBuild
     ? shaFromBuild

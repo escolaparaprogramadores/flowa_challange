@@ -1,5 +1,3 @@
-using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
-
 namespace Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 
 public static class OrderMetricNames
