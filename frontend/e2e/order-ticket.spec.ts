@@ -204,7 +204,7 @@ test('CA-24: quantity as a large Sora 22px number and summary in a box with the 
   const quantityStyle = await readComputedStyle(locateOrderTicketForm(page).getByLabel(/^Quantidade de/), ['font-family', 'font-size']);
   expect(quantityStyle['font-family']).toMatch(/^"?Sora"?,/);
   expect(quantityStyle['font-size']).toBe('22px');
-  await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill('100');
+  await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill('100,00');
   const estimatedTotal = page.getByTestId('total-estimado');
   await expect(estimatedTotal).toHaveText('R$ 10.000,00');
   const totalStyle = await readComputedStyle(estimatedTotal, ['font-family', 'font-size']);

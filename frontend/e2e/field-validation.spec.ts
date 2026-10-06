@@ -41,10 +41,7 @@ test('CA-2: the side only offers Compra and Venda', async ({ page }) => {
 
 const refusedQuantities: Array<[string, string]> = [
   ['0', 'A quantidade deve ser maior que zero.'],
-  ['-1', 'A quantidade deve ser maior que zero.'],
-  ['1,5', 'A quantidade deve ser um número inteiro.'],
-  ['abc', 'A quantidade deve ser um número inteiro.'],
-  ['100.000', 'A quantidade deve ser menor que 100.000.'],
+  ['', 'Informe a quantidade.'],
 ];
 
 for (const [refusedQuantity, expectedMessage] of refusedQuantities) {
@@ -62,12 +59,10 @@ for (const [refusedQuantity, expectedMessage] of refusedQuantities) {
   });
 }
 
+// With the bank-style mask the only price left to refuse on screen is 0,00 (empty also becomes 0,00).
 const refusedPrices: Array<[string, string]> = [
-  ['0', 'O preço deve ser maior que zero.'],
-  ['-1', 'O preço deve ser maior que zero.'],
-  ['1.000', 'O preço deve ser menor que 1.000,00.'],
-  ['10,005', 'O preço deve ser múltiplo de 0,01.'],
-  ['abc', 'O preço deve ser um número.'],
+  ['0,00', 'O preço deve ser maior que zero.'],
+  ['', 'O preço deve ser maior que zero.'],
 ];
 
 for (const [refusedPrice, expectedMessage] of refusedPrices) {
@@ -89,7 +84,7 @@ test('RF-14: empty quantity and price are refused on screen, each with its messa
   const orderSends = countOrderSends(page);
   await fillOrderTicket(page, '', '');
   await page.getByRole('button', { name: /^Enviar ordem/ }).click();
-  await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveText(['Informe a quantidade.', 'Informe o preço.']);
+  await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveText(['Informe a quantidade.', 'O preço deve ser maior que zero.']);
   expect(orderSends).toEqual([]);
 });
 
@@ -107,9 +102,8 @@ const quantitySteps: Array<{ quantityTypedBefore: string; buttonName: string; ex
   { quantityTypedBefore: '100', buttonName: 'Aumentar quantidade', expectedQuantity: '101' },
   { quantityTypedBefore: '100', buttonName: 'Diminuir quantidade', expectedQuantity: '99' },
   { quantityTypedBefore: '1', buttonName: 'Diminuir quantidade', expectedQuantity: '1' },
-  { quantityTypedBefore: '99.999', buttonName: 'Aumentar quantidade', expectedQuantity: '99999' },
-  { quantityTypedBefore: '100.000', buttonName: 'Diminuir quantidade', expectedQuantity: '99999' },
-  { quantityTypedBefore: 'abc', buttonName: 'Aumentar quantidade', expectedQuantity: '1' },
+  { quantityTypedBefore: '99998', buttonName: 'Aumentar quantidade', expectedQuantity: '99999' },
+  { quantityTypedBefore: '', buttonName: 'Aumentar quantidade', expectedQuantity: '1' },
 ];
 
 for (const { quantityTypedBefore, buttonName, expectedQuantity } of quantitySteps) {
@@ -119,3 +113,67 @@ for (const { quantityTypedBefore, buttonName, expectedQuantity } of quantityStep
     await expect(page.getByLabel(/^Quantidade de/)).toHaveValue(expectedQuantity);
   });
 }
+
+function locateSummaryPrice(orderTicketPage: Page) {
+  return locateOrderTicketForm(orderTicketPage).locator('.order-summary-row').filter({ hasText: 'Preço por ação' }).locator('dd');
+}
+
+test('CA-1 (F5): typing 9999999 leaves the quantity at 99999, and the + is disabled and does not change it', async ({ page }) => {
+  const quantityField = page.getByLabel(/^Quantidade de/);
+  const increaseQuantityButton = page.getByRole('button', { name: 'Aumentar quantidade' });
+  await quantityField.fill('');
+  await quantityField.pressSequentially('9999999');
+  await expect(quantityField).toHaveValue('99999');
+  await expect(increaseQuantityButton).toBeDisabled();
+  await increaseQuantityButton.click({ force: true });
+  await expect(quantityField).toHaveValue('99999');
+});
+
+test('CA-1 (F5): below 99999 the + stays enabled, and reaching 99999 with it disables it', async ({ page }) => {
+  const increaseQuantityButton = page.getByRole('button', { name: 'Aumentar quantidade' });
+  await page.getByLabel(/^Quantidade de/).fill('99998');
+  await expect(increaseQuantityButton).toBeEnabled();
+  await increaseQuantityButton.click();
+  await expect(page.getByLabel(/^Quantidade de/)).toHaveValue('99999');
+  await expect(increaseQuantityButton).toBeDisabled();
+});
+
+test('CA-1 (F5): letters, comma, dot and minus never get into the quantity', async ({ page }) => {
+  const quantityField = page.getByLabel(/^Quantidade de/);
+  await quantityField.fill('');
+  await quantityField.pressSequentially('-1,5a.0');
+  await expect(quantityField).toHaveValue('150');
+});
+
+test('CA-2 (F5): the price starts at 0,00 and 2, 5, 0, 0 fills from the right up to 25,00, with the summary following', async ({ page }) => {
+  const priceField = page.getByLabel('Preço por ação (R$)');
+  await expect(priceField).toHaveValue('0,00');
+  await expect(locateSummaryPrice(page)).toHaveText('R$ 0,00');
+  await priceField.press('End');
+  for (const [typedPriceKey, expectedShownPrice] of [['2', '0,02'], ['5', '0,25'], ['0', '2,50'], ['0', '25,00']]) {
+    await priceField.press(typedPriceKey);
+    await expect(priceField, `after ${typedPriceKey}`).toHaveValue(expectedShownPrice);
+  }
+  await expect(locateSummaryPrice(page)).toHaveText('R$ 25,00');
+  await expect(page.getByTestId('total-estimado')).toHaveText('R$ 2.500,00');
+  await page.getByLabel(/^Quantidade de/).fill('99999');
+  await expect(page.getByTestId('total-estimado')).toHaveText('R$ 2.499.975,00');
+});
+
+test('CA-2 (F5): six nines stop the price at 999,99 and the next digit does not get in', async ({ page }) => {
+  const priceField = page.getByLabel('Preço por ação (R$)');
+  await priceField.press('End');
+  await priceField.pressSequentially('999999');
+  await expect(priceField).toHaveValue('999,99');
+  await priceField.press('9');
+  await expect(priceField).toHaveValue('999,99');
+  await expect(locateSummaryPrice(page)).toHaveText('R$ 999,99');
+});
+
+test('CA-2 (F5): Backspace moves the cents back to the right', async ({ page }) => {
+  const priceField = page.getByLabel('Preço por ação (R$)');
+  await priceField.press('End');
+  await priceField.pressSequentially('2500');
+  await priceField.press('Backspace');
+  await expect(priceField).toHaveValue('2,50');
+});
