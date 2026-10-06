@@ -6,7 +6,7 @@ import { EXPOSURES_ROUTE, EXPOSURE_UNAVAILABLE_MESSAGE, ORDERS_ROUTE, ORDER_LIST
 // OrderAccumulator before and starts it again after; the test does not shut anything down by itself.
 
 type ExposuresData = { exposures: { symbol: string; exposure: number }[] };
-type OrdersPageData = { total: number; pageSize: number };
+type OrdersPageData = { total: number; pageSize: number; orders: { clOrdId: string }[] };
 
 test('CA-31: without the OrderAccumulator the screen shows the exposure and the orders from the database, and sending fails as before', async ({ page }) => {
   // What the database has now, read by the same OrderGenerator the screen calls.
@@ -17,6 +17,10 @@ test('CA-31: without the OrderAccumulator the screen shows the exposure and the 
   const ordersPageAnswer = await page.request.get(`${ORDERS_ROUTE}?page=1`);
   expect(ordersPageAnswer.status()).toBe(200);
   const storedOrdersPage = ((await ordersPageAnswer.json()) as { data: OrdersPageData }).data;
+  // Whoever runs the scenario leaves orders stored before stopping the OrderAccumulator: zero exposure and an empty
+  // list are also what the screen shows when nothing could be read (CA-43), so they would prove nothing here.
+  expect(storedOrdersPage.total).toBeGreaterThan(0);
+  expect(storedExposures.some((storedExposure) => storedExposure.exposure !== 0)).toBe(true);
 
   await page.goto('/');
 
@@ -27,11 +31,9 @@ test('CA-31: without the OrderAccumulator the screen shows the exposure and the 
   }
   await expect(page.getByText(EXPOSURE_UNAVAILABLE_MESSAGE)).toHaveCount(0);
   const orderListCard = page.getByRole('region', { name: 'Compra/Venda' });
-  if (storedOrdersPage.total === 0) {
-    await expect(orderListCard.getByTestId('lista-de-ordens-vazia')).toBeVisible();
-  } else {
-    await expect(orderListCard.getByTestId('linha-da-ordem')).toHaveCount(Math.min(storedOrdersPage.total, storedOrdersPage.pageSize));
-  }
+  const orderListRows = orderListCard.getByTestId('linha-da-ordem');
+  await expect(orderListRows).toHaveCount(Math.min(storedOrdersPage.total, storedOrdersPage.pageSize));
+  await expect(orderListRows.first().locator('td[data-column="send-identifier"]')).toHaveText(storedOrdersPage.orders[0].clOrdId);
   await expect(page.getByText(ORDER_LIST_UNAVAILABLE_MESSAGE)).toHaveCount(0);
 
   await page.getByLabel(/^Quantidade de/).fill('10');

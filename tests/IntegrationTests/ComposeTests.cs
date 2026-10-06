@@ -357,29 +357,36 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     [Fact]
     public async Task With_the_orderaccumulator_paused_exposures_and_orders_still_answer_from_postgres()
     {
+        await DeleteAllOrdersThroughTheOrderGeneratorAsync();
+        var knownOrder = await PostOrderAsync("VALE3", "sell", 3, 1.23m);
+        Assert.Equal("accepted", knownOrder.GetProperty("status").GetString());
+        var knownOrderClOrdId = knownOrder.GetProperty("clOrdId").GetString()!;
         HttpStatusCode exposuresStatus;
         HttpStatusCode ordersPageStatus;
-        string[] exposureSymbols;
-        int ordersPageNumber;
+        decimal[] exposuresWhilePaused;
+        (long Total, string? NewestClOrdId) ordersPageWhilePaused;
         await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "pause", "orderaccumulator");
         try
         {
             using var exposuresResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/exposures");
             exposuresStatus = exposuresResponse.StatusCode;
-            exposureSymbols = ReadSuccessData(await exposuresResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("exposures").EnumerateArray()
-                .Select(symbolExposureRow => symbolExposureRow.GetProperty("symbol").GetString()!).ToArray();
+            exposuresWhilePaused = ReadSuccessData(await exposuresResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("exposures").EnumerateArray()
+                .Select(symbolExposureRow => symbolExposureRow.GetProperty("exposure").GetDecimal()).ToArray();
             using var ordersPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=1");
             ordersPageStatus = ordersPageResponse.StatusCode;
-            ordersPageNumber = ReadSuccessData(await ordersPageResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("page").GetInt32();
+            var ordersPageWhilePausedJson = ReadSuccessData(await ordersPageResponse.Content.ReadFromJsonAsync<JsonElement>());
+            ordersPageWhilePaused = (ordersPageWhilePausedJson.GetProperty("total").GetInt64(),
+                ordersPageWhilePausedJson.GetProperty("orders")[0].GetProperty("clOrdId").GetString());
         }
         finally
         {
             await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(1), "unpause", "orderaccumulator");
+            await DeleteAllOrdersThroughTheOrderGeneratorAsync();
         }
 
         Assert.Equal((HttpStatusCode.OK, HttpStatusCode.OK), (exposuresStatus, ordersPageStatus));
-        Assert.Equal(new[] { "PETR4", "VALE3", "VIIA4" }, exposureSymbols);
-        Assert.Equal(1, ordersPageNumber);
+        Assert.Equal([0m, -3.69m, 0m], exposuresWhilePaused);
+        Assert.Equal((1L, knownOrderClOrdId), ordersPageWhilePaused);
     }
 
     // The exception path of the OrderGenerator handler, outside an order: with the Postgres stopped the page read fails
@@ -434,18 +441,22 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
 
     // CA-42 and decision 19: the delete runs on the OrderGenerator and the decisions on the OrderAccumulator, two
     // processes, with no lock in memory between them. With orders and a delete at the same time, repeated, at the end
-    // the exposure of each symbol is the sum of the accepted orders that stayed stored.
+    // the exposure of each symbol is the sum of the accepted orders that stayed stored. A round only counts as a race
+    // when some accepted orders of it were deleted and some stayed: the test needs at least three of those rounds.
     [Fact]
     public async Task Delete_and_orders_at_the_same_time_end_with_the_exposure_equal_to_the_stored_accepted_orders()
     {
-        const int ConcurrencyRounds = 5;
+        const int MaximumConcurrencyRounds = 20;
+        const int RequiredRacingRounds = 3;
         const int OrdersPerRound = 30;
         string[] roundSymbols = ["PETR4", "VALE3", "VIIA4"];
         var roundRandom = new Random(4242);
+        var racingRounds = 0;
         try
         {
-            for (var concurrencyRound = 1; concurrencyRound <= ConcurrencyRounds; concurrencyRound++)
+            for (var concurrencyRound = 1; concurrencyRound <= MaximumConcurrencyRounds && racingRounds < RequiredRacingRounds; concurrencyRound++)
             {
+                await DeleteAllOrdersThroughTheOrderGeneratorAsync();
                 var roundOrders = Enumerable.Range(0, OrdersPerRound).Select(orderIndex => new
                 {
                     symbol = roundSymbols[orderIndex % roundSymbols.Length],
@@ -457,20 +468,31 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
                 var roundOrderCalls = roundOrders.Select(async roundOrder =>
                 {
                     using var orderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync("/api/orders", roundOrder);
-                    return orderResponse.StatusCode;
+                    var orderDataMessage = await orderResponse.Content.ReadFromJsonAsync<JsonElement>();
+                    return (orderResponse.StatusCode, Order: orderDataMessage.GetProperty("data"));
                 }).ToList();
                 await Task.Delay(TimeSpan.FromMilliseconds(roundRandom.Next(20, 200)));
                 using var roundDeletionResponse = await composeUnderTest.OrderGeneratorHttp.DeleteAsync("/api/orders");
-                var roundOrderStatuses = await Task.WhenAll(roundOrderCalls);
+                var roundOrderAnswers = await Task.WhenAll(roundOrderCalls);
 
                 Assert.Equal(HttpStatusCode.NoContent, roundDeletionResponse.StatusCode);
-                Assert.All(roundOrderStatuses, roundOrderStatus => Assert.Equal(HttpStatusCode.OK, roundOrderStatus));
+                Assert.All(roundOrderAnswers, roundOrderAnswer => Assert.Equal(HttpStatusCode.OK, roundOrderAnswer.StatusCode));
+                var acceptedClOrdIds = roundOrderAnswers
+                    .Where(roundOrderAnswer => roundOrderAnswer.Order.GetProperty("status").GetString() == "accepted")
+                    .Select(roundOrderAnswer => roundOrderAnswer.Order.GetProperty("clOrdId").GetString()!)
+                    .ToHashSet();
+                var storedAcceptedClOrdIds = await ReadStoredAcceptedClOrdIdsAsync();
+                Assert.Subset(acceptedClOrdIds, storedAcceptedClOrdIds);
                 var acceptedOrdersExposureBySymbol = await ReadStoredAcceptedOrdersExposureBySymbolAsync();
                 var symbolExposures = await ReadSymbolExposuresAsync();
                 Assert.True(
                     roundSymbols.Select(roundSymbol => acceptedOrdersExposureBySymbol.GetValueOrDefault(roundSymbol)).SequenceEqual(symbolExposures),
                     $"round {concurrencyRound}: stored accepted orders {string.Join(" ", acceptedOrdersExposureBySymbol)}, exposure {string.Join(" ", symbolExposures)}");
+                if (storedAcceptedClOrdIds.Count > 0 && storedAcceptedClOrdIds.Count < acceptedClOrdIds.Count)
+                    racingRounds++;
             }
+
+            Assert.True(racingRounds >= RequiredRacingRounds, $"only {racingRounds} round(s) had the delete in the middle of the accepted orders");
         }
         finally
         {
@@ -510,6 +532,13 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
     {
         var exposuresBody = ReadSuccessData(await composeUnderTest.OrderGeneratorHttp.GetFromJsonAsync<JsonElement>("/api/exposures"));
         return exposuresBody.GetProperty("exposures").EnumerateArray().Select(symbolExposureRow => symbolExposureRow.GetProperty("exposure").GetDecimal()).ToArray();
+    }
+
+    private async Task<HashSet<string>> ReadStoredAcceptedClOrdIdsAsync()
+    {
+        var storedAcceptedClOrdIdRows = await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromSeconds(30), "exec", "-T", "postgres",
+            "psql", "-U", "flowa", "-d", "flowa", "-At", "-c", "SELECT cl_ord_id FROM orders WHERE accepted");
+        return storedAcceptedClOrdIdRows.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
     }
 
     // The Postgres port is not open on the host: the sum is read by psql inside its container, straight from the orders table.

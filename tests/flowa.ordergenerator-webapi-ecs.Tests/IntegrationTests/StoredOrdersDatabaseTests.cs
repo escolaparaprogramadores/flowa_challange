@@ -66,6 +66,22 @@ public sealed class StoredOrdersDatabaseTests : IAsyncLifetime, IDisposable
             ordersPageDataMessage.GetProperty("data").GetRawText());
     }
 
+    // RF-04: orders received in the same instant come newest id first (ORDER BY received_at DESC, id DESC).
+    [Fact]
+    public async Task Orders_received_at_the_same_instant_come_with_the_newest_id_first()
+    {
+        await _orderGeneratorPostgres.InsertStoredOrderAsync(AcceptedBuyOrder(1) with { ClOrdId = "cl-stored-first", ReceivedAt = FirstOrderReceivedAt });
+        await _orderGeneratorPostgres.InsertStoredOrderAsync(AcceptedBuyOrder(2) with { ClOrdId = "cl-stored-second", ReceivedAt = FirstOrderReceivedAt });
+        await _orderGeneratorPostgres.InsertStoredOrderAsync(AcceptedBuyOrder(3) with { ClOrdId = "cl-stored-third", ReceivedAt = FirstOrderReceivedAt });
+        await using var orderGeneratorFactory = CreateOrderGeneratorFactoryOnTheTestDatabase();
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+
+        var ordersPageDataMessage = await OrderApiTests.ReadSuccessDataMessageAsync(await orderGeneratorClient.GetAsync("/api/orders?page=1"));
+
+        Assert.Equal(["cl-stored-third", "cl-stored-second", "cl-stored-first"],
+            ordersPageDataMessage.GetProperty("data").GetProperty("orders").EnumerateArray().Select(listedOrder => listedOrder.GetProperty("clOrdId").GetString()));
+    }
+
     // The default factory points at a database nobody listens to: a 400 here proves the page was refused before any read.
     [Theory]
     [InlineData("0")]
