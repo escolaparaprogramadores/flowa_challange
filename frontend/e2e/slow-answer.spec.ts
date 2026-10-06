@@ -44,9 +44,9 @@ function watchScreenReads(orderTicketPage: Page) {
 
 test('CA-11 and CA-27: a late answer (503) shows the warning, rereads list and exposure by itself at most 3 times, 2 s apart, and the order shows up', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/');
+  // Deleting before the page opens: a reload would cut the opening reads still in flight.
   expect((await page.request.delete(ORDERS_ROUTE)).status()).toBe(204);
-  await page.reload();
+  await page.goto('/');
   await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
 
   await page.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'PETR4', exact: true }).click();
@@ -119,9 +119,8 @@ test('CA-11 and CA-27: a late answer (503) shows the warning, rereads list and e
 
 async function startFromEmptyBoard(orderTicketPage: Page, viewportWidth: number) {
   await orderTicketPage.setViewportSize({ width: viewportWidth, height: 900 });
-  await orderTicketPage.goto('/');
   expect((await orderTicketPage.request.delete(ORDERS_ROUTE)).status()).toBe(204);
-  await orderTicketPage.reload();
+  await orderTicketPage.goto('/');
   await expect(orderTicketPage.getByTestId('lista-de-ordens-vazia')).toBeVisible();
 }
 

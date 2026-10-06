@@ -56,9 +56,9 @@ async function expectBoxAboveTable(orderTicketPage: Page, responseBoxTestId: str
 for (const viewportWidth of [1920, 1440, 860, 375]) {
   test(`CA-3 at ${viewportWidth}px: the box shows "Aceita" and then "Rejeitada" with the order and the reason when PETR4 breaks the limit`, async ({ page }) => {
     await page.setViewportSize({ width: viewportWidth, height: 900 });
-    await page.goto('/');
+    // Deleting before the page opens: a reload would cut the opening reads still in flight.
     await deleteAllOrdersOnServer(page);
-    await page.reload();
+    await page.goto('/');
     await expect(locateOrderListCard(page).getByTestId('caixa-de-resposta')).toHaveCount(0);
 
     const acceptedAnswer = await sendPetr4BigBuy(page);
@@ -111,9 +111,8 @@ for (const viewportWidth of [1920, 1440, 860, 375]) {
 }
 
 test('RF-04: the box of the previous answer goes away as soon as a new send starts', async ({ page }) => {
-  await page.goto('/');
   await deleteAllOrdersOnServer(page);
-  await page.reload();
+  await page.goto('/');
   await sendPetr4BigBuy(page);
   await expect(locateOrderListCard(page).getByTestId('caixa-de-resposta')).toBeVisible();
   // The real send is only held for 1.5 s so the instant between the click and the answer can be seen.
@@ -133,9 +132,8 @@ test('RF-04: the box of the previous answer goes away as soon as a new send star
 });
 
 test('P02-10: the box shows the answer of the POST without waiting for the list and exposure reads after it', async ({ page }) => {
-  await page.goto('/');
   await deleteAllOrdersOnServer(page);
-  await page.reload();
+  await page.goto('/');
   // The opening reads must be over before the hold starts, or they would be held too (F-07).
   await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
   await expect(page.getByTestId('exposicao-VALE3').getByTestId('exposicao-atual')).toHaveText('R$ 0,00');
