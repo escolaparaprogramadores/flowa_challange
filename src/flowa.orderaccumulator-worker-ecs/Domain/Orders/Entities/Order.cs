@@ -68,6 +68,15 @@ public sealed class Order : Entity, IAggregateRoot
         string clOrdId, string orderId, string execId, string? symbol, char side, decimal quantity, decimal price, bool accepted, string? rejectReason) =>
         new(Guid.ParseExact(orderId, OrderIdFormat), clOrdId, execId, symbol, side, quantity, price, accepted, rejectReason);
 
+    public static string BuildDuplicateClOrdIdRejectionText(string clOrdId) =>
+        $"Ordem rejeitada: o ClOrdID {clOrdId} já foi usado com outros dados.";
+
+    public bool HasTheSameOrderFieldsAs(IncomingOrder incomingOrder)
+    {
+        ArgumentNullException.ThrowIfNull(incomingOrder);
+        return Symbol == incomingOrder.Symbol && Side == incomingOrder.Side && Quantity == incomingOrder.Quantity && Price == incomingOrder.Price;
+    }
+
     public bool WasRejectedForInvalidFields() =>
         !Accepted && OrderFieldPolicy.ValidateIncomingOrderFields(new IncomingOrder(ClOrdId, Symbol, Side, Quantity, Price)).ValidOrderFields is null;
 
