@@ -11,11 +11,10 @@ locals {
   # O generator acha o accumulator por este nome no Cloud Map (registro A, TTL curto).
   nome_dns_do_accumulator = "${aws_service_discovery_service.registro_dns_do_order_accumulator.name}.${aws_service_discovery_private_dns_namespace.descoberta_privada_dos_servicos_flowa.name}"
 
-  # A imagem não tem curl nem wget; o bash abre o socket e confere se o /health respondeu 200.
-  comando_health_check_por_servico_flowa = {
-    for nome_do_servico_flowa, porta_http_do_servico_flowa in { generator = local.porta_http_do_generator, accumulator = local.porta_http_do_accumulator } :
-    nome_do_servico_flowa => "exec 3<>/dev/tcp/127.0.0.1/${porta_http_do_servico_flowa} && printf 'GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"
-  }
+  # A imagem não tem curl nem wget; o bash abre o socket e confere se o /health respondeu 200. Só o generator:
+  # o accumulator é worker sem HTTP e fica sem checagem (decisão 20; uma checagem TCP na 9876 geraria uma
+  # desconexão FIX no log a cada 15 s).
+  comando_health_check_do_generator = "exec 3<>/dev/tcp/127.0.0.1/${local.porta_http_do_generator} && printf 'GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"
 
   log_group_por_servico_flowa = {
     generator   = local.log_group_generator
@@ -171,7 +170,7 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
     ]
 
     healthCheck = {
-      command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico_flowa.generator]
+      command     = ["CMD", "bash", "-c", local.comando_health_check_do_generator]
       interval    = 15
       timeout     = 5
       retries     = 3
@@ -201,14 +200,11 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
     image     = "${local.ecr_accumulator_url}:${var.accumulator_image_tag}"
     essential = true
 
-    portMappings = [
-      { containerPort = local.porta_http_do_accumulator, protocol = "tcp" },
-      { containerPort = local.porta_fix, protocol = "tcp" },
-    ]
+    portMappings = [{ containerPort = local.porta_fix, protocol = "tcp" }]
 
     environment = concat([
-      { name = "ASPNETCORE_HTTP_PORTS", value = tostring(local.porta_http_do_accumulator) },
       { name = "Fix__AcceptorPort", value = tostring(local.porta_fix) },
+      { name = "Database__MaximumPoolSize", value = tostring(local.limite_do_pool_do_accumulator) },
     ], local.variaveis_datadog_do_app_por_servico_flowa.accumulator)
 
     # A connection string (com a senha) vem do segredo no momento em que a task sobe; nunca fica na task
@@ -216,14 +212,6 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
     secrets = [
       { name = "ConnectionStrings__Flowa", valueFrom = "${local.db_secret_arn}:connection_string::" },
     ]
-
-    healthCheck = {
-      command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico_flowa.accumulator]
-      interval    = 15
-      timeout     = 5
-      retries     = 3
-      startPeriod = 30
-    }
 
     logConfiguration = local.configuracao_de_log_do_app_por_servico_flowa.accumulator
   }], local.containers_do_agente_por_servico_flowa.accumulator, local.containers_do_coletor_por_servico_flowa.accumulator))
