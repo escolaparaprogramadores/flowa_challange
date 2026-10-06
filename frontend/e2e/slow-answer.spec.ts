@@ -18,6 +18,12 @@ const DATABASE_PAUSE_IN_MS = Number(process.env.E2E_DB_PAUSE_MS ?? 3_000);
 const SCREENSHOT_FOLDER = process.env.E2E_PROVAS_DIR;
 const MAYBE_ACCEPTED_MESSAGE = 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.';
 const brazilianReaisFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+// A read of the list that fails answers like the server does when it cannot read the orders (as in order-list.spec.ts).
+const ORDER_LIST_READ_FAILURE = {
+  status: 503,
+  contentType: 'application/problem+json',
+  body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível ler as ordens agora.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }),
+};
 const WARNING_BOX_COLORS = { border: 'color(srgb 0.956863 0.772549 0.415686 / 0.38)', text: 'rgb(244, 197, 106)', background: 'rgba(242, 184, 75, 0.14)' };
 
 function isDatabasePaused() {
@@ -153,12 +159,12 @@ test('RF-12 at 375px: the read right after the warning fails, it counts as a rou
   await startFromEmptyBoard(page, 375);
   await fillOrderTicket(page, 'PETR4', '100', '10,00');
   const screenReads = watchScreenReads(page);
-  // Only the first list read after the send fails on the network; every other read reaches the real server.
+  // Only the first list read after the send fails (503); every other read reaches the real server.
   let shouldFailNextOrderListRead = true;
   await page.route(`**${ORDERS_ROUTE}?page=*`, async (orderListReadRoute) => {
     if (!shouldFailNextOrderListRead) return orderListReadRoute.continue();
     shouldFailNextOrderListRead = false;
-    return orderListReadRoute.abort('failed');
+    return orderListReadRoute.fulfill(ORDER_LIST_READ_FAILURE);
   });
   const { lateAnswerAtInMs, databaseResume } = await sendWithDatabasePaused(page);
 
@@ -191,7 +197,7 @@ test('RF-12: a new send cancels the rereads of the previous unconfirmed send', a
   // While the first order is unconfirmed its list reads fail, so its cycle would keep rereading for 4 s.
   let shouldFailOrderListReads = true;
   await page.route(`**${ORDERS_ROUTE}?page=*`, (orderListReadRoute) =>
-    shouldFailOrderListReads ? orderListReadRoute.abort('failed') : orderListReadRoute.continue(),
+    shouldFailOrderListReads ? orderListReadRoute.fulfill(ORDER_LIST_READ_FAILURE) : orderListReadRoute.continue(),
   );
   const { databaseResume } = await sendWithDatabasePaused(page);
   await expect(page.getByTestId('faixa-da-falha-no-envio').getByTestId('status-da-ordem')).toHaveText('Sem confirmação');
