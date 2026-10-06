@@ -1,8 +1,5 @@
 using System.Text.Json;
-using Base.OrderGenerator.Application.Orders.Responses;
 using Base.OrderGenerator.Application.Orders.UseCases;
-using Base.OrderGenerator.Commons.Responses;
-using Base.OrderGenerator.Domain.Orders.Enums;
 using Base.OrderGenerator.Domain.Orders.ValueObjects;
 using Base.OrderGenerator.Entrypoint.ErrorHandling;
 using Base.OrderGenerator.Entrypoint.Orders.Requests;
@@ -11,9 +8,6 @@ namespace Base.OrderGenerator.Entrypoint.Orders.Endpoints;
 
 public static class OrdersEndpoints
 {
-    public const string InvalidOrderMessage = "A ordem tem campos inválidos.";
-    public const string InvalidOrderErrorCode = "invalid-order";
-
     extension(WebApplication orderGeneratorApp)
     {
         public void MapOrdersEndpoints()
@@ -24,46 +18,30 @@ public static class OrdersEndpoints
         }
     }
 
-    private static async Task<IResult> PostOrderAsync(HttpRequest orderHttpRequest, SendOrderUseCase sendOrderUseCase)
+    private static async Task<IResult> PostOrderAsync(
+        HttpContext httpContext, SendOrderUseCase sendOrderUseCase, DataMessageHttpResponseConverter dataMessageHttpResponseConverter)
     {
-        var rawOrderFields = await ReadRawOrderFields(orderHttpRequest);
-        var orderRequestFormatValidation = OrderRequestFormatValidator.ValidateOrderRequestFormat(
-            rawOrderFields.Symbol, rawOrderFields.Side, rawOrderFields.Quantity, rawOrderFields.Price);
-        if (orderRequestFormatValidation.OrderToSend is not { } orderToSend)
-        {
-            var orderFieldFormatMessages = orderRequestFormatValidation.OrderFieldFormatErrors
-                .Select(orderFieldFormatError => orderFieldFormatError.OrderFieldFormatMessage).ToList();
-            return DataMessage<SentOrderResponse>.CreateErrorMessage(InvalidOrderMessage, ResultStatus.InvalidInput, orderFieldFormatMessages, InvalidOrderErrorCode)
-                .ConvertToHttpResponse();
-        }
-
-        var sentOrderMessage = await sendOrderUseCase.SendOrderAsync(orderToSend);
-        return sentOrderMessage.ConvertToHttpResponse(sentOrderResult => ConvertToSentOrderResponse(sentOrderResult, orderToSend));
+        var sendOrderRequest = await ReadSendOrderRequestAsync(httpContext.Request);
+        var sentOrderMessage = await sendOrderUseCase.SendOrderAsync(sendOrderRequest.MapToSendOrderCommand());
+        return dataMessageHttpResponseConverter.ConvertToHttpResponse(sentOrderMessage, httpContext);
     }
 
-    private static async Task<IResult> GetOrdersPageAsync(HttpRequest ordersPageHttpRequest, ListOrdersUseCase listOrdersUseCase, CancellationToken requestAborted)
+    private static async Task<IResult> GetOrdersPageAsync(
+        HttpContext httpContext, ListOrdersUseCase listOrdersUseCase, DataMessageHttpResponseConverter dataMessageHttpResponseConverter)
     {
-        var requestedPageNumber = ordersPageHttpRequest.Query.TryGetValue("page", out var pageQueryValues) ? pageQueryValues.ToString() : null;
-        return (await listOrdersUseCase.ListOrdersAsync(requestedPageNumber, requestAborted)).ConvertToHttpResponse();
+        var requestedPageNumber = httpContext.Request.Query.TryGetValue("page", out var pageQueryValues) ? pageQueryValues.ToString() : null;
+        var storedOrdersPage = await listOrdersUseCase.ListOrdersAsync(requestedPageNumber, httpContext.RequestAborted);
+        return dataMessageHttpResponseConverter.ConvertToHttpResponse(storedOrdersPage, httpContext);
     }
 
-    private static async Task<IResult> DeleteAllOrdersAsync(DeleteAllOrdersUseCase deleteAllOrdersUseCase, CancellationToken requestAborted)
+    private static async Task<IResult> DeleteAllOrdersAsync(
+        HttpContext httpContext, DeleteAllOrdersUseCase deleteAllOrdersUseCase, DataMessageHttpResponseConverter dataMessageHttpResponseConverter)
     {
-        var ordersDeletionMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(requestAborted);
-        return ordersDeletionMessage.Success ? Results.NoContent() : ordersDeletionMessage.ConvertToHttpResponse();
+        var ordersDeletionMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(httpContext.RequestAborted);
+        return ordersDeletionMessage.Success ? Results.NoContent() : dataMessageHttpResponseConverter.ConvertToHttpResponse(ordersDeletionMessage, httpContext);
     }
 
-    private static SentOrderResponse ConvertToSentOrderResponse(SentOrderResult sentOrderResult, OrderToSend sentOrder) => new(
-        sentOrderResult.Status == SentOrderStatus.Accepted ? "accepted" : "rejected",
-        sentOrderResult.ClOrdId,
-        sentOrderResult.OrderId,
-        sentOrderResult.ExecId,
-        sentOrder.Symbol,
-        sentOrder.Side == OrderSide.Buy ? OrderRequestFormatValidator.BuyOrderSideJsonCode : OrderRequestFormatValidator.SellOrderSideJsonCode,
-        sentOrder.Quantity,
-        sentOrder.Price);
-
-    private static async Task<(string? Symbol, string? Side, string? Quantity, string? Price)> ReadRawOrderFields(HttpRequest orderHttpRequest)
+    private static async Task<SendOrderRequest> ReadSendOrderRequestAsync(HttpRequest orderHttpRequest)
     {
         JsonDocument orderJsonDocument;
         try
@@ -72,19 +50,20 @@ public static class OrdersEndpoints
         }
         catch (JsonException)
         {
-            return default;
+            return new SendOrderRequest(null, null, null, null);
         }
 
         using (orderJsonDocument)
         {
             var orderJson = orderJsonDocument.RootElement;
             if (orderJson.ValueKind != JsonValueKind.Object)
-                return default;
+                return new SendOrderRequest(null, null, null, null);
 
-            return (ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderSymbolFieldName),
-                ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderSideFieldName),
-                ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderQuantityFieldName),
-                ReadRawOrderFieldText(orderJson, OrderRequestFormatValidator.OrderPriceFieldName));
+            return new SendOrderRequest(
+                ReadRawOrderFieldText(orderJson, OrderToSend.OrderSymbolFieldName),
+                ReadRawOrderFieldText(orderJson, OrderToSend.OrderSideFieldName),
+                ReadRawOrderFieldText(orderJson, OrderToSend.OrderQuantityFieldName),
+                ReadRawOrderFieldText(orderJson, OrderToSend.OrderPriceFieldName));
         }
     }
 

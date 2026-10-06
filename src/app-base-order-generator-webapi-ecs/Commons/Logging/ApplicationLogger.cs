@@ -2,8 +2,15 @@ using System.Collections;
 
 namespace Base.OrderGenerator.Commons.Logging;
 
-public sealed class ApplicationLogger<T>(ILogger<T> frameworkLogger) : IApplicationLogger<T>
+public sealed class ApplicationLogger<T> : IApplicationLogger<T>
 {
+    private readonly ILogger<T> _frameworkLogger;
+
+    public ApplicationLogger(ILogger<T> frameworkLogger)
+    {
+        _frameworkLogger = frameworkLogger ?? throw new ArgumentNullException(nameof(frameworkLogger));
+    }
+
     public void LogInformation(string message, object? context = null) => WriteLogLine(LogLevel.Information, null, message, context);
 
     public void LogWarning(string message, object? context = null) => WriteLogLine(LogLevel.Warning, null, message, context);
@@ -12,10 +19,10 @@ public sealed class ApplicationLogger<T>(ILogger<T> frameworkLogger) : IApplicat
 
     private void WriteLogLine(LogLevel logLevel, Exception? loggedException, string logMessage, object? logContext)
     {
-        if (!frameworkLogger.IsEnabled(logLevel))
+        if (!_frameworkLogger.IsEnabled(logLevel))
             return;
 
-        frameworkLogger.Log(logLevel, default, new LogLineState(logMessage, ReadLogContextFields(logContext)), loggedException,
+        _frameworkLogger.Log(logLevel, default, new LogLineState(logMessage, ReadLogContextFields(logContext)), loggedException,
             static (logLineState, _) => logLineState.ToString());
     }
 

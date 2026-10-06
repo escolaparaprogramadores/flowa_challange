@@ -1,32 +1,36 @@
-using Base.OrderGenerator.Commons.Logging;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
 namespace Base.OrderGenerator.Entrypoint.ErrorHandling;
 
-public sealed class AnyClientProblemDetailsWriter(
-    IOptions<ProblemDetailsOptions> problemDetailsOptions,
-    IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions,
-    IApplicationLogger<OrderGeneratorExceptionHandler> httpErrorLogger) : IProblemDetailsWriter
+public sealed class AnyClientProblemDetailsWriter : IProblemDetailsWriter
 {
+    private readonly IOptions<ProblemDetailsOptions> _problemDetailsOptions;
+    private readonly IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> _jsonOptions;
+    private readonly DataMessageHttpResponseConverter _dataMessageHttpResponseConverter;
+
+    public AnyClientProblemDetailsWriter(
+        IOptions<ProblemDetailsOptions> problemDetailsOptions,
+        IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions,
+        DataMessageHttpResponseConverter dataMessageHttpResponseConverter)
+    {
+        _problemDetailsOptions = problemDetailsOptions ?? throw new ArgumentNullException(nameof(problemDetailsOptions));
+        _jsonOptions = jsonOptions ?? throw new ArgumentNullException(nameof(jsonOptions));
+        _dataMessageHttpResponseConverter = dataMessageHttpResponseConverter ?? throw new ArgumentNullException(nameof(dataMessageHttpResponseConverter));
+    }
+
     public bool CanWrite(ProblemDetailsContext problemDetailsContext) => true;
 
     public ValueTask WriteAsync(ProblemDetailsContext problemDetailsContext)
     {
-        problemDetailsOptions.Value.CustomizeProblemDetails?.Invoke(problemDetailsContext);
+        _problemDetailsOptions.Value.CustomizeProblemDetails?.Invoke(problemDetailsContext);
         var responseProblemDetails = problemDetailsContext.ProblemDetails;
         var httpContext = problemDetailsContext.HttpContext;
 
-        if (problemDetailsContext.Exception is null)
-            responseProblemDetails.Extensions["traceId"] = HttpErrorTraceScope.WriteUnderHttpErrorTrace(httpContext, null, () =>
-                httpErrorLogger.LogWarning("Expected error in request.", new
-                {
-                    ErrorCode = responseProblemDetails.Type,
-                    Method = httpContext.Request.Method,
-                    Route = ApiProblemDetailsExtensions.ReadRouteTemplate(httpContext)
-                }));
+        if (!responseProblemDetails.Extensions.ContainsKey(DataMessageHttpResponseConverter.TraceIdExtensionName))
+            _dataMessageHttpResponseConverter.WriteHttpErrorLogUnderItsTrace(httpContext, responseProblemDetails, null, null);
 
         return new ValueTask(httpContext.Response.WriteAsJsonAsync(
-            responseProblemDetails, responseProblemDetails.GetType(), jsonOptions.Value.SerializerOptions, "application/problem+json"));
+            responseProblemDetails, responseProblemDetails.GetType(), _jsonOptions.Value.SerializerOptions, "application/problem+json"));
     }
 }

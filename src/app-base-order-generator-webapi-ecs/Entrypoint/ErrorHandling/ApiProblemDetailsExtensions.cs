@@ -8,22 +8,6 @@ public static class ApiProblemDetailsExtensions
 {
     public const string ProblemTypePrefix = "urn:base-investimentos:problem:";
 
-    public static IResult ConvertToHttpResponse<T>(this DataMessage<T> useCaseMessage) =>
-        useCaseMessage.ConvertToHttpResponse(useCaseData => useCaseData);
-
-    public static IResult ConvertToHttpResponse<T, TResponseData>(this DataMessage<T> useCaseMessage, Func<T, TResponseData> convertToResponseData)
-    {
-        if (useCaseMessage.Success)
-            return Results.Json(
-                DataMessage<TResponseData>.CreateSuccessMessage(convertToResponseData(useCaseMessage.Data!), useCaseMessage.Message, useCaseMessage.Status),
-                statusCode: ResultStatusHttpMapper.ConvertToHttpStatusCode(useCaseMessage.Status));
-
-        if (useCaseMessage.Status == ResultStatus.InternalError)
-            throw new InvalidOperationException(useCaseMessage.Message);
-
-        return Results.Problem(BuildErrorProblemDetails(useCaseMessage.Status, useCaseMessage.ErrorCode, useCaseMessage.Message, useCaseMessage.Errors));
-    }
-
     public static ProblemDetails BuildErrorProblemDetails(ResultStatus resultStatus, string? errorCode, string errorMessage, IReadOnlyCollection<string> errorMessages)
     {
         var errorProblemDetails = new ProblemDetails

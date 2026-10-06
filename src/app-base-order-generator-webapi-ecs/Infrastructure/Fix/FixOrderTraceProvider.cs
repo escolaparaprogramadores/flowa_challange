@@ -2,7 +2,7 @@ using System.Diagnostics;
 
 namespace Base.OrderGenerator.Infrastructure.Fix;
 
-public static class FixOrderTraceProvider
+internal static class FixOrderTraceProvider
 {
     public const int TraceParentTag = 5100;
     public const string TraceSourceName = "Flowa.Fix";

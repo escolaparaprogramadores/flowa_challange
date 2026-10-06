@@ -5,18 +5,27 @@ using QuickFix.Logger;
 
 namespace Base.OrderGenerator.Infrastructure.Fix;
 
-public sealed class FixSessionLog(IApplicationLogger<FixSessionLog> fixSessionLogger, string? fixSessionId) : ILog
+internal sealed class FixSessionLog : ILog
 {
     private const char FixFieldSeparator = '\u0001';
     private const string HeartbeatMessageTypeField = "\u000135=0\u0001";
 
     private static readonly Regex ClOrdIdTraceIdPattern = new("\u000111=(?<clOrdId>[0-9a-f]{32})\u0001", RegexOptions.CultureInvariant);
 
+    private readonly IApplicationLogger<FixSessionLog> _fixSessionLogger;
+    private readonly string? _fixSessionId;
+
+    public FixSessionLog(IApplicationLogger<FixSessionLog> fixSessionLogger, string? fixSessionId)
+    {
+        _fixSessionLogger = fixSessionLogger ?? throw new ArgumentNullException(nameof(fixSessionLogger));
+        _fixSessionId = fixSessionId;
+    }
+
     public void OnIncoming(string incomingFixMessage) => LogFixMessage("FIX message received.", incomingFixMessage);
 
     public void OnOutgoing(string outgoingFixMessage) => LogFixMessage("FIX message sent.", outgoingFixMessage);
 
-    public void OnEvent(string fixSessionEvent) => fixSessionLogger.LogInformation(fixSessionEvent, new { FixSession = fixSessionId });
+    public void OnEvent(string fixSessionEvent) => _fixSessionLogger.LogInformation(fixSessionEvent, new { FixSession = _fixSessionId });
 
     public void Clear() { }
 
@@ -27,9 +36,9 @@ public sealed class FixSessionLog(IApplicationLogger<FixSessionLog> fixSessionLo
         if (fixMessage.Contains(HeartbeatMessageTypeField, StringComparison.Ordinal))
             return;
 
-        fixSessionLogger.LogInformation(logMessage, new
+        _fixSessionLogger.LogInformation(logMessage, new
         {
-            FixSession = fixSessionId,
+            FixSession = _fixSessionId,
             FixMessage = fixMessage.Replace(FixFieldSeparator, '|'),
             TraceId = ReadOrderTraceIdOutsideSpan(fixMessage)
         });

@@ -10,6 +10,7 @@ public static class ExposuresEndpoints
         public void MapExposuresEndpoints() => orderGeneratorApp.MapGet("/api/exposures", GetExposuresAsync);
     }
 
-    private static async Task<IResult> GetExposuresAsync(GetExposuresUseCase getExposuresUseCase, CancellationToken requestAborted) =>
-        (await getExposuresUseCase.GetExposuresAsync(requestAborted)).ConvertToHttpResponse();
+    private static async Task<IResult> GetExposuresAsync(
+        HttpContext httpContext, GetExposuresUseCase getExposuresUseCase, DataMessageHttpResponseConverter dataMessageHttpResponseConverter) =>
+        dataMessageHttpResponseConverter.ConvertToHttpResponse(await getExposuresUseCase.GetExposuresAsync(httpContext.RequestAborted), httpContext);
 }

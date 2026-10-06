@@ -5,10 +5,11 @@ using Base.OrderGenerator.Infrastructure.Exposures.Adapters;
 using Base.OrderGenerator.Infrastructure.Fix;
 using Base.OrderGenerator.Infrastructure.Orders.Adapters;
 using Base.OrderGenerator.Infrastructure.Orders.Options;
+using Microsoft.Extensions.Options;
 
 namespace Base.OrderGenerator.Infrastructure.DependencyInjection;
 
-public static class InfrastructureServiceCollectionExtensions
+internal static class InfrastructureServiceCollectionExtensions
 {
     public static readonly TimeSpan OrderAccumulatorRequestTimeout = TimeSpan.FromSeconds(5);
 
@@ -16,6 +17,9 @@ public static class InfrastructureServiceCollectionExtensions
     {
         public IServiceCollection AddOrderGeneratorInfrastructure()
         {
+            services.AddOptions<FixOptions>().BindConfiguration(FixOptions.SectionName).ValidateDataAnnotations().ValidateOnStart();
+            services.AddOptions<OrderAccumulatorOptions>().BindConfiguration(OrderAccumulatorOptions.SectionName).ValidateDataAnnotations().ValidateOnStart();
+
             services.AddSingleton<FixSessionLogFactory>();
             services.AddSingleton<FixOrderClient>();
             services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<FixOrderClient>());
@@ -29,6 +33,5 @@ public static class InfrastructureServiceCollectionExtensions
     }
 
     private static string ReadOrderAccumulatorBaseUrl(IServiceProvider serviceProvider) =>
-        serviceProvider.GetRequiredService<IConfiguration>()[OrderGeneratorConfigurationKeys.OrderAccumulatorBaseUrl]
-            ?? throw new InvalidOperationException("Configuration OrderAccumulator:BaseUrl is missing.");
+        serviceProvider.GetRequiredService<IOptions<OrderAccumulatorOptions>>().Value.BaseUrl;
 }

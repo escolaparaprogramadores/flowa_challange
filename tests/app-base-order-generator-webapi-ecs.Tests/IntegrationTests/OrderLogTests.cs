@@ -15,6 +15,8 @@ public sealed class OrderLogTests
 {
     private const string ExceptionHandlerCategory = "Base.OrderGenerator.Entrypoint.ErrorHandling.OrderGeneratorExceptionHandler";
     private const string FixSessionLogCategory = "Base.OrderGenerator.Infrastructure.Fix.FixSessionLog";
+    private const string RequestReceivedCategory = "Base.OrderGenerator.Entrypoint.Logging.RequestReceivedLoggingMiddleware";
+    private const string SendOrderUseCaseCategory = "Base.OrderGenerator.Application.Orders.UseCases.SendOrderUseCase";
     private const string ValidOrderJson = """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.50}""";
 
     [Fact]
@@ -42,8 +44,11 @@ public sealed class OrderLogTests
         var orderSending = Assert.Single(orderSendingSpans);
         Assert.Equal(orderSending.TraceId.ToHexString(), orderClOrdId);
         var orderLogLines = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.TraceId == orderClOrdId).ToList();
-        Assert.Equal(2, orderLogLines.Count);
-        Assert.All(orderLogLines, orderLogLine => Assert.Equal((FixSessionLogCategory, "Information"), (orderLogLine.Category, orderLogLine.LogLevel)));
+        Assert.Equal(4, orderLogLines.Count);
+        Assert.All(orderLogLines, orderLogLine => Assert.Equal("Information", orderLogLine.LogLevel));
+        Assert.Equal(2, orderLogLines.Count(orderLogLine => orderLogLine.Category == FixSessionLogCategory));
+        Assert.Single(orderLogLines, orderLogLine => (orderLogLine.Category, orderLogLine.Message) == (RequestReceivedCategory, "Request received."));
+        Assert.Single(orderLogLines, orderLogLine => (orderLogLine.Category, orderLogLine.Message) == (SendOrderUseCaseCategory, "Order accepted by the OrderAccumulator."));
         var sentOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
         Assert.Contains("|35=D|", sentOrderLine.ReadLogField("FixMessage"));
         Assert.Contains($"|11={orderClOrdId}|", sentOrderLine.ReadLogField("FixMessage"));

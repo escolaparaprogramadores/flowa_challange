@@ -1,44 +1,34 @@
-using Base.OrderGenerator.Commons.Http;
-using Base.OrderGenerator.Commons.Logging;
+using Base.OrderGenerator.Application.ErrorHandling;
 using Base.OrderGenerator.Commons.Responses;
-using Base.OrderGenerator.Domain.Orders.Exceptions;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace Base.OrderGenerator.Entrypoint.ErrorHandling;
 
-public sealed class OrderGeneratorExceptionHandler(IProblemDetailsService problemDetailsService, IApplicationLogger<OrderGeneratorExceptionHandler> httpErrorLogger) : IExceptionHandler
+public sealed class OrderGeneratorExceptionHandler : IExceptionHandler
 {
     public const string InvalidRequestMessage = "Dados inválidos";
-    public const string UnexpectedErrorMessage = "Aconteceu um erro inesperado. Informe o traceId ao suporte.";
-    public const string OrderAccumulatorUnavailableMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
-    public const string OrderAccumulatorUnavailableErrorCode = "order-accumulator-unavailable";
+    public const string InvalidRequestErrorCode = "invalid-input";
+
+    private readonly IProblemDetailsService _problemDetailsService;
+    private readonly DataMessageHttpResponseConverter _dataMessageHttpResponseConverter;
+
+    public OrderGeneratorExceptionHandler(IProblemDetailsService problemDetailsService, DataMessageHttpResponseConverter dataMessageHttpResponseConverter)
+    {
+        _problemDetailsService = problemDetailsService ?? throw new ArgumentNullException(nameof(problemDetailsService));
+        _dataMessageHttpResponseConverter = dataMessageHttpResponseConverter ?? throw new ArgumentNullException(nameof(dataMessageHttpResponseConverter));
+    }
 
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
-        var errorProblemDetails = exception switch
-        {
-            BadHttpRequestException => ApiProblemDetailsExtensions.BuildErrorProblemDetails(ResultStatus.InvalidInput, null, InvalidRequestMessage, []),
-            OrderNotAnsweredException orderNotAnswered => ApiProblemDetailsExtensions.BuildErrorProblemDetails(
-                ResultStatus.ServiceUnavailable, orderNotAnswered.ErrorCode, OrderAccumulatorUnavailableMessage, []),
-            _ when exception.IndicatesUnavailableHttpApi() => ApiProblemDetailsExtensions.BuildErrorProblemDetails(
-                ResultStatus.ServiceUnavailable, OrderAccumulatorUnavailableErrorCode, OrderAccumulatorUnavailableMessage, []),
-            _ => ApiProblemDetailsExtensions.BuildErrorProblemDetails(ResultStatus.InternalError, null, UnexpectedErrorMessage, [])
-        };
+        var errorProblemDetails = exception is BadHttpRequestException
+            ? ApiProblemDetailsExtensions.BuildErrorProblemDetails(ResultStatus.InvalidInput, InvalidRequestErrorCode, InvalidRequestMessage, [])
+            : ApiProblemDetailsExtensions.BuildErrorProblemDetails(
+                ResultStatus.InternalError, UseCaseFailureDataMessageMapper.UnexpectedErrorCode, UseCaseFailureDataMessageMapper.UnexpectedErrorMessage, []);
 
-        var httpErrorLogContext = new { ErrorCode = errorProblemDetails.Type, Method = httpContext.Request.Method, Route = ApiProblemDetailsExtensions.ReadRouteTemplate(httpContext) };
-        void WriteHttpErrorLog()
-        {
-            if (errorProblemDetails.Status == StatusCodes.Status500InternalServerError)
-                httpErrorLogger.LogError(exception, "Unexpected application error.", httpErrorLogContext);
-            else
-                httpErrorLogger.LogWarning("Expected error in request.", httpErrorLogContext);
-        }
-
-        errorProblemDetails.Extensions["traceId"] = HttpErrorTraceScope.WriteUnderHttpErrorTrace(
-            httpContext, (exception as OrderFailureException)?.ClOrdId, WriteHttpErrorLog);
+        _dataMessageHttpResponseConverter.WriteHttpErrorLogUnderItsTrace(httpContext, errorProblemDetails, exception, null);
 
         httpContext.Response.StatusCode = errorProblemDetails.Status!.Value;
-        await problemDetailsService.WriteAsync(new ProblemDetailsContext
+        await _problemDetailsService.WriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
             Exception = exception,
