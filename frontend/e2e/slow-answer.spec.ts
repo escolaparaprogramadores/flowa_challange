@@ -18,11 +18,11 @@ const DATABASE_PAUSE_IN_MS = Number(process.env.E2E_DB_PAUSE_MS ?? 3_000);
 const SCREENSHOT_FOLDER = process.env.E2E_PROVAS_DIR;
 const MAYBE_ACCEPTED_MESSAGE = 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.';
 const brazilianReaisFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-// A read of the list that fails answers like the server does when it cannot read the orders (as in order-list.spec.ts).
+// A read of the list that fails answers like the OrderGenerator does when the database read fails (500 internal-error).
 const ORDER_LIST_READ_FAILURE = {
-  status: 503,
+  status: 500,
   contentType: 'application/problem+json',
-  body: JSON.stringify({ type: 'urn:base-investimentos:problem:order-accumulator-unavailable', title: 'Serviço indisponível', status: 503, detail: 'Não foi possível ler as ordens agora.', success: false, statusResultado: 'ServiceUnavailable', errors: [] }),
+  body: JSON.stringify({ type: 'urn:base-investimentos:problem:internal-error', title: 'Erro interno', status: 500, detail: 'Aconteceu um erro inesperado. Informe o traceId ao suporte.', success: false, statusResultado: 'InternalError', errors: [] }),
 };
 const WARNING_BOX_COLORS = { border: 'color(srgb 0.956863 0.772549 0.415686 / 0.38)', text: 'rgb(244, 197, 106)', background: 'rgba(242, 184, 75, 0.14)' };
 
@@ -159,7 +159,7 @@ test('RF-12 at 375px: the read right after the warning fails, it counts as a rou
   await startFromEmptyBoard(page, 375);
   await fillOrderTicket(page, 'PETR4', '100', '10,00');
   const screenReads = watchScreenReads(page);
-  // Only the first list read after the send fails (503); every other read reaches the real server.
+  // Only the first list read after the send fails (500); every other read reaches the real server.
   let shouldFailNextOrderListRead = true;
   await page.route(`**${ORDERS_ROUTE}?page=*`, async (orderListReadRoute) => {
     if (!shouldFailNextOrderListRead) return orderListReadRoute.continue();

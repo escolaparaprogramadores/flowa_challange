@@ -170,3 +170,66 @@ test('P02-10: the box shows the answer of the POST without waiting for the list 
   // When the reads are released, the row arrives at the list as before.
   await expect(page.getByTestId('linha-da-ordem')).toHaveCount(1, { timeout: 10_000 });
 });
+
+// G-2: the FIX session refused the order (Reject 35=3 or 35=j) and the OrderGenerator answers 422 fix-order-rejected
+// with the reject text. The real OrderAccumulator never sends a Reject for an order the screen can build, so only the
+// answer of the POST is replaced, with the exact body of the F3 (ApiProblemDetailsExtensions, UseCaseFailureDataMessageMapper).
+const FIX_REJECT_TEXT = 'Required tag missing (35=3, 371=54)';
+const FIX_ORDER_REJECTED_ANSWER = {
+  status: 422,
+  contentType: 'application/problem+json',
+  body: JSON.stringify({
+    type: 'urn:base-investimentos:problem:fix-order-rejected', title: 'Regra de negócio violada', status: 422,
+    detail: FIX_REJECT_TEXT, success: false, statusResultado: 'BusinessRuleViolated', errors: [],
+  }),
+};
+
+for (const viewportWidth of [1440, 375]) {
+  test(`RF-08 and G-2 at ${viewportWidth}px: the 422 shows "Não entrou" with the reject text, without the delay warning nor extra reads`, async ({ page }) => {
+    await page.setViewportSize({ width: viewportWidth, height: 900 });
+    await deleteAllOrdersOnServer(page);
+    await page.goto('/');
+    await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
+    await page.route('**' + CREATE_ORDER_ROUTE, (orderCreationRoute) => orderCreationRoute.fulfill(FIX_ORDER_REJECTED_ANSWER));
+    const listReadsAfterSend: string[] = [];
+    let hasClickedSend = false;
+    page.on('request', (pageRequest) => {
+      const requestRoute = new URL(pageRequest.url()).pathname;
+      if (hasClickedSend && pageRequest.method() === 'GET' && (requestRoute === ORDERS_ROUTE || requestRoute === EXPOSURES_ROUTE)) {
+        listReadsAfterSend.push(requestRoute);
+      }
+    });
+
+    await page.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'PETR4', exact: true }).click();
+    await page.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: 'Compra' }).click();
+    await page.getByLabel(/^Quantidade de/).fill('100');
+    await page.getByLabel('Preço por ação (R$)').fill('10,00');
+    const createOrderResponse = page.waitForResponse(
+      (httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE,
+    );
+    hasClickedSend = true;
+    await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+    expect((await createOrderResponse).status()).toBe(422);
+
+    const refusalBox = locateOrderListCard(page).getByTestId('faixa-da-falha-no-envio');
+    await expect(refusalBox).toHaveCount(1);
+    await expect(refusalBox).toBeVisible();
+    await expect(refusalBox).toHaveAttribute('role', 'alert');
+    await expect(refusalBox.getByTestId('status-da-ordem')).toHaveText('Não entrou');
+    await expect(refusalBox.getByTestId('status-da-ordem')).toHaveCSS('color', REJECTED_BOX_COLORS.text);
+    await expect(refusalBox.getByTestId('mensagem-da-ordem')).toHaveText(FIX_REJECT_TEXT);
+    await expect(refusalBox.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 100 × R$ 10,00');
+    await expectBorderOnEverySide(refusalBox, REJECTED_BOX_COLORS.border);
+    await expect(locateOrderListCard(page)).not.toContainText('A ordem pode ter sido aceita');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+
+    // Only the one read every send makes (list and exposure); the 422 never starts the recheck cycle of RF-11.
+    await page.waitForTimeout(6_000);
+    expect(listReadsAfterSend.filter((readRoute) => readRoute === ORDERS_ROUTE)).toHaveLength(1);
+    expect(listReadsAfterSend.filter((readRoute) => readRoute === EXPOSURES_ROUTE)).toHaveLength(1);
+    await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
+    if (SCREENSHOT_FOLDER) {
+      await locateOrderListCard(page).screenshot({ path: `${SCREENSHOT_FOLDER}/06-caixa-nao-entrou-${viewportWidth}.png` });
+    }
+  });
+}
