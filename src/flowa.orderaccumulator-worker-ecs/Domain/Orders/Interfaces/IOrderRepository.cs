@@ -7,6 +7,4 @@ public interface IOrderRepository
     Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default);
 
     Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default);
-
-    Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default);
 }
