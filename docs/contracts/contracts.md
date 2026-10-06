@@ -1,12 +1,16 @@
-# Contrato entre as partes do Flowa — v2
+# Contrato entre as partes do Flowa — v3
 
 Este arquivo é o acordo entre o OrderGenerator, o OrderAccumulator, a tela e o `docker compose`.
 Quem implementa segue o que está aqui. Mudou alguma coisa? Sobe a versão e avisa quem usa.
 A v2 trocou o formato das respostas HTTP: sucesso em `DataMessage` e erro em `application/problem+json`.
+A v3 traz o motivo da rejeição na lista, a resposta `Rejected` para toda ordem que o OrderAccumulator
+não consegue decidir, o `422` e o `503` de sessão perdida no envio, os dois prazos configuráveis e o
+OrderGenerator lendo a lista e a exposição direto no banco.
 
 A regra de campo da ordem (símbolos `PETR4`/`VALE3`/`VIIA4`, lado, quantidade inteira maior que zero e
 menor que 100.000, preço maior que zero, menor que 1.000 e múltiplo de 0,01) e as mensagens dela moram
-só no OrderAccumulator, em `Base.OrderAccumulator.Domain.Orders` (`OrderFieldRule`, `OrderFieldMessages`).
+só no OrderAccumulator, em `Flowa.OrderAccumulator.Domain.Orders.ValueObjects` (`OrderFieldPolicy`,
+`OrderFieldMessages`).
 O OrderGenerator não aplica essa regra: confere só o formato (o que nem cabe numa `NewOrderSingle`) e
 manda o resto pelo FIX. A tela guarda uma cópia da regra só para avisar antes de enviar.
 
@@ -32,11 +36,11 @@ quem pede `text/html`:
 
 ```json
 {
-  "type": "urn:base-investimentos:problem:order-accumulator-unavailable",
+  "type": "urn:base-investimentos:problem:fix-session-not-logged-on",
   "title": "Serviço indisponível",
   "status": 503,
   "detail": "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.",
-  "instance": "/api/exposures",
+  "instance": "/api/orders",
   "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
   "success": false,
   "statusResultado": "ServiceUnavailable",
@@ -51,9 +55,9 @@ quem pede `text/html`:
 | `status` | O mesmo número do status HTTP. |
 | `detail` | Mensagem em português desta ocorrência. Nunca leva exceção, SQL, host ou stack trace. |
 | `instance` | Caminho pedido. |
-| `traceId` | 32 caracteres hexadecimais: o trace da requisição no Datadog, o mesmo da linha de log do erro. Num erro de `POST /api/orders` depois de a ordem ter `ClOrdID` (503 e 500 da tabela da ordem), é o próprio `ClOrdID`. Sem o tracer ligado (teste local), é o `ClOrdID` no erro da ordem e o trace id da requisição no ASP.NET nos outros. |
+| `traceId` | 32 caracteres hexadecimais: o trace da requisição no Datadog, o mesmo da linha de log do erro. Num erro de `POST /api/orders` depois de a ordem ter `ClOrdID` (422, 503 e 500 da tabela da ordem), é o próprio `ClOrdID`. Sem o tracer ligado (teste local), é o `ClOrdID` no erro da ordem e o trace id da requisição no ASP.NET nos outros. |
 | `success` | Sempre `false`. |
-| `statusResultado` | Nome do resultado: `InvalidInput` (400), `NotFound` (404), `ServiceUnavailable` (503), `InternalError` (500). |
+| `statusResultado` | Nome do resultado: `InvalidInput` (400), `NotFound` (404), `BusinessRuleViolated` (422), `ServiceUnavailable` (503), `InternalError` (500). |
 | `errors` | Lista de mensagens em português (no 400 de formato, uma por campo). |
 
 Códigos de `type` usados hoje:
@@ -61,13 +65,15 @@ Códigos de `type` usados hoje:
 | Código | HTTP | Quando |
 |---|---|---|
 | `invalid-order` | 400 | `POST /api/orders` com ordem que não cabe no FIX |
+| `invalid-input` | 400 | pedido que o servidor não consegue ler; `detail` = `"Dados inválidos"` |
 | `invalid-page` | 400 | `GET /api/orders` com página inválida |
 | `not-found` | 404 | caminho `/api/...` que não existe |
 | `method-not-allowed` | 405 | verbo que a rota do OrderAccumulator não tem |
+| `fix-order-rejected` | 422 | `POST /api/orders` recusado pela sessão FIX (`35=3`) ou pelo OrderAccumulator (`35=j`): a ordem não entrou |
 | `fix-session-not-logged-on` | 503 | `POST /api/orders` sem sessão FIX logada |
-| `execution-report-timeout` | 503 | `POST /api/orders` sem `ExecutionReport` em 5 s |
-| `order-accumulator-unavailable` | 503 | rota repassada sem resposta do OrderAccumulator |
-| `internal-error` | 500 | erro inesperado; `detail` = `"Aconteceu um erro inesperado. Informe o traceId ao suporte."` |
+| `execution-report-timeout` | 503 | `POST /api/orders` sem `ExecutionReport` no prazo (`Fix:ExecutionReportTimeoutSeconds`, padrão 5 s) |
+| `fix-session-lost` | 503 | `POST /api/orders` com a sessão FIX caindo enquanto a ordem esperava a resposta |
+| `internal-error` | 500 | erro inesperado, inclusive banco fora do ar na lista, na exposição e no "apagar tudo"; `detail` = `"Aconteceu um erro inesperado. Informe o traceId ao suporte."` |
 
 Todo erro HTTP deixa exatamente uma linha de log (Warning para o erro esperado, Error com a exceção para o
 inesperado), com o mesmo trace id do `traceId`, o `type` no campo `ErrorCode`, o verbo e o modelo da rota.
@@ -95,10 +101,12 @@ Respostas:
 | Situação | HTTP | Corpo |
 |---|---|---|
 | Ordem aceita (`150=0`) | 200 | `DataMessage` com `message: "Ordem aceita."` e `data: { "status": "accepted", "clOrdId", "orderId", "execId", "symbol", "side", "quantity", "price" }` |
-| Ordem rejeitada (`150=8`), por limite ou por campo fora da regra | 200 | `DataMessage` com `message: "<texto da tag 58>"` e `data: { "status": "rejected", … }` (mesmos campos) |
+| Ordem rejeitada (`150=8`): por limite, por campo fora da regra, por `ClOrdID` repetido com outros dados, ou porque o OrderAccumulator não conseguiu decidir a tempo | 200 | `DataMessage` com `message: "<texto da tag 58>"` e `data: { "status": "rejected", … }` (mesmos campos) |
 | Ordem que não cabe no FIX (nada é enviado por FIX) | 400 | problem `invalid-order`, `detail: "A ordem tem campos inválidos."`, `errors: ["Informe o preço."]` |
+| Recusa da sessão FIX (`35=3`) ou do OrderAccumulator (`35=j`) | 422 | problem `fix-order-rejected`, title `"Regra de negócio violada"`, `detail` = texto da tag 58 da recusa, `traceId` = `ClOrdID`. Sai na hora, sem esperar o prazo |
 | Sem sessão FIX | 503 | problem `fix-session-not-logged-on`, `detail: "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes."`, `traceId` = `ClOrdID` |
-| Sem resposta em 5 s | 503 | problem `execution-report-timeout`, mesmo `detail`, `traceId` = `ClOrdID` |
+| Sem resposta no prazo | 503 | problem `execution-report-timeout`, `detail: "A ordem pode ter sido aceita. Confira a lista antes de enviar de novo."`, `traceId` = `ClOrdID` |
+| Sessão FIX caiu com a ordem esperando resposta | 503 | problem `fix-session-lost`, mesmo `detail` do prazo, `traceId` = `ClOrdID`. Sai na hora da queda |
 | `ExecutionReport` fora do contrato | 500 | problem `internal-error` (sem stack trace), `traceId` = `ClOrdID` |
 | Erro inesperado antes de a ordem sair | 500 | problem `internal-error` (sem stack trace) |
 
@@ -113,6 +121,12 @@ Respostas:
 - Campo que cabe no FIX, mas está fora da regra (símbolo `ITUB4`, quantidade `0`, `1.5` ou `100000`,
   preço `1000` ou `10.005`), vai pelo FIX e volta `200` com `data.status: "rejected"` e os motivos na `message`.
 - Em `accepted` e `rejected`, `side` volta como `"buy"`/`"sell"` e `quantity`/`price` como número.
+- No `422`, sem tag 58 na recusa o `detail` é `"A sessão FIX recusou a ordem (SessionRejectReason <373>)."`
+  ou `"A sessão FIX recusou a ordem."` no `35=3`, e `"O OrderAccumulator recusou a ordem (BusinessRejectReason <380>)."`
+  no `35=j`. O `35=j` é casado com a ordem pela tag 379 ou, sem ela, pela 45 (`RefSeqNum`).
+- `503` por prazo ou por queda da sessão quer dizer "pode ter sido aceita": a ordem pode estar gravada.
+  `ExecutionReport` que chega depois do prazo é
+  descartado com um log Warning `"ExecutionReport arrived for an order that is no longer waiting for it."`.
 
 ### OrderAccumulator — `GET /api/exposures`
 
@@ -136,10 +150,9 @@ Devolve a exposição atual dos três símbolos, sempre nesta ordem: `PETR4`, `V
 
 ### OrderGenerator — `GET /api/exposures`
 
-Repassa o `GET /api/exposures` do OrderAccumulator: o mesmo `data` e a mesma `message`, num envelope só
-(o `data` do OrderGenerator nunca tem outro `data` dentro).
-Se o OrderAccumulator não responder em 5 s, estiver fora do ar ou responder outro status que não `200`,
-devolve `503` com o problem `order-accumulator-unavailable`.
+Lê a exposição direto no PostgreSQL, na mesma tabela que o OrderAccumulator grava, e responde o mesmo
+`data` e a mesma `message` do OrderAccumulator. Sem a tabela (banco recém-criado), cada símbolo vem com
+exposição `0`. Banco fora do ar → `500` com o problem `internal-error`.
 
 ### OrderAccumulator — `GET /api/orders?page=<n>` e `DELETE /api/orders`
 
@@ -153,13 +166,14 @@ devolve `503` com o problem `order-accumulator-unavailable`.
   "total": 12,
   "orders": [
     { "receivedAt": "2026-10-04T12:00:00Z", "status": "accepted", "symbol": "PETR4", "side": "buy",
-      "quantity": 100, "price": 10.50, "orderId": "…", "clOrdId": "…" }
+      "quantity": 100, "price": 10.50, "orderId": "…", "clOrdId": "…", "rejectReason": null }
   ]
 }
 ```
 
 - `receivedAt` é ISO-8601 em UTC. `status` é `"accepted"` ou `"rejected"`; `symbol` e `side` podem ser
   `null` numa ordem rejeitada que chegou pelo FIX com o campo fora do padrão.
+- `rejectReason` é o motivo gravado da rejeição, o mesmo texto da tag 58; `null` na ordem aceita.
 - O tamanho da página é fixo no servidor; `pageSize` vindo do cliente é ignorado. Sem `page`, vem a página 1.
 - Página `0`, negativa, texto, repetida ou acima de `1000` → `400` com o problem `invalid-page`,
   `detail: "Página inválida."` e `errors: ["A página deve ser um número inteiro de 1 a 1000."]`.
@@ -170,13 +184,13 @@ devolve `503` com o problem `order-accumulator-unavailable`.
 
 ### OrderGenerator — `GET /api/orders?page=<n>` e `DELETE /api/orders`
 
-Repassam as duas rotas acima para o OrderAccumulator, com o mesmo prazo de 5 s do `GET /api/exposures`.
+Respondem as duas rotas acima direto no PostgreSQL, sem chamar o OrderAccumulator, com as mesmas
+regras: o mesmo `data`, a mesma `message`, a mesma página de 10 e o mesmo `400` `invalid-page`.
 
-- `GET` leva só o `page`, sem mudar. No `200` devolve o mesmo `data` e a mesma `message`; no `400` devolve
-  o mesmo problem `invalid-page` (com o `traceId` da requisição no OrderGenerator).
-- `DELETE` devolve o `204` sem corpo. Outro verbo em `/api/orders` (fora `POST`, a ordem) não apaga nada.
-- OrderAccumulator fora do ar, sem resposta em 5 s ou com outro status (`GET` diferente de `200`/`400`,
-  `DELETE` diferente de `204`) → `503` com o problem `order-accumulator-unavailable`.
+- `GET` sem a tabela de ordens (banco recém-criado) devolve a página vazia, com `total: 0`.
+- `DELETE` zera a exposição e apaga as ordens numa transação só e devolve o `204` sem corpo. Outro verbo
+  em `/api/orders` (fora `POST`, a ordem) não apaga nada.
+- Banco fora do ar → `500` com o problem `internal-error`.
 - Nenhuma das duas manda `Access-Control-Allow-Origin`: outra página não consegue chamá-las.
 
 ### Os dois apps — `GET /health` e `GET /version`
@@ -188,6 +202,9 @@ do código que está rodando, gravado no build, para conferir que a versão no a
 ## 2. Mensagens FIX 4.4
 
 Pacotes: `QuickFIXn.Core` e `QuickFIXn.FIX44`, versão `1.14.1` (os dois têm alvo `net10.0`).
+As duas pontas validam as mensagens com o mesmo dicionário FIX 4.4, que acrescenta a tag 5100
+(`TraceParent`): um arquivo só, `src/flowa.commons/Fix/FIX44-flowa.xml`, que o build põe ao lado do
+executável de cada app.
 
 ### `NewOrderSingle` (`35=D`), do OrderGenerator para o OrderAccumulator
 
@@ -215,16 +232,31 @@ Pacotes: `QuickFIXn.Core` e `QuickFIXn.FIX44`, versão `1.14.1` (os dois têm al
 | 151 | LeavesQty | a quantidade da ordem | `0` |
 | 14 | CumQty | `0` | `0` |
 | 6 | AvgPx | `0` | `0` |
+| 103 | OrdRejReason | não vai | `6` (Duplicate order) só no `ClOrdID` repetido com outros dados |
 | 58 | Text | não vai | o motivo, em português |
 
-O motivo da rejeição em `58`:
+Toda `NewOrderSingle` que passa pela sessão recebe um `ExecutionReport`, mesmo quando o OrderAccumulator
+não consegue decidir. Sem `ClOrdID` (11), `Symbol` (55) ou `Side` (54), a própria sessão FIX recusa a
+mensagem com `Reject` (`35=3`, `373=1`, `58=Required tag missing`), porque o dicionário marca esses
+campos como obrigatórios. O motivo da rejeição em `58`:
 
 - campo fora da regra (só o OrderAccumulator valida, venha a ordem da tela ou de FIX direto): as mensagens de `OrderFieldMessages` dos campos com erro, separadas por espaço,
   na ordem `symbol`, `side`, `quantity`, `price`. Uma ordem rejeitada aqui não muda a exposição.
+  Sem `OrderQty` (38) ou sem `Price` (44), o valor conta como zero e volta
+  `A quantidade deve ser maior que zero.` / `O preço deve ser maior que zero.`.
 - limite: `Ordem rejeitada: a exposição de <SÍMBOLO> passaria do limite de 100.000.000,00.`
+- falha interna (o banco caiu, por exemplo): `Ordem rejeitada: o OrderAccumulator não conseguiu decidir a ordem agora. Tente de novo.`
+- prazo do banco vencido: `Ordem rejeitada: o OrderAccumulator não decidiu a ordem em <N> s. Tente de novo.`,
+  com `<N>` = `Orders:DecisionTimeoutSeconds` (padrão 4).
+- `ClOrdID` repetido com outro símbolo, lado, quantidade ou preço:
+  `Ordem rejeitada: o ClOrdID <id> já foi usado com outros dados.`, com `103=6`.
 
-Ordem repetida (mesmo `ClOrdID`): o OrderAccumulator devolve o `ExecutionReport` original que
-gravou (mesmos `37`, `17`, `150`, `39`, `58`) e não conta a ordem de novo.
+Na falha interna, no prazo e no `ClOrdID` repetido com outros dados, nada é gravado: `37` e `17` são
+novos, `11`, `55` e `54` repetem o que chegou, e a ordem original (se houver) não muda.
+
+Ordem repetida com os mesmos dados (mesmo `ClOrdID`, símbolo, lado, quantidade e preço): o
+OrderAccumulator devolve o `ExecutionReport` original que gravou (mesmos `37`, `17`, `150`, `39`, `58`)
+e não conta a ordem de novo.
 
 ## 3. Sessão FIX
 
@@ -245,9 +277,15 @@ Nas duas pontas, para a sessão sobreviver à troca de container:
 - log FIX no `stdout`, para aparecer no `docker compose logs`.
 
 O OrderGenerator confere se a sessão está logada antes de enviar. Sem sessão, responde
-o `503` `fix-session-not-logged-on` na hora. Com sessão, espera o `ExecutionReport` do mesmo `ClOrdID` por até
-5 s; passou disso, o `503` `execution-report-timeout`. Quando o OrderAccumulator volta, o initiator reloga
+o `503` `fix-session-not-logged-on` na hora. Com sessão, espera o `ExecutionReport` do mesmo `ClOrdID` pelo
+prazo de `Fix:ExecutionReportTimeoutSeconds` (de 1 a 5 s, padrão 5; fora disso o app não sobe); passou
+disso, o `503` `execution-report-timeout`. Um `Reject` (`35=3`) ou `BusinessMessageReject` (`35=j`) da
+ordem encerra a espera na hora com o `422` `fix-order-rejected`, e a queda da sessão encerra na hora
+todas as esperas com o `503` `fix-session-lost`. Quando o OrderAccumulator volta, o initiator reloga
 sozinho.
+
+O OrderAccumulator decide cada ordem dentro de `Orders:DecisionTimeoutSeconds` (padrão 4 s, maior que
+zero; senão o app não sobe).
 
 ## 4. Portas e variáveis de ambiente
 
@@ -256,7 +294,7 @@ sozinho.
 | OrderGenerator | 8080 (HTTP); 8443 (HTTPS, só fora do compose) | página, `/api/*`, `/health`, `/version` |
 | OrderAccumulator | 8081 (HTTP); 8444 (HTTPS, só fora do compose) | `GET /api/exposures`, `GET /api/orders`, `DELETE /api/orders`, `/health`, `/version` |
 | OrderAccumulator | 9876 (TCP) | acceptor FIX |
-| PostgreSQL | 5432 | banco do OrderAccumulator |
+| PostgreSQL | 5432 | banco: o OrderAccumulator grava; o OrderGenerator lê a lista e a exposição e apaga |
 
 As variáveis seguem o padrão do ASP.NET Core (`__` separa as seções). O valor da coluna "fora do
 compose" é o padrão para rodar na máquina, sem Docker.
@@ -268,13 +306,15 @@ compose" é o padrão para rodar na máquina, sem Docker.
 | `ASPNETCORE_HTTPS_PORTS` | OrderGenerator / OrderAccumulator | `8443` / `8444`, certificado de desenvolvimento do .NET (`dotnet dev-certs https`) | não usa |
 | `Fix__AcceptorHost` | OrderGenerator | `localhost` | `orderaccumulator` |
 | `Fix__AcceptorPort` | os dois | `9876` | `9876` |
-| `OrderAccumulator__BaseUrl` | OrderGenerator | `http://localhost:8081` | `http://orderaccumulator:8081` |
-| `ConnectionStrings__Flowa` | OrderAccumulator | host `localhost` | host `postgres` |
+| `Fix__ExecutionReportTimeoutSeconds` | OrderGenerator | `5` (de 1 a 5) | `5` (padrão) |
+| `Orders__DecisionTimeoutSeconds` | OrderAccumulator | `4` (maior que zero) | `4` (padrão) |
+| `ConnectionStrings__Flowa` | os dois | host `localhost` | host `postgres` |
+| `Database__MaximumPoolSize` | os dois, opcional | padrão do Npgsql | `10` no OrderGenerator |
 
 A string do banco tem o formato do Npgsql: `Host=<host>;Port=5432;Database=flowa;Username=flowa;`
 seguido da senha. A senha nunca fica escrita no código nem neste contrato: o compose lê de
 `POSTGRES_PASSWORD` e monta a string; fora do compose, quem roda define `ConnectionStrings__Flowa`
-inteira. O valor de desenvolvimento local fica declarado no README.
+inteira, a mesma nos dois apps. O valor de desenvolvimento local fica declarado no README.
 
 Nomes dos serviços no compose: `ordergenerator`, `orderaccumulator`, `postgres`. Para o avaliador,
 basta publicar a porta `8080` do OrderGenerator; as outras podem ficar só na rede interna.

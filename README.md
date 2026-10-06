@@ -82,11 +82,12 @@ ConnectionStrings__Flowa="Host=localhost;Port=5432;Database=flowa;Username=flowa
 dotnet run --no-launch-profile --project src/flowa.orderaccumulator-worker-ecs
 ```
 
-E o OrderGenerator, em outro terminal:
+E o OrderGenerator, em outro terminal. Ele lê a lista e a exposição no mesmo banco, com a mesma senha:
 
 ```bash
+export POSTGRES_PASSWORD=<senha do usuário flowa>
 ASPNETCORE_HTTP_PORTS=8080 Fix__AcceptorHost=localhost Fix__AcceptorPort=9876 \
-OrderAccumulator__BaseUrl=http://localhost:8081 \
+ConnectionStrings__Flowa="Host=localhost;Port=5432;Database=flowa;Username=flowa;Password=$POSTGRES_PASSWORD" \
 dotnet run --no-launch-profile --project src/flowa.ordergenerator-webapi-ecs
 ```
 
@@ -131,7 +132,7 @@ do limite, e chegar a 100 milhões não passa. Um centavo acima é rejeitado. As
 
 **Concorrência resolvida no banco.** A exposição só muda num `UPDATE` que testa o limite na própria
 cláusula `WHERE`
-(`src/flowa.orderaccumulator-worker-ecs/Infrastructure/Persistence/ExposureRepository.cs`). Se a ordem não couber,
+(`src/flowa.orderaccumulator-worker-ecs/Infrastructure/Exposures/Repositories/ExposureRepository.cs`). Se a ordem não couber,
 nenhuma linha muda e ela é rejeitada. Como o PostgreSQL trava a linha durante o `UPDATE`, duas ordens
 ao mesmo tempo no mesmo ativo não conseguem passar juntas do limite. Isso não depende de lock em
 memória e continuaria valendo com mais de uma instância. Há um teste com 200 ordens simultâneas,
@@ -142,7 +143,9 @@ a concorrência do jeito acima. As tabelas são criadas na subida, com `IF NOT E
 
 **Ordem repetida.** O `ClOrdID` de cada ordem é único no banco. Se a mesma `NewOrderSingle` chegar duas
 vezes, a segunda não mexe na exposição: o OrderAccumulator devolve o mesmo `ExecutionReport` da
-primeira vez, com o mesmo resultado e o mesmo motivo.
+primeira vez, com o mesmo resultado e o mesmo motivo. Se o `ClOrdID` repetido vier com outro ativo,
+lado, quantidade ou preço, ela volta rejeitada como ordem duplicada (`OrdRejReason` 6) e a primeira
+fica como estava.
 
 **Ordem aceita entra inteira na exposição.** O enunciado fala em somar a "quantidade executada". Aqui
 nenhuma ordem é executada: o OrderAccumulator só aceita ou rejeita. A ordem aceita volta com
@@ -152,7 +155,7 @@ sempre em zero e o limite nunca barraria nada.
 
 **A regra de campo mora só no OrderAccumulator.** Símbolo, lado, quantidade e preço são validados pelo
 OrderAccumulator, no que chega pelo FIX
-(`src/flowa.orderaccumulator-worker-ecs/Domain/Orders/OrderFieldRule.cs`). Campo inválido volta como ordem rejeitada, com o motivo em
+(`src/flowa.orderaccumulator-worker-ecs/Domain/Orders/ValueObjects/OrderFieldPolicy.cs`). Campo inválido volta como ordem rejeitada, com o motivo em
 português, igual a uma ordem rejeitada pelo limite. O que nem cabe numa ordem FIX (campo faltando, tipo
 errado, lado desconhecido) o OrderGenerator responde com erro 400, sem mandar nada. A tela mantém um
 aviso local que aparece antes do envio, só para avisar cedo: ele não é a proteção, e o OrderAccumulator
@@ -164,8 +167,9 @@ valida mesmo que a tela seja burlada.
   nomes `ORDERGENERATOR` e `ORDERACCUMULATOR`.
 - Os ativos são fixos (PETR4, VALE3 e VIIA4) e o limite é uma constante no código, não configuração.
 - A ordem não é executada: ela só é aceita ou rejeitada. Não existe casamento de ordens nem preenchimento.
-- As mensagens FIX ficam em memória e a numeração recomeça a cada logon. Uma mensagem perdida numa queda
-  não é reenviada; o OrderGenerator responde erro de comunicação depois de 5 segundos.
+- As mensagens FIX ficam em memória e a numeração recomeça a cada logon. Uma mensagem perdida não é
+  reenviada: se a sessão cai, o OrderGenerator responde na hora que a ordem pode ter sido aceita; sem
+  resposta e sem queda, responde o mesmo depois do prazo (5 segundos por padrão).
 - A proteção contra ordem repetida vale para o `ClOrdID` no FIX. Se a tela enviar a mesma ordem de novo,
   ela ganha um `ClOrdID` novo e conta como outra ordem.
 - Não há migrações versionadas do banco: o esquema é criado na subida do OrderAccumulator.
@@ -182,8 +186,9 @@ A tela é servida pelo próprio OrderGenerator. Quando você envia uma ordem, a 
 regra do limite no PostgreSQL e responde com um `ExecutionReport` (35=8): `New` quando aceita, `Rejected` com o motivo
 quando não aceita. O OrderGenerator devolve essa resposta para a tela.
 
-O painel de exposição chama `GET /api/exposures` no OrderGenerator, que só repassa a pergunta para o
-OrderAccumulator. A fonte do desenho fica em `docs/architecture/arquitetura-local.drawio` e o contrato
+O painel de exposição chama `GET /api/exposures` no OrderGenerator, que lê a exposição direto no
+PostgreSQL, na tabela que o OrderAccumulator grava. A lista de ordens e o "apagar tudo" seguem o mesmo
+caminho. As duas pontas do FIX usam o mesmo dicionário, `src/flowa.commons/Fix/FIX44-flowa.xml`. A fonte do desenho fica em `docs/architecture/arquitetura-local.drawio` e o contrato
 entre as partes (rotas, mensagens FIX, portas) em `docs/contracts/contracts.md`.
 
 ### Termos do negócio no código
@@ -196,65 +201,85 @@ O texto deste README fala em português; o código usa os nomes em inglês abaix
 - **Lado** (compra ou venda): `OrderSide`.
 - **Exposição de um ativo**: `SymbolExposure`.
 - **Limite de exposição**: `ExposureLimitPolicy`.
-- **Regra de campo**: `OrderFieldRule`.
+- **Regra de campo**: `OrderFieldPolicy`.
 - **Resposta da ordem**: a mensagem FIX `ExecutionReport`.
 - **Número da ordem**: o `ClOrdID` do FIX, `ClOrdId` no código.
 
 ### Como o código é organizado
 
-Cada app é um projeto .NET só (`OrderGenerator.csproj` e `OrderAccumulator.csproj`, na solução
-`Flowa.slnx`). As camadas são pastas, com o namespace igual à pasta (`Base.OrderAccumulator.Domain`, por
-exemplo):
+Cada app é um projeto .NET só (`OrderGenerator.csproj` e `OrderAccumulator.csproj`), e o código técnico
+que os dois usam fica num terceiro projeto, a Commons (`src/flowa.commons/Commons.csproj`). Os três estão
+na solução `Flowa.slnx`. Dentro de cada app, as camadas são pastas, com o namespace igual à pasta
+(`Flowa.OrderAccumulator.Domain`, por exemplo):
 
-- **Entrypoint**: rotas HTTP, a sessão FIX do OrderAccumulator e a montagem das dependências. Recebe o
-  pedido, chama o caso de uso e responde.
+- **Entrypoint**: rotas HTTP, a sessão FIX do OrderAccumulator, o tratamento de erro, o log de cada
+  pedido e a montagem das dependências. Recebe o pedido, chama o caso de uso e responde.
 - **Application**: os casos de uso. Cada um só organiza o passo a passo, sem regra de negócio.
 - **Domain**: as regras do negócio: a ordem, a regra de campo, o limite de exposição. Não usa nenhuma
   biblioteca de fora.
-- **Infrastructure**: PostgreSQL, cliente FIX, Datadog e log. Fora daqui, só o Entrypoint usa biblioteca
-  de fora: a QuickFIX/n na sessão FIX do OrderAccumulator e o Npgsql ao montar a conexão.
-- **Commons**: só contratos que as outras camadas usam, como a interface do log.
+- **Infrastructure**: o SQL do PostgreSQL, o cliente FIX e as métricas do Datadog. Banco e Datadog
+  passam pela Commons; fora daqui, só o Entrypoint usa a QuickFIX/n, na sessão FIX do OrderAccumulator.
 
-As dependências só apontam para dentro: o Domain não conhece nenhuma outra camada. Um teste de cada app
-confere isso lendo o código compilado (`tests/*.Tests/Camadas/LayerDependencyTests.cs`).
+A **Commons** é a parte técnica dividida pelos dois apps: banco (Dapper e Npgsql atrás de `IDatabase`), log,
+observabilidade, o envelope `DataMessage`, a base das entidades e o dicionário FIX (`Fix/FIX44-flowa.xml`).
 
-Dentro da Application há uma pasta por assunto do negócio, e cada fluxo é uma pasta com um caso de uso só.
-No OrderAccumulator as pastas `Orders` e `Exposures` têm o mesmo nome no Domain, onde ficam as regras. No
-OrderGenerator só `Orders` tem Domain: a exposição ali é só repassada do OrderAccumulator, sem regra.
+As dependências só apontam para dentro: o Domain não conhece nenhuma outra camada, e só a Commons usa
+Dapper, Npgsql e o cliente do Datadog. Um teste de cada app confere isso lendo o código compilado
+(`tests/*.Tests/Camadas/LayerDependencyTests.cs`).
+
+Dentro de cada camada há uma pasta por assunto do negócio (`Orders` e `Exposures`) e, dentro dela, uma
+pasta por tipo de classe (`UseCases`, `Responses`, `Interfaces`, `Repositories`...).
 
 ```
 src/flowa.orderaccumulator-worker-ecs/
-├─ Entrypoint/        rotas HTTP, sessão FIX (NewOrderSingleConsumer) e workers
+├─ Entrypoint/
+│  ├─ Fix/                  NewOrderSingleConsumer: recebe a ordem FIX e responde o ExecutionReport
+│  ├─ BackgroundService/    sessão FIX (acceptor) e a métrica da exposição
+│  ├─ Orders/, Exposures/   rotas HTTP
+│  └─ ErrorHandling/, Logging/, Observability/
 ├─ Application/
-│  ├─ Orders/
-│  │  ├─ DecideIncomingOrder/   decide se a ordem que chegou pelo FIX é aceita
-│  │  ├─ ListOrders/            lista as ordens para a tela
-│  │  └─ DeleteAllOrders/       apaga as ordens e zera a exposição
-│  └─ Exposures/
-│     └─ GetExposures/          exposição de cada ativo para o painel
+│  ├─ Orders/       DecideIncomingOrder, ListOrders e DeleteAllOrders (UseCases), Responses, Interfaces
+│  ├─ Exposures/    GetExposures (UseCases), Responses, Interfaces
+│  └─ ErrorHandling/
 ├─ Domain/
-│  ├─ Orders/         Order, regra de campo, IOrderRepository
-│  └─ Exposures/      SymbolExposure, limite de exposição, IExposureRepository
-├─ Infrastructure/    Persistence, Fix, Metrics, Logging
-└─ Commons/
+│  ├─ Orders/           Order, regra de campo (OrderFieldPolicy), IOrderRepository
+│  ├─ Exposures/        SymbolExposure, limite de exposição, IExposureRepository
+│  └─ DomainServices/   OrderDecisionDomainService
+└─ Infrastructure/
+   ├─ Orders/, Exposures/    Repositories (SQL); em Orders, também Adapters (métricas do Datadog) e Options
+   ├─ Fix/                   rastro na tag 5100 e log da sessão FIX
+   ├─ Persistence/           Schema.sql, criado na subida
+   └─ DependencyInjection/
 
 src/flowa.ordergenerator-webapi-ecs/
-├─ Entrypoint/        rotas HTTP e a página
+├─ Entrypoint/
+│  ├─ Orders/, Exposures/   rotas HTTP e o pedido da ordem
+│  └─ DependencyInjection/, ErrorHandling/, Logging/, Observability/
 ├─ Application/
-│  ├─ Orders/
-│  │  ├─ SendOrder/         manda a ordem por FIX e devolve a resposta
-│  │  ├─ ListOrders/        repassa a lista de ordens do OrderAccumulator
-│  │  └─ DeleteAllOrders/   repassa o "apagar tudo" ao OrderAccumulator
-│  └─ Exposures/
-│     └─ GetExposures/      repassa a exposição de cada ativo
+│  ├─ Orders/       SendOrder, ListOrders e DeleteAllOrders (UseCases), Commands, Responses, Interfaces
+│  ├─ Exposures/    GetExposures (UseCases), Responses, Interfaces
+│  └─ ErrorHandling/
 ├─ Domain/
-│  └─ Orders/         OrderToSend, SentOrderResult
-├─ Infrastructure/    cliente FIX, cliente HTTP do OrderAccumulator, rastro, log
-└─ Commons/
+│  ├─ Orders/       OrderToSend, SentOrderResult, formato da ordem
+│  └─ Exposures/    SymbolExposure, limite de exposição
+└─ Infrastructure/
+   ├─ Fix/                   cliente FIX (FixOrderClient), rastro e log da sessão
+   ├─ Orders/, Exposures/    Repositories: lista, exposição e "apagar tudo" no PostgreSQL;
+   │                         em Orders, também Options (prazo do FIX)
+   └─ DependencyInjection/
+
+src/flowa.commons/
+├─ Database/, Logging/, Observability/, Responses/, Entities/, DependencyInjection/
+└─ Fix/             FIX44-flowa.xml, o dicionário FIX dos dois apps
 ```
 
-Cada agregado tem um repositório só: `IOrderRepository` e `IExposureRepository`, com a interface no Domain
-e o código do PostgreSQL na Infrastructure.
+A página não fica no OrderGenerator: o código dela está em `frontend/`, e o build do Vite vai para o
+`wwwroot` dele.
+
+No OrderAccumulator, cada agregado tem um repositório: `IOrderRepository` e `IExposureRepository`, com a
+interface no Domain e o SQL na Infrastructure. As leituras para a tela têm repositório próprio, com a
+interface na Application (`IOrderListReadRepository`, `ISymbolExposureReadRepository`; no OrderGenerator,
+`IStoredOrderRepository` e `ISymbolExposureRepository`).
 
 ## Na nuvem (AWS)
 
@@ -266,7 +291,7 @@ da versão local, e as ordens vão para um PostgreSQL de verdade na AWS.
 O navegador fala só com o API Gateway. Ele passa o pedido por um VPC Link para o OrderGenerator, que
 roda no ECS Fargate. O OrderGenerator acha o OrderAccumulator pelo Cloud Map e conversa com ele por FIX,
 como na versão local. O OrderAccumulator grava num RDS PostgreSQL que fica numa subnet sem saída para
-fora. Nenhuma tarefa aceita conexão vinda da internet. Cada serviço roda uma cópia com 0,5 vCPU e
+fora, e o OrderGenerator lê a lista e a exposição nesse mesmo banco. Nenhuma tarefa aceita conexão vinda da internet. Cada serviço roda uma cópia com 0,5 vCPU e
 1 GB, que o app divide com o agente do Datadog, o banco é um `db.t3.micro` numa zona só, e o API
 Gateway aceita até 20 pedidos por segundo (rajada de 40); acima disso responde 429.
 
@@ -305,7 +330,7 @@ aparece como um rastro só, da tela até o OrderAccumulator: o OrderGenerator p�
 numa tag FIX própria da `NewOrderSingle`, a 5100 (`TraceParent`), e o OrderAccumulator continua o
 mesmo rastro (`Infrastructure/Fix/FixOrderTraceProvider.cs` em cada app). O OrderAccumulator conta
 `flowa.ordens.aceitas` e `flowa.ordens.rejeitadas` por ativo e lado, e publica `flowa.exposicao` por
-ativo (`src/flowa.orderaccumulator-worker-ecs/Infrastructure/Metrics/DatadogOrderMetricsAdapter.cs`). O ClOrdID não vira etiqueta, para o
+ativo (`src/flowa.orderaccumulator-worker-ecs/Infrastructure/Orders/Adapters/DatadogOrderMetricsAdapter.cs`). O ClOrdID não vira etiqueta, para o
 número de séries ficar pequeno.
 
 A esteira só põe o agente nas tasks quando o cofre do Datadog no Secrets Manager já tem a chave
