@@ -1,9 +1,12 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Net;
 using Flowa.Commons.Database;
+using Flowa.Commons.Observability;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 using Dapper;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace Flowa.OrderAccumulator.Tests;
@@ -42,6 +45,32 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
 
         Assert.Equal(HttpStatusCode.OK, orderAccumulatorHealthResponse.StatusCode);
         Assert.Equal("Healthy", await orderAccumulatorHealthResponse.Content.ReadAsStringAsync());
+    }
+
+    // The Commons is shared by the apps, so the meter and the duration metric come from the app: the Program of the
+    // OrderAccumulator has to register the use case measurement with its own names, the ones the dashboard reads.
+    [Fact]
+    public void Program_registers_the_use_case_measurement_with_the_order_accumulator_meter_and_metric()
+    {
+        var orderAccumulatorMeterFactory = orderAccumulatorApp.Services.GetRequiredService<IMeterFactory>();
+        var recordedUseCaseDurations = new List<(string MeterName, string MetricName, string? MetricUnit)>();
+        using var useCaseDurationListener = new MeterListener
+        {
+            InstrumentPublished = (publishedInstrument, listener) =>
+            {
+                if (publishedInstrument.Meter.Scope == orderAccumulatorMeterFactory)
+                    listener.EnableMeasurementEvents(publishedInstrument);
+            }
+        };
+        useCaseDurationListener.SetMeasurementEventCallback<double>((publishedInstrument, _, _, _) =>
+            recordedUseCaseDurations.Add((publishedInstrument.Meter.Name, publishedInstrument.Name, publishedInstrument.Unit)));
+        useCaseDurationListener.Start();
+
+        using (orderAccumulatorApp.Services.GetRequiredService<IOperationMonitoring>().StartOperationMonitoring("orders.list-orders"))
+        {
+        }
+
+        Assert.Equal(("Base.OrderAccumulator", "orderaccumulator.usecase.duration", "s"), Assert.Single(recordedUseCaseDurations));
     }
 
     [Fact]
