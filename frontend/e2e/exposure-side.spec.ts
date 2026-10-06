@@ -204,13 +204,21 @@ for (const windowWidth of [1920, 1440, 860, 375]) {
   });
 }
 
-// The widest values that fit the limit: PETR4 sold and VALE3 bought by 99,999 × 999.99, so one remaining figure reads
-// R$ 199.998.000,01. Between 861 and 1080 px the three cards are narrow; the split must come from the card width alone.
+// The limit accepts exactly ±R$ 100.000.000,00, so the widest figures are -R$ 100.000.000,00 and R$ 200.000.000,00.
+// Between 861 and 1080 px the three cards are narrow; the split must come from the card width alone.
 const WIDEST_VALUE_CARDS = [
-  { assetSymbol: 'PETR4', currentExposure: '-R$ 99.998.000,01', remainingToBuy: 'R$ 199.998.000,01', remainingToSell: 'R$ 1.999,99' },
-  { assetSymbol: 'VALE3', currentExposure: 'R$ 99.998.000,01', remainingToBuy: 'R$ 1.999,99', remainingToSell: 'R$ 199.998.000,01' },
-  { assetSymbol: 'VIIA4', currentExposure: 'R$ 0,00', remainingToBuy: 'R$ 100.000.000,00', remainingToSell: 'R$ 100.000.000,00' },
+  { assetSymbol: 'PETR4', sideBadgeLabel: 'Vendido', currentExposure: '-R$ 100.000.000,00', remainingToBuy: 'R$ 200.000.000,00', remainingToSell: 'R$ 0,00' },
+  { assetSymbol: 'VALE3', sideBadgeLabel: 'Comprado', currentExposure: 'R$ 100.000.000,00', remainingToBuy: 'R$ 0,00', remainingToSell: 'R$ 200.000.000,00' },
+  { assetSymbol: 'VIIA4', sideBadgeLabel: 'Zerado', currentExposure: 'R$ 0,00', remainingToBuy: 'R$ 100.000.000,00', remainingToSell: 'R$ 100.000.000,00' },
 ] as const;
+
+// 99,999 × 999.99 + 2 × 999.99 + 1 × 0.01 = 100,000,000.00 exactly.
+async function moveExposureToTheLimit(ticketPage: Page, symbol: string, side: 'buy' | 'sell') {
+  await sendOrderThroughApi(ticketPage, symbol, side, 99_999, 999.99);
+  await sendOrderThroughApi(ticketPage, symbol, side, 2, 999.99);
+  await sendOrderThroughApi(ticketPage, symbol, side, 1, 0.01);
+  expect((await readServerExposure(ticketPage, symbol)).exposure).toBe(side === 'buy' ? 100_000_000 : -100_000_000);
+}
 
 for (const { windowWidth, remainingFiguresLayout, areCardsInOneRow } of [
   { windowWidth: 1920, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: true },
@@ -223,8 +231,8 @@ for (const { windowWidth, remainingFiguresLayout, areCardsInOneRow } of [
   { windowWidth: 375, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: false },
 ] as const) {
   test(`RNF-02: at ${windowWidth} px, with the widest values, the remaining figures sit ${remainingFiguresLayout} in all three cards, each number on one line inside its card`, async ({ page }) => {
-    await sendOrderThroughApi(page, 'PETR4', 'sell', 99_999, 999.99);
-    await sendOrderThroughApi(page, 'VALE3', 'buy', 99_999, 999.99);
+    await moveExposureToTheLimit(page, 'PETR4', 'sell');
+    await moveExposureToTheLimit(page, 'VALE3', 'buy');
     await page.setViewportSize({ width: windowWidth, height: 900 });
     await page.goto('/');
     await expect(locateAssetCard(page, 'VIIA4')).toBeVisible();
@@ -232,6 +240,7 @@ for (const { windowWidth, remainingFiguresLayout, areCardsInOneRow } of [
     const limitUsageTrackTops: number[] = [];
     for (const expectedCard of WIDEST_VALUE_CARDS) {
       const assetCard = locateAssetCard(page, expectedCard.assetSymbol);
+      await checkSideBadge(assetCard, expectedCard.assetSymbol, expectedCard.sideBadgeLabel);
       await expect(assetCard.getByTestId('exposicao-atual')).toHaveText(expectedCard.currentExposure);
       await expect(assetCard.getByTestId('falta-para-comprar')).toHaveText(expectedCard.remainingToBuy);
       await expect(assetCard.getByTestId('falta-para-vender')).toHaveText(expectedCard.remainingToSell);
