@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Base.OrderAccumulator.Commons.Responses;
 
 public sealed class DataMessage<T>
@@ -9,7 +11,11 @@ public sealed class DataMessage<T>
     public IReadOnlyCollection<string> Errors { get; private set; }
     public string? ErrorCode { get; private set; }
 
-    private DataMessage(bool success, ResultStatus status, string message, T? data, IReadOnlyCollection<string> errors, string? errorCode)
+    [JsonIgnore]
+    public Exception? UnexpectedFailure { get; private set; }
+
+    private DataMessage(
+        bool success, ResultStatus status, string message, T? data, IReadOnlyCollection<string> errors, string? errorCode, Exception? unexpectedFailure)
     {
         Success = success;
         Status = status;
@@ -17,11 +23,18 @@ public sealed class DataMessage<T>
         Data = data;
         Errors = errors;
         ErrorCode = errorCode;
+        UnexpectedFailure = unexpectedFailure;
     }
 
     public static DataMessage<T> CreateSuccessMessage(T responseData, string message, ResultStatus status = ResultStatus.Ok) =>
-        new(true, status, message, responseData, Array.Empty<string>(), null);
+        new(true, status, message, responseData, Array.Empty<string>(), null, null);
 
     public static DataMessage<T> CreateErrorMessage(string message, ResultStatus status = ResultStatus.InvalidInput, IReadOnlyCollection<string>? errors = null, string? errorCode = null) =>
-        new(false, status, message, default, errors ?? Array.Empty<string>(), errorCode);
+        new(false, status, message, default, errors ?? Array.Empty<string>(), errorCode, null);
+
+    public static DataMessage<T> CreateUnexpectedFailureMessage(Exception unexpectedFailure, string message, string errorCode)
+    {
+        ArgumentNullException.ThrowIfNull(unexpectedFailure);
+        return new(false, ResultStatus.InternalError, message, default, Array.Empty<string>(), errorCode, unexpectedFailure);
+    }
 }

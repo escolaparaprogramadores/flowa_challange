@@ -5,13 +5,20 @@ using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
 
-public sealed class SymbolExposureReadRepository(IDatabase orderDatabase) : ISymbolExposureReadRepository
+public sealed class SymbolExposureReadRepository : ISymbolExposureReadRepository
 {
     private const string SelectExposuresSql = """
         SELECT symbol AS Symbol, exposure AS Exposure
         FROM exposures
         WHERE symbol = ANY(@Symbols)
         """;
+
+    private readonly IDatabase orderDatabase;
+
+    public SymbolExposureReadRepository(IDatabase orderDatabase)
+    {
+        this.orderDatabase = orderDatabase ?? throw new ArgumentNullException(nameof(orderDatabase));
+    }
 
     public async Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default)
     {

@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Base.OrderAccumulator.Commons.Responses;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -17,6 +18,9 @@ public static class ApiProblemDetailsExtensions
             return Results.Json(
                 DataMessage<TResponseData>.CreateSuccessMessage(convertToResponseData(useCaseMessage.Data!), useCaseMessage.Message, useCaseMessage.Status),
                 statusCode: ResultStatusHttpMapper.ConvertToHttpStatusCode(useCaseMessage.Status));
+
+        if (useCaseMessage.UnexpectedFailure is { } unexpectedUseCaseFailure)
+            ExceptionDispatchInfo.Throw(unexpectedUseCaseFailure);
 
         if (useCaseMessage.Status == ResultStatus.InternalError)
             throw new InvalidOperationException(useCaseMessage.Message);

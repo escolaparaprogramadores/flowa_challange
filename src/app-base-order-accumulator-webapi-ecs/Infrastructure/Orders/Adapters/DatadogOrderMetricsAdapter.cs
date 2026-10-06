@@ -3,8 +3,15 @@ using Base.OrderAccumulator.Commons.Observability;
 
 namespace Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 
-public sealed class DatadogOrderMetricsAdapter(IMetricsClient orderMetricsClient) : IOrderMetricsPort
+public sealed class DatadogOrderMetricsAdapter : IOrderMetricsPort
 {
+    private readonly IMetricsClient orderMetricsClient;
+
+    public DatadogOrderMetricsAdapter(IMetricsClient orderMetricsClient)
+    {
+        this.orderMetricsClient = orderMetricsClient ?? throw new ArgumentNullException(nameof(orderMetricsClient));
+    }
+
     public void CountAnsweredOrder(string? orderSymbol, char orderSide, bool orderAccepted)
     {
         var answeredOrderTags = OrderMetricTagMapper.BuildOrderDecisionTags(orderSymbol, orderSide);

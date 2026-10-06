@@ -44,12 +44,9 @@ public static class OrderFieldPolicy
         return orderSymbol;
     }
 
-    private static OrderSide? CheckOrderSide(char orderSide, List<string> invalidOrderFieldMessages) => orderSide switch
-    {
-        OrderSideCodes.BuyOrderSideFixCode => OrderSide.Buy,
-        OrderSideCodes.SellOrderSideFixCode => OrderSide.Sell,
-        _ => AddInvalidOrderFieldMessage<OrderSide>(invalidOrderFieldMessages, OrderFieldMessages.OrderSideInvalidMessage)
-    };
+    private static OrderSide? CheckOrderSide(char orderSide, List<string> invalidOrderFieldMessages) =>
+        OrderSideCodes.ConvertFixCodeToOrderSide(orderSide)
+        ?? AddInvalidOrderFieldMessage<OrderSide>(invalidOrderFieldMessages, OrderFieldMessages.OrderSideInvalidMessage);
 
     private static int? CheckOrderQuantity(decimal orderQuantity, List<string> invalidOrderFieldMessages)
     {

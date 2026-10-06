@@ -5,10 +5,19 @@ using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Domain.DomainServices;
 
-public sealed class OrderDecisionDomainService(IExposureRepository exposureRepository)
+public sealed class OrderDecisionDomainService
 {
+    private readonly IExposureRepository exposureRepository;
+
+    public OrderDecisionDomainService(IExposureRepository exposureRepository)
+    {
+        this.exposureRepository = exposureRepository ?? throw new ArgumentNullException(nameof(exposureRepository));
+    }
+
     public async Task<Order> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(incomingOrder);
+
         var orderFieldValidation = OrderFieldPolicy.ValidateIncomingOrderFields(incomingOrder);
         if (orderFieldValidation.ValidOrderFields is not { } validOrderFields)
             return Order.RejectOrderWithInvalidFields(incomingOrder, orderFieldValidation.InvalidOrderFieldMessages);

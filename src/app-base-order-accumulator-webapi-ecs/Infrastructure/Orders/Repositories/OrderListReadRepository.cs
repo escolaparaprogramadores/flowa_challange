@@ -4,7 +4,7 @@ using Base.OrderAccumulator.Commons.Database;
 
 namespace Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 
-public sealed class OrderListReadRepository(IDatabase orderDatabase) : IOrderListReadRepository
+public sealed class OrderListReadRepository : IOrderListReadRepository
 {
     public const int OrdersPerPage = 10;
 
@@ -17,6 +17,13 @@ public sealed class OrderListReadRepository(IDatabase orderDatabase) : IOrderLis
         ORDER BY received_at DESC, id DESC
         LIMIT @OrdersPerPage OFFSET @SkippedOrders
         """;
+
+    private readonly IDatabase orderDatabase;
+
+    public OrderListReadRepository(IDatabase orderDatabase)
+    {
+        this.orderDatabase = orderDatabase ?? throw new ArgumentNullException(nameof(orderDatabase));
+    }
 
     public Task<StoredOrderPageResponse> ReadStoredOrderPageAsync(int pageNumber, CancellationToken cancellationToken = default) =>
         orderDatabase.ReadInRepeatableReadSnapshotAsync(async () =>

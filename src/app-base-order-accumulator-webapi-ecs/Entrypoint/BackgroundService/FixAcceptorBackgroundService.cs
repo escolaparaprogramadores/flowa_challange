@@ -6,14 +6,23 @@ using QuickFix;
 
 namespace Base.OrderAccumulator.Entrypoint.BackgroundService;
 
-public sealed class FixAcceptorBackgroundService(
-    NewOrderSingleConsumer newOrderSingleConsumer, IConfiguration appConfiguration, FixSessionLogFactory fixSessionLogFactory)
-    : IHostedService, IDisposable
+public sealed class FixAcceptorBackgroundService : IHostedService, IDisposable
 {
     private const string AcceptorSettingsFile = "acceptor.cfg";
     private const string Fix44DictionaryFile = "FIX44-flowa.xml";
 
+    private readonly NewOrderSingleConsumer newOrderSingleConsumer;
+    private readonly IConfiguration appConfiguration;
+    private readonly FixSessionLogFactory fixSessionLogFactory;
     private ThreadedSocketAcceptor? fixAcceptor;
+
+    public FixAcceptorBackgroundService(
+        NewOrderSingleConsumer newOrderSingleConsumer, IConfiguration appConfiguration, FixSessionLogFactory fixSessionLogFactory)
+    {
+        this.newOrderSingleConsumer = newOrderSingleConsumer ?? throw new ArgumentNullException(nameof(newOrderSingleConsumer));
+        this.appConfiguration = appConfiguration ?? throw new ArgumentNullException(nameof(appConfiguration));
+        this.fixSessionLogFactory = fixSessionLogFactory ?? throw new ArgumentNullException(nameof(fixSessionLogFactory));
+    }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {

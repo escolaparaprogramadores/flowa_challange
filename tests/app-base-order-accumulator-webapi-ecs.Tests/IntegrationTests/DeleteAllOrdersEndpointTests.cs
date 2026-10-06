@@ -4,6 +4,7 @@ using System.Text;
 using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Orders.UseCases;
 using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Responses;
 using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Base.OrderAccumulator.Infrastructure.DependencyInjection;
 using Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
@@ -148,8 +149,10 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
         var deleteAllOrdersUseCase = new DeleteAllOrdersUseCase(
             deleteFailureUnitOfWork, new OrderRepository(deleteFailureDatabase), new ExposureRepository(deleteFailureDatabase), symbolExposureMemory);
 
-        var refusedDeleteException = await Assert.ThrowsAsync<PostgresException>(() => deleteAllOrdersUseCase.DeleteAllOrdersAsync(CancellationToken.None));
+        var refusedDeleteMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(CancellationToken.None);
 
+        Assert.Equal((false, ResultStatus.InternalError, "internal-error"), (refusedDeleteMessage.Success, refusedDeleteMessage.Status, refusedDeleteMessage.ErrorCode));
+        var refusedDeleteException = Assert.IsType<PostgresException>(refusedDeleteMessage.UnexpectedFailure);
         Assert.Equal("P0001", refusedDeleteException.SqlState);
         SymbolExposure[] exposuresBeforeTheFailedDelete = [new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
         Assert.Equal(exposuresBeforeTheFailedDelete, await deleteFailureExposureReader.GetSymbolExposuresAsync());

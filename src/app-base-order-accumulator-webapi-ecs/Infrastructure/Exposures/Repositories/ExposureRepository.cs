@@ -3,8 +3,10 @@ using Base.OrderAccumulator.Domain.Exposures.Interfaces;
 
 namespace Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
 
-public sealed class ExposureRepository(IDatabase orderDatabase) : IExposureRepository
+public sealed class ExposureRepository : IExposureRepository
 {
+    private readonly IDatabase orderDatabase;
+
     private const string MoveExposureSql = """
         UPDATE exposures
         SET exposure = exposure + @Delta
@@ -14,6 +16,11 @@ public sealed class ExposureRepository(IDatabase orderDatabase) : IExposureRepos
     private const string SymbolExistsSql = "SELECT count(*) FROM exposures WHERE symbol = @Symbol";
 
     private const string ZeroSymbolExposuresSql = "UPDATE exposures SET exposure = 0 WHERE symbol = ANY(@Symbols)";
+
+    public ExposureRepository(IDatabase orderDatabase)
+    {
+        this.orderDatabase = orderDatabase ?? throw new ArgumentNullException(nameof(orderDatabase));
+    }
 
     public async Task<bool> TryMoveSymbolExposureWithinLimitAsync(
         string orderSymbol, decimal exposureDelta, decimal exposureLimit, CancellationToken cancellationToken = default)

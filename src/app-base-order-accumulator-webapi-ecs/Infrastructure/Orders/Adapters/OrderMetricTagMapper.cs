@@ -3,7 +3,7 @@ using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 
-public static class OrderMetricTagMapper
+internal static class OrderMetricTagMapper
 {
     public const string InvalidTagValue = "invalido";
     public const string BuyOrderSideTagValue = "buy";

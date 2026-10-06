@@ -1,6 +1,6 @@
 namespace Base.OrderAccumulator.Infrastructure.Orders.Options;
 
-public static class OrderAccumulatorConfigurationKeys
+internal static class OrderAccumulatorConfigurationKeys
 {
     public const string OrderDatabaseConnectionStringName = "Flowa";
     public const string FixAcceptorPort = "Fix:AcceptorPort";

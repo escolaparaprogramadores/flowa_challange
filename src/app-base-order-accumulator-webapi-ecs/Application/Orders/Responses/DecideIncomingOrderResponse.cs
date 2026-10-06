@@ -1,4 +1,4 @@
-using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Application.Orders.Responses;
 
@@ -15,8 +15,19 @@ public sealed record DecideIncomingOrderResponse(
     bool RejectedForInvalidFields,
     bool IsRepeat)
 {
-    public static DecideIncomingOrderResponse FromAnsweredOrder(Order answeredOrder, bool isRepeat) => new(
-        answeredOrder.ClOrdId, answeredOrder.OrderId, answeredOrder.ExecId, answeredOrder.Symbol, answeredOrder.Side,
-        answeredOrder.Quantity, answeredOrder.Price, answeredOrder.Accepted, answeredOrder.RejectReason,
-        answeredOrder.WasRejectedForInvalidFields(), isRepeat);
+    public decimal LeavesQuantity { get; init; }
+
+    public static DecideIncomingOrderResponse MapFromOrderAnswer(OrderAnswer orderAnswer)
+    {
+        ArgumentNullException.ThrowIfNull(orderAnswer);
+
+        var answeredOrder = orderAnswer.AnsweredOrder;
+        return new DecideIncomingOrderResponse(
+            answeredOrder.ClOrdId, answeredOrder.OrderId, answeredOrder.ExecId, answeredOrder.Symbol, answeredOrder.Side,
+            answeredOrder.Quantity, answeredOrder.Price, answeredOrder.Accepted, answeredOrder.RejectReason,
+            answeredOrder.WasRejectedForInvalidFields(), orderAnswer.IsRepeat)
+        {
+            LeavesQuantity = answeredOrder.CalculateLeavesQuantity()
+        };
+    }
 }

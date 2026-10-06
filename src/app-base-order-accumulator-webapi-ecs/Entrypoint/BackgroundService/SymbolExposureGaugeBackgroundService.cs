@@ -3,10 +3,20 @@ using Base.OrderAccumulator.Application.Orders.Interfaces;
 
 namespace Base.OrderAccumulator.Entrypoint.BackgroundService;
 
-public sealed class SymbolExposureGaugeBackgroundService(
-    IOrderMetricsPort orderMetrics, ISymbolExposureMemoryPort symbolExposureMemory, TimeProvider gaugeClock) : Microsoft.Extensions.Hosting.BackgroundService
+public sealed class SymbolExposureGaugeBackgroundService : Microsoft.Extensions.Hosting.BackgroundService
 {
     public static readonly TimeSpan SymbolExposureGaugeInterval = TimeSpan.FromSeconds(30);
+
+    private readonly IOrderMetricsPort orderMetrics;
+    private readonly ISymbolExposureMemoryPort symbolExposureMemory;
+    private readonly TimeProvider gaugeClock;
+
+    public SymbolExposureGaugeBackgroundService(IOrderMetricsPort orderMetrics, ISymbolExposureMemoryPort symbolExposureMemory, TimeProvider gaugeClock)
+    {
+        this.orderMetrics = orderMetrics ?? throw new ArgumentNullException(nameof(orderMetrics));
+        this.symbolExposureMemory = symbolExposureMemory ?? throw new ArgumentNullException(nameof(symbolExposureMemory));
+        this.gaugeClock = gaugeClock ?? throw new ArgumentNullException(nameof(gaugeClock));
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

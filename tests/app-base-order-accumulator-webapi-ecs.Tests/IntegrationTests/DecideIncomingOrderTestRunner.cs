@@ -1,8 +1,10 @@
+using System.Runtime.ExceptionServices;
 using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Application.Orders.UseCases;
 using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Responses;
 using Base.OrderAccumulator.Domain.DomainServices;
 using Base.OrderAccumulator.Domain.Orders.Interfaces;
 using Base.OrderAccumulator.Domain.Orders.ValueObjects;
@@ -26,7 +28,10 @@ public sealed class DecideIncomingOrderTestRunner(
     {
     }
 
-    public async Task<DecideIncomingOrderResponse> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
+    public async Task<DecideIncomingOrderResponse> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default) =>
+        DecidedOrderMessages.ReadDecidedOrder(await DecideIncomingOrderMessageAsync(incomingOrder, cancellationToken));
+
+    public async Task<DataMessage<DecideIncomingOrderResponse>> DecideIncomingOrderMessageAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
     {
         await using var orderDatabaseUnitOfWork = new DatabaseUnitOfWork(orderDatabaseConnectionSource);
         var orderDatabase = new DapperDatabase(orderDatabaseUnitOfWork);
@@ -61,6 +66,17 @@ public static class OrderAccumulatorAppServicesExtensions
     public static async Task<DecideIncomingOrderResponse> DecideIncomingOrderAsync(this IServiceProvider orderAccumulatorAppServices, IncomingOrder incomingOrder)
     {
         await using var orderOperationScope = orderAccumulatorAppServices.CreateAsyncScope();
-        return await orderOperationScope.ServiceProvider.GetRequiredService<DecideIncomingOrderUseCase>().DecideIncomingOrderAsync(incomingOrder);
+        return DecidedOrderMessages.ReadDecidedOrder(
+            await orderOperationScope.ServiceProvider.GetRequiredService<DecideIncomingOrderUseCase>().DecideIncomingOrderAsync(incomingOrder));
+    }
+}
+
+public static class DecidedOrderMessages
+{
+    public static DecideIncomingOrderResponse ReadDecidedOrder(DataMessage<DecideIncomingOrderResponse> orderDecisionMessage)
+    {
+        if (orderDecisionMessage.UnexpectedFailure is { } orderDecisionFailure)
+            ExceptionDispatchInfo.Throw(orderDecisionFailure);
+        return orderDecisionMessage.Data!;
     }
 }

@@ -3,11 +3,22 @@ using Microsoft.Extensions.Options;
 
 namespace Base.OrderAccumulator.Entrypoint.ErrorHandling;
 
-public sealed class ProblemDetailsForAnyClientWriter(
-    IOptions<ProblemDetailsOptions> problemDetailsOptions,
-    IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions,
-    IApplicationLogger<GlobalErrorHandler> httpErrorLogger) : IProblemDetailsWriter
+public sealed class ProblemDetailsForAnyClientWriter : IProblemDetailsWriter
 {
+    private readonly IOptions<ProblemDetailsOptions> problemDetailsOptions;
+    private readonly IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions;
+    private readonly IApplicationLogger<GlobalErrorHandler> httpErrorLogger;
+
+    public ProblemDetailsForAnyClientWriter(
+        IOptions<ProblemDetailsOptions> problemDetailsOptions,
+        IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions> jsonOptions,
+        IApplicationLogger<GlobalErrorHandler> httpErrorLogger)
+    {
+        this.problemDetailsOptions = problemDetailsOptions ?? throw new ArgumentNullException(nameof(problemDetailsOptions));
+        this.jsonOptions = jsonOptions ?? throw new ArgumentNullException(nameof(jsonOptions));
+        this.httpErrorLogger = httpErrorLogger ?? throw new ArgumentNullException(nameof(httpErrorLogger));
+    }
+
     public bool CanWrite(ProblemDetailsContext problemDetailsContext) => true;
 
     public ValueTask WriteAsync(ProblemDetailsContext problemDetailsContext)
