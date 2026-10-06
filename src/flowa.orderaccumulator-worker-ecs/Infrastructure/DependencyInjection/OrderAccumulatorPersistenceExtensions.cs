@@ -1,6 +1,5 @@
 using System.Data;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
-using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.Commons.Database;
 using Flowa.Commons.DependencyInjection;
 using Flowa.OrderAccumulator.Domain.Exposures.Interfaces;
@@ -26,7 +25,6 @@ public static class OrderAccumulatorPersistenceExtensions
         orderAccumulatorServices.AddScoped<IOrderRepository, OrderRepository>();
         orderAccumulatorServices.AddScoped<IExposureRepository, ExposureRepository>();
         orderAccumulatorServices.AddScoped<ISymbolExposureReadRepository, SymbolExposureReadRepository>();
-        orderAccumulatorServices.AddScoped<IOrderListReadRepository, OrderListReadRepository>();
         return orderAccumulatorServices;
     }
 

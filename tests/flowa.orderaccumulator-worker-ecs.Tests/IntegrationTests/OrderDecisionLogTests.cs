@@ -35,7 +35,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
         // Each sale is worth 99,998,000.01; the second one would take VIIA4 over 100 million.
         var acceptedSale = NewTracedOrder("VIIA4", '2', 99999, 999.99m);
         var saleOverTheLimit = NewTracedOrder("VIIA4", '2', 99999, 999.99m);
-        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        await using (var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync())
         {
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
             Assert.Equal(ExecType.NEW, (await fixTestInitiator.SendExpectingExecutionReportAsync(acceptedSale)).ExecType.Value);
@@ -59,7 +59,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         using var orderTraceListener = ListenToOrderTraceSource();
         var orderWithUnknownSymbol = NewTracedOrder("ITUB4", '1', 100, 10.50m);
-        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        await using (var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync())
         {
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
             Assert.Equal(ExecType.REJECTED, (await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithUnknownSymbol)).ExecType.Value);
@@ -77,7 +77,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         using var orderTraceListener = ListenToOrderTraceSource();
         var orderWithUnknownSymbol = NewTracedOrder("ITUB4", '1', 100, 10.50m);
-        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        await using (var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync())
         {
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
             await fixTestInitiator.SendExpectingExecutionReportAsync(orderWithUnknownSymbol);
@@ -103,7 +103,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         using var orderTraceListener = ListenToOrderTraceSource();
         var orderWithoutLoggedOnSession = NewTracedOrder("VIIA4", '1', 10, 2.00m);
-        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        await using (var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync())
         {
             // The acceptor session exists but nobody is logged on: SendToTarget returns false.
             orderAccumulatorTestApp.Services.GetRequiredService<NewOrderSingleConsumer>()
@@ -123,9 +123,9 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         using var orderTraceListener = ListenToOrderTraceSource();
         var orderThatHitsTheDatabaseFailure = NewTracedOrder("PETR4", '1', 10, 1.00m);
-        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
+        await using (var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
             orderAccumulatorTestServices.AddScoped<IOrderRepository>(orderOperationServices =>
-                new OrderRepositoryFailingForClOrdId(orderThatHitsTheDatabaseFailure.ClOrdID.Value, new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())))).StartWithFixAcceptor())
+                new OrderRepositoryFailingForClOrdId(orderThatHitsTheDatabaseFailure.ClOrdID.Value, new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())))).StartWithFixAcceptorAsync())
         {
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
             var databaseFailureExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(orderThatHitsTheDatabaseFailure);
@@ -179,8 +179,5 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
 
         public Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default) =>
             postgresOrderRepository.TryAddOrderAsync(answeredOrder, cancellationToken);
-
-        public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
-            postgresOrderRepository.DeleteAllOrdersAsync(cancellationToken);
     }
 }

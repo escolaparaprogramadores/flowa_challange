@@ -70,7 +70,7 @@ public sealed class ConcurrentOrderExposureTests(OrderAccumulatorPostgresFixture
         // The exposure only moves in one direction in this round; so every rejected order was larger than the
         // room left at the end. This shows the accepted ones reached the limit.
         Assert.All(rejectedAnswers, rejectedAnswer =>
-            Assert.True(Math.Abs(TestOrders.ExposureDeltaOf(rejectedAnswer)) > ExposureLimitPolicy.CalculateRemainingExposureCapacity(finalExposure)));
+            Assert.True(Math.Abs(TestOrders.ExposureDeltaOf(rejectedAnswer)) > ExposureLimitPolicy.PerSymbol - Math.Abs(finalExposure)));
     }
 
     // Regression of the flaky test: with 30 s (the Npgsql default) a slow round timed out the read.

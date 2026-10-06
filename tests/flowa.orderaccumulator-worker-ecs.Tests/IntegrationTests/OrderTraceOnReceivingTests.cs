@@ -23,7 +23,7 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
     public async Task Order_with_traceparent_in_tag_5100_is_accepted_in_the_same_trace_as_the_sending()
     {
         using var capturedOrderTraceSpans = new CapturedOrderTraceSpans();
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         using var orderSending = OrderSendingTestSource.StartActivity("fix.envio_da_ordem", ActivityKind.Producer);
         Assert.NotNull(orderSending);
@@ -56,7 +56,7 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
         string orderClOrdId;
         string orderTraceParent;
-        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        await using (var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync())
         {
             using var capturedOrderTraceSpans = new CapturedOrderTraceSpans();
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
@@ -95,7 +95,7 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
     public async Task Order_without_tag_5100_is_accepted_and_opens_a_new_trace()
     {
         using var capturedOrderTraceSpans = new CapturedOrderTraceSpans();
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         var orderWithoutTrace = FixTestInitiator.NewOrder("trace-without-5100", "VALE3", '2', 200, 61.37m);
 
@@ -116,7 +116,7 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
     public async Task Order_with_malformed_tag_5100_is_accepted_and_opens_a_new_trace(string malformedTraceParent)
     {
         using var capturedOrderTraceSpans = new CapturedOrderTraceSpans();
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         var orderWithMalformedTrace = FixTestInitiator.NewOrder("malformed-trace", "VIIA4", '1', 10, 3.21m);
         orderWithMalformedTrace.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, malformedTraceParent));
@@ -133,7 +133,7 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
     [Fact]
     public async Task User_field_outside_the_dictionary_is_still_refused_by_the_fix_session()
     {
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         var orderWithUnknownField = FixTestInitiator.NewOrder("field-5101", "PETR4", '1', 100, 10.50m);
         orderWithUnknownField.SetField(new StringField(5101, "outside-the-dictionary"));

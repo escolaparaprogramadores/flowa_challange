@@ -17,14 +17,6 @@ public sealed class ExposureLimitTests
         Assert.Equal(-1_050.00m, ExposureLimitPolicy.CalculateOrderExposureDelta(OrderSide.Sell, 100, 10.50m));
     }
 
-    [Theory]
-    [InlineData(1_000)]
-    [InlineData(-1_000)]
-    public void Remaining_is_the_limit_minus_the_absolute_exposure(int symbolExposure)
-    {
-        Assert.Equal(ExposureLimitPolicy.PerSymbol - 1_000m, ExposureLimitPolicy.CalculateRemainingExposureCapacity(symbolExposure));
-    }
-
     [Fact]
     public void Rejection_text_matches_the_contract_word_for_word()
     {

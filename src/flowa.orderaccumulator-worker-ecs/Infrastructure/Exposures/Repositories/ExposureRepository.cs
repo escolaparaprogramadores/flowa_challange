@@ -15,8 +15,6 @@ public sealed class ExposureRepository : IExposureRepository
 
     private const string SymbolExistsSql = "SELECT count(*) FROM exposures WHERE symbol = @Symbol";
 
-    private const string ZeroSymbolExposuresSql = "UPDATE exposures SET exposure = 0 WHERE symbol = ANY(@Symbols)";
-
     public ExposureRepository(IDatabase orderDatabase)
     {
         this.orderDatabase = orderDatabase ?? throw new ArgumentNullException(nameof(orderDatabase));
@@ -38,7 +36,4 @@ public sealed class ExposureRepository : IExposureRepository
 
         return false;
     }
-
-    public async Task ZeroSymbolExposuresAsync(IReadOnlyList<string> orderSymbols, CancellationToken cancellationToken = default) =>
-        await orderDatabase.ExecuteSqlCommandAsync(ZeroSymbolExposuresSql, new { Symbols = orderSymbols.ToArray() }, cancellationToken);
 }

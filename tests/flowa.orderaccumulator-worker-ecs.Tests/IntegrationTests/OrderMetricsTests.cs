@@ -16,8 +16,6 @@ using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Adapters;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -318,7 +316,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         var uniqueVersionTag = "sha-" + Guid.NewGuid().ToString("N");
         using var agentOnTheDatadogPort = new DogStatsdUdpListener(OrderMetricsExtensions.DatadogAgentDogStatsdPort);
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
-        await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, uniqueVersionTag, new OrderAccumulatorCapturedLogs());
+        await using var orderAccumulatorApp = await StartOrderAccumulatorAppAsync(startupDatabaseConnectionString, uniqueVersionTag);
         var appServices = orderAccumulatorApp.Services;
         var appOrderMetricsClient = (DogStatsdMetricsClient)appServices.GetRequiredService<IMetricsClient>();
 
@@ -340,8 +338,8 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task Without_an_agent_the_app_processes_every_order_and_writes_only_the_accepted_order_lines()
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
-        var capturedAppLogs = new OrderAccumulatorCapturedLogs();
-        await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "sha-without-agent", capturedAppLogs);
+        await using var orderAccumulatorApp = await StartOrderAccumulatorAppAsync(startupDatabaseConnectionString, "sha-without-agent");
+        var capturedAppLogs = orderAccumulatorApp.CapturedOrderAccumulatorLogs;
         var appServices = orderAccumulatorApp.Services;
         var appOrderMetricsClient = (DogStatsdMetricsClient)appServices.GetRequiredService<IMetricsClient>();
         var appOrderDecisionServices = appServices;
@@ -368,7 +366,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task App_counts_orders_through_the_datadog_adapter_and_reads_the_exposure_stored_before_startup()
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync("UPDATE exposures SET exposure = 4321.50 WHERE symbol = 'VALE3'");
-        await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "test-sha", new OrderAccumulatorCapturedLogs());
+        await using var orderAccumulatorApp = await StartOrderAccumulatorAppAsync(startupDatabaseConnectionString, "test-sha");
 
         var appServices = orderAccumulatorApp.Services;
         Assert.IsType<DatadogOrderMetricsAdapter>(appServices.GetRequiredService<IOrderMetricsPort>());
@@ -402,21 +400,13 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         return startupDatabaseConnectionString;
     }
 
-    private static WebApplicationFactory<Program> CreateOrderAccumulatorApp(
-        string startupDatabaseConnectionString, string versionTag, OrderAccumulatorCapturedLogs capturedAppLogs)
-    {
-        var orderAccumulatorApp = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(orderAccumulatorHost => orderAccumulatorHost
-                .UseSetting("ConnectionStrings:Flowa", startupDatabaseConnectionString)
-                .UseSetting("Fix:AcceptorPort", "0")
-                .UseSetting("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost)
-                .UseSetting("DD_ENV", "dev")
-                .UseSetting("DD_SERVICE", "order-accumulator")
-                .UseSetting("DD_VERSION", versionTag)
-                .ConfigureLogging(orderAccumulatorLogging => orderAccumulatorLogging.AddProvider(capturedAppLogs)));
-        orderAccumulatorApp.CreateClient();
-        return orderAccumulatorApp;
-    }
+    private static Task<OrderAccumulatorFixTestHost> StartOrderAccumulatorAppAsync(string startupDatabaseConnectionString, string versionTag) =>
+        new OrderAccumulatorFixTestHost(startupDatabaseConnectionString, extraOrderAccumulatorSettings: new Dictionary<string, string?>
+        {
+            ["DD_ENV"] = "dev",
+            ["DD_SERVICE"] = "order-accumulator",
+            ["DD_VERSION"] = versionTag
+        }).StartWithFixAcceptorAsync();
 
     // The gauge goes out in a send loop; reads until the three symbols arrive and sorts them by tag.
     private async Task<List<DogStatsdMetricLine>> ReadThreeExposureGaugesAsync()
@@ -475,8 +465,6 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
 
         public Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default) =>
             Task.FromException<bool>(databaseFailure);
-
-        public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) => Task.FromException(databaseFailure);
     }
 
     private sealed class SymbolExposureReaderFailingOnTheFirstRead(ISymbolExposureReadRepository storedExposureReader) : ISymbolExposureReadRepository

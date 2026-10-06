@@ -50,6 +50,31 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal("1654", await composeUnderTest.ReadContainerProcessUserIdAsync("orderaccumulator"));
     }
 
+    // CA-9: the OrderAccumulator is a worker; inside its own container the only socket the app user listens on is the
+    // FIX 9876 and a connection to the old HTTP port 8081 is refused. Docker's own DNS also listens in the container
+    // network (127.0.0.11, as root), so the sockets are filtered by the app user. The aspnet base image sets
+    // ASPNETCORE_HTTP_PORTS=8080; the container must carry it empty, read from the running process environment.
+    [Fact]
+    public async Task Orderaccumulator_listens_only_on_the_fix_port_and_refuses_the_old_http_port()
+    {
+        var accumulatorAppUserId = await composeUnderTest.ReadContainerProcessUserIdAsync("orderaccumulator");
+        var listeningSocketTables = await composeUnderTest.RunComposeCommandAsync(
+            TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "cat", "/proc/net/tcp", "/proc/net/tcp6");
+        var oldHttpPortAnswer = await composeUnderTest.RunComposeCommandAsync(
+            TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "bash", "-c",
+            "(exec 3<>/dev/tcp/127.0.0.1/8081) 2>/dev/null && echo open || echo refused");
+        var accumulatorProcessEnvironment = await composeUnderTest.RunComposeCommandAsync(
+            TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "bash", "-c", "tr '\\0' '\\n' < /proc/1/environ");
+
+        Assert.Equal("1654", accumulatorAppUserId);
+        Assert.Equal(new[] { 9876 }, ReadListeningTcpPortsOfUser(listeningSocketTables, accumulatorAppUserId));
+        Assert.Equal("refused", oldHttpPortAnswer.Trim());
+        Assert.Equal(
+            new[] { "ASPNETCORE_HTTP_PORTS=" },
+            accumulatorProcessEnvironment.Split('\n').Select(environmentLine => environmentLine.Trim())
+                .Where(environmentLine => environmentLine.StartsWith("ASPNETCORE_", StringComparison.Ordinal)).ToArray());
+    }
+
     [Fact]
     public async Task Both_apps_only_start_after_postgres_is_healthy()
     {
@@ -69,6 +94,14 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         Assert.Equal("10", generatorEnvironment.GetProperty("Database__MaximumPoolSize").GetString());
         Assert.DoesNotContain("Pool", generatorEnvironment.GetProperty("ConnectionStrings__Flowa").GetString());
         Assert.False(generatorEnvironment.TryGetProperty("OrderAccumulator__BaseUrl", out _));
+
+        // CA-32 and CA-9 on the OrderAccumulator: pool limit outside the secret, no HTTP port and no healthcheck (decision 20).
+        var orderAccumulatorService = composeServices.GetProperty("orderaccumulator");
+        var accumulatorEnvironment = orderAccumulatorService.GetProperty("environment");
+        Assert.Equal("10", accumulatorEnvironment.GetProperty("Database__MaximumPoolSize").GetString());
+        Assert.DoesNotContain("Pool", accumulatorEnvironment.GetProperty("ConnectionStrings__Flowa").GetString());
+        Assert.False(accumulatorEnvironment.TryGetProperty("ASPNETCORE_HTTP_PORTS", out _));
+        Assert.False(orderAccumulatorService.TryGetProperty("healthcheck", out _));
 
         var postgresHealthcheck = composeServices.GetProperty("postgres").GetProperty("healthcheck").GetProperty("test")
             .EnumerateArray().Select(healthcheckCommandPart => healthcheckCommandPart.GetString()).ToArray();
@@ -631,6 +664,16 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
 
     private async Task<IReadOnlyList<ComposeJsonLogLine>> ReadOrderLogLinesAsync(string serviceName, string clOrdId) =>
         (await ReadServiceJsonLogLinesAsync(serviceName)).Where(serviceLogLine => serviceLogLine.TraceId == clOrdId).ToList();
+
+    // /proc/net/tcp and tcp6: the local address ends in ":<port in hex>", state 0A is LISTEN and the 8th column is the uid.
+    private static int[] ReadListeningTcpPortsOfUser(string listeningSocketTables, string socketOwnerUserId) =>
+        listeningSocketTables.Split('\n')
+            .Select(socketTableLine => socketTableLine.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Where(socketTableColumns => socketTableColumns.Length > 7 && socketTableColumns[3] == "0A" && socketTableColumns[7] == socketOwnerUserId)
+            .Select(listeningSocketColumns => Convert.ToInt32(listeningSocketColumns[1].Split(':')[1], 16))
+            .Distinct()
+            .Order()
+            .ToArray();
 }
 
 // Runs without Docker: the limit is a constant of the OrderAccumulator and must not leak into configuration (CA-21).
@@ -734,8 +777,8 @@ public sealed class CleanCloneImageCommitTests
         Task<string> RunCloneComposeCommandAsync(TimeSpan commandTimeout, params string[] composeArguments) =>
             CaptureCloneExternalCommandOutputAsync(commandTimeout, "docker", ["compose", "-p", CloneComposeProjectName, "-f", cloneComposeFile, .. composeArguments]);
 
-        // The GET /version leaves from inside each container, through the /dev/tcp of bash: the aspnet image has no
-        // curl and port 8081 of the OrderAccumulator does not even leave the compose network.
+        // The GET /version leaves from inside the OrderGenerator container, through the /dev/tcp of bash: the aspnet
+        // image has no curl.
         async Task<string> ReadCloneServiceCommitAsync(string serviceName, int containerHttpPort)
         {
             var lastVersionFailure = "no answer";
@@ -763,6 +806,27 @@ public sealed class CleanCloneImageCommitTests
             throw new TimeoutException($"the /version of {serviceName} did not answer within 2 minutes; last failure: {lastVersionFailure}");
         }
 
+        // The OrderAccumulator is a worker without HTTP: the commit it was built from is the BuildCommitSha of its
+        // "Application started." log line.
+        async Task<string> ReadCloneAccumulatorStartedCommitAsync()
+        {
+            var startedLineDeadline = DateTime.UtcNow.AddMinutes(2);
+            while (DateTime.UtcNow < startedLineDeadline)
+            {
+                var accumulatorLog = await RunCloneComposeCommandAsync(TimeSpan.FromSeconds(30), "logs", "--no-color", "--no-log-prefix", "orderaccumulator");
+                var applicationStartedLines = accumulatorLog.Split('\n')
+                    .Select(accumulatorLogLine => accumulatorLogLine.Trim())
+                    .Where(accumulatorLogLine => accumulatorLogLine.StartsWith('{'))
+                    .Select(ComposeJsonLogLine.ParseContainerLogLine)
+                    .Where(accumulatorJsonLogLine => accumulatorJsonLogLine.Message == "Application started.")
+                    .ToList();
+                if (applicationStartedLines.Count > 0)
+                    return Assert.Single(applicationStartedLines).ReadLogField("BuildCommitSha")!;
+                await Task.Delay(500);
+            }
+            throw new TimeoutException("the orderaccumulator did not write the Application started. line within 2 minutes");
+        }
+
         var repoHeadCommit = (await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", repoRoot, "rev-parse", "HEAD")).Trim();
         var cloneTestFailed = false;
         try
@@ -772,7 +836,7 @@ public sealed class CleanCloneImageCommitTests
 
             await RunCloneComposeCommandAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
             Assert.Equal(repoHeadCommit, await ReadCloneServiceCommitAsync("ordergenerator", 8080));
-            Assert.Equal(repoHeadCommit, await ReadCloneServiceCommitAsync("orderaccumulator", 8081));
+            Assert.Equal(repoHeadCommit, await ReadCloneAccumulatorStartedCommitAsync());
             await RunCloneComposeCommandAsync(TimeSpan.FromMinutes(2), "down", "-v");
 
             await CaptureCloneExternalCommandOutputAsync(TimeSpan.FromSeconds(30), "git", "-C", cloneDirectory, "commit", "--allow-empty", "--quiet", "-m", "new test commit");
@@ -781,7 +845,7 @@ public sealed class CleanCloneImageCommitTests
 
             await RunCloneComposeCommandAsync(CloneComposeUpTimeout, "up", "-d", "--wait", "--wait-timeout", "300");
             Assert.Equal(newCloneCommit, await ReadCloneServiceCommitAsync("ordergenerator", 8080));
-            Assert.Equal(newCloneCommit, await ReadCloneServiceCommitAsync("orderaccumulator", 8081));
+            Assert.Equal(newCloneCommit, await ReadCloneAccumulatorStartedCommitAsync());
         }
         catch
         {

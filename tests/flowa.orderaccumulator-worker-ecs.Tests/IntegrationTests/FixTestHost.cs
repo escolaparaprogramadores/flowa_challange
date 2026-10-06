@@ -2,10 +2,9 @@ using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Net;
 using System.Threading.Channels;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using QuickFix.Fields;
 using QuickFix.FIX44;
@@ -17,19 +16,24 @@ using Message = QuickFix.Message;
 
 namespace Flowa.OrderAccumulator.Tests;
 
-// The whole OrderAccumulator (Program.cs), with the FIX acceptor on 127.0.0.1 on a free port
-// (or on the requested port) and the container database.
-public sealed class OrderAccumulatorFixTestHost : WebApplicationFactory<Program>
+// The whole OrderAccumulator, composed and started by the same Program methods the worker runs, with the FIX acceptor
+// on 127.0.0.1 on a free port (or on the requested port) and the container database. The worker has no HTTP.
+public sealed class OrderAccumulatorFixTestHost : IAsyncDisposable
 {
     public const string FixAcceptorLoopbackBindHost = "127.0.0.1";
 
     private readonly string orderDatabaseConnectionString;
     private readonly Action<IServiceCollection>? replaceOrderAccumulatorServices;
+    private readonly IReadOnlyDictionary<string, string?> extraOrderAccumulatorSettings;
+    private IHost? orderAccumulatorHost;
 
-    public OrderAccumulatorFixTestHost(string orderDatabaseConnectionString, int? fixAcceptorPort = null, Action<IServiceCollection>? replaceOrderAccumulatorServices = null)
+    public OrderAccumulatorFixTestHost(
+        string orderDatabaseConnectionString, int? fixAcceptorPort = null, Action<IServiceCollection>? replaceOrderAccumulatorServices = null,
+        IReadOnlyDictionary<string, string?>? extraOrderAccumulatorSettings = null)
     {
         this.orderDatabaseConnectionString = orderDatabaseConnectionString;
         this.replaceOrderAccumulatorServices = replaceOrderAccumulatorServices;
+        this.extraOrderAccumulatorSettings = extraOrderAccumulatorSettings ?? new Dictionary<string, string?>();
         FixAcceptorPort = fixAcceptorPort ?? FindFreeFixAcceptorTcpPort();
     }
 
@@ -37,21 +41,46 @@ public sealed class OrderAccumulatorFixTestHost : WebApplicationFactory<Program>
 
     public OrderAccumulatorCapturedLogs CapturedOrderAccumulatorLogs { get; } = new();
 
-    protected override void ConfigureWebHost(IWebHostBuilder orderAccumulatorWebHostBuilder)
+    public IServiceProvider Services =>
+        orderAccumulatorHost?.Services ?? throw new InvalidOperationException("Start the OrderAccumulator with StartWithFixAcceptorAsync first.");
+
+    public async Task<OrderAccumulatorFixTestHost> StartWithFixAcceptorAsync()
     {
-        orderAccumulatorWebHostBuilder.UseSetting("ConnectionStrings:Flowa", orderDatabaseConnectionString);
-        orderAccumulatorWebHostBuilder.UseSetting("Fix:AcceptorPort", FixAcceptorPort.ToString());
-        orderAccumulatorWebHostBuilder.UseSetting("Fix:AcceptorBindHost", FixAcceptorLoopbackBindHost);
-        orderAccumulatorWebHostBuilder.ConfigureLogging(orderAccumulatorLoggingBuilder => orderAccumulatorLoggingBuilder.AddProvider(CapturedOrderAccumulatorLogs));
-        if (replaceOrderAccumulatorServices is not null)
-            orderAccumulatorWebHostBuilder.ConfigureTestServices(replaceOrderAccumulatorServices);
+        var orderAccumulatorBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            EnvironmentName = Environments.Development,
+            ContentRootPath = AppContext.BaseDirectory
+        });
+        orderAccumulatorBuilder.Configuration.AddInMemoryCollection(BuildOrderAccumulatorTestSettings());
+        Program.AddOrderAccumulatorServices(orderAccumulatorBuilder);
+        orderAccumulatorBuilder.Logging.AddProvider(CapturedOrderAccumulatorLogs);
+        replaceOrderAccumulatorServices?.Invoke(orderAccumulatorBuilder.Services);
+
+        orderAccumulatorHost = orderAccumulatorBuilder.Build();
+        await Program.StartOrderAccumulatorAsync(orderAccumulatorHost);
+        return this;
     }
 
-    // Forces the host (and the acceptor) to start without needing an HTTP call first.
-    public OrderAccumulatorFixTestHost StartWithFixAcceptor()
+    public async ValueTask DisposeAsync()
     {
-        _ = Services;
-        return this;
+        if (orderAccumulatorHost is null)
+            return;
+
+        await orderAccumulatorHost.StopAsync();
+        orderAccumulatorHost.Dispose();
+    }
+
+    private Dictionary<string, string?> BuildOrderAccumulatorTestSettings()
+    {
+        var orderAccumulatorTestSettings = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Flowa"] = orderDatabaseConnectionString,
+            ["Fix:AcceptorPort"] = FixAcceptorPort.ToString(),
+            ["Fix:AcceptorBindHost"] = FixAcceptorLoopbackBindHost
+        };
+        foreach (var (extraSettingKey, extraSettingValue) in extraOrderAccumulatorSettings)
+            orderAccumulatorTestSettings[extraSettingKey] = extraSettingValue;
+        return orderAccumulatorTestSettings;
     }
 
     public static int FindFreeFixAcceptorTcpPort()

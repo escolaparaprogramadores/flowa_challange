@@ -57,17 +57,20 @@ locals {
       # Se o agente cair ou a chave estiver errada, a task segue de pé e as ordens continuam passando.
       essential = false
 
-      environment = [
+      environment = concat([
         { name = "ECS_FARGATE", value = "true" },
         { name = "DD_SITE", value = "datadoghq.com" },
         { name = "DD_ENV", value = local.ambiente_dos_recursos_flowa },
         { name = "DD_APM_ENABLED", value = "true" },
         { name = "DD_DOGSTATSD_PORT", value = "8125" },
-        # O health check do ECS bate no /health a cada 15 s; esses rastros só fariam ruído.
-        { name = "DD_APM_IGNORE_RESOURCES", value = "^GET /health$" },
-        { name = "DD_LOGS_ENABLED", value = "false" },
-        { name = "DD_LOG_LEVEL", value = "warn" },
-      ]
+        ],
+        # O health check do ECS bate no /health do generator a cada 15 s; esses rastros só fariam ruído.
+        # O accumulator é worker sem HTTP e sem checagem de saúde: não tem esse filtro.
+        servico_flowa == "generator" ? [{ name = "DD_APM_IGNORE_RESOURCES", value = "^GET /health$" }] : [],
+        [
+          { name = "DD_LOGS_ENABLED", value = "false" },
+          { name = "DD_LOG_LEVEL", value = "warn" },
+      ])
 
       # O segredo é texto puro, sem campo JSON; a execution role o lê quando a task sobe.
       secrets = [

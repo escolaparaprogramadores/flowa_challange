@@ -17,8 +17,6 @@ public static class ExposureLimitPolicy
     public static decimal CalculateOrderExposureDelta(OrderSide orderSide, int orderQuantity, decimal orderPrice) =>
         orderSide == OrderSide.Buy ? orderPrice * orderQuantity : -(orderPrice * orderQuantity);
 
-    public static decimal CalculateRemainingExposureCapacity(decimal symbolExposure) => PerSymbol - Math.Abs(symbolExposure);
-
     public static string BuildExposureLimitRejectionText(string orderSymbol) =>
         $"Ordem rejeitada: a exposição de {orderSymbol} passaria do limite de {PerSymbol.ToString("N", BrazilianMoneyFormat)}.";
 }

@@ -1,22 +1,19 @@
-using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using System.Net;
 using Flowa.Commons.Database;
 using Flowa.Commons.Observability;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 using Dapper;
-using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace Flowa.OrderAccumulator.Tests;
 
-// The app starts against its own empty database: the migration has to run at startup.
+// The app starts against its own empty database: the migration has to run at startup. It starts as a worker, without HTTP.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
     private string emptyOrderAccumulatorDatabaseConnectionString = null!;
-    private WebApplicationFactory<Program> orderAccumulatorApp = null!;
 
     public async Task InitializeAsync()
     {
@@ -28,31 +25,31 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
         {
             Database = emptyOrderAccumulatorDatabaseName
         }.ConnectionString;
-        orderAccumulatorApp = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(orderAccumulatorHost => orderAccumulatorHost
-                .UseSetting("ConnectionStrings:Flowa", emptyOrderAccumulatorDatabaseConnectionString)
-                // The FIX acceptor starts too: a free port and only on loopback, without competing for 9876 or opening to the network.
-                .UseSetting("Fix:AcceptorPort", "0")
-                .UseSetting("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost));
     }
 
-    public async Task DisposeAsync() => await orderAccumulatorApp.DisposeAsync();
+    public Task DisposeAsync() => Task.CompletedTask;
 
+    // CA-9: no web server is registered, so nothing answers /health, /version, /api/exposures or /api/orders.
     [Fact]
-    public async Task Health_answers_healthy()
+    public async Task Worker_starts_without_any_http_server()
     {
-        var orderAccumulatorHealthResponse = await orderAccumulatorApp.CreateClient().GetAsync("/health");
+        // Arrange
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(emptyOrderAccumulatorDatabaseConnectionString).StartWithFixAcceptorAsync();
 
-        Assert.Equal(HttpStatusCode.OK, orderAccumulatorHealthResponse.StatusCode);
-        Assert.Equal("Healthy", await orderAccumulatorHealthResponse.Content.ReadAsStringAsync());
+        // Act
+        var registeredHttpServer = orderAccumulatorTestApp.Services.GetService<IServer>();
+
+        // Assert
+        Assert.Null(registeredHttpServer);
     }
 
     // The Commons is shared by the apps, so the meter and the duration metric come from the app: the Program of the
     // OrderAccumulator has to register the use case measurement with its own names, the ones the dashboard reads.
     [Fact]
-    public void Program_registers_the_use_case_measurement_with_the_order_accumulator_meter_and_metric()
+    public async Task Program_registers_the_use_case_measurement_with_the_order_accumulator_meter_and_metric()
     {
-        var orderAccumulatorMeterFactory = orderAccumulatorApp.Services.GetRequiredService<IMeterFactory>();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(emptyOrderAccumulatorDatabaseConnectionString).StartWithFixAcceptorAsync();
+        var orderAccumulatorMeterFactory = orderAccumulatorTestApp.Services.GetRequiredService<IMeterFactory>();
         var recordedUseCaseDurations = new List<(string MeterName, string MetricName, string? MetricUnit)>();
         using var useCaseDurationListener = new MeterListener
         {
@@ -66,7 +63,7 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
             recordedUseCaseDurations.Add((publishedInstrument.Meter.Name, publishedInstrument.Name, publishedInstrument.Unit)));
         useCaseDurationListener.Start();
 
-        using (orderAccumulatorApp.Services.GetRequiredService<IOperationMonitoring>().StartOperationMonitoring("orders.list-orders"))
+        using (orderAccumulatorTestApp.Services.GetRequiredService<IOperationMonitoring>().StartOperationMonitoring("orders.decide-incoming-order"))
         {
         }
 
@@ -74,21 +71,9 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
     }
 
     [Fact]
-    public async Task Version_answers_the_commit_the_app_was_built_from()
-    {
-        var orderAccumulatorVersionResponse = await orderAccumulatorApp.CreateClient().GetAsync("/version");
-
-        // Contract §1: {"commit":"<full sha, 40 characters>"}.
-        var gitHeadSha = ReadGitHeadSha();
-        Assert.Equal(40, gitHeadSha.Length);
-        Assert.Equal(HttpStatusCode.OK, orderAccumulatorVersionResponse.StatusCode);
-        Assert.Equal($$"""{"commit":"{{gitHeadSha}}"}""", await orderAccumulatorVersionResponse.Content.ReadAsStringAsync());
-    }
-
-    [Fact]
     public async Task Startup_creates_the_tables_and_one_zeroed_row_per_symbol()
     {
-        orderAccumulatorApp.CreateClient();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(emptyOrderAccumulatorDatabaseConnectionString).StartWithFixAcceptorAsync();
 
         await using var orderDatabaseConnection = new NpgsqlConnection(emptyOrderAccumulatorDatabaseConnectionString);
         var symbolExposureRows = (await orderDatabaseConnection.QueryAsync<(string Symbol, decimal Exposure)>(
@@ -109,17 +94,5 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
 
         await using var orderDatabaseConnection = await emptyOrderAccumulatorDatabase.OpenConnectionAsync();
         Assert.Equal(3, await orderDatabaseConnection.ExecuteScalarAsync<long>("SELECT count(*) FROM exposures"));
-    }
-
-    private static string ReadGitHeadSha()
-    {
-        using var gitRevParseProcess = Process.Start(new ProcessStartInfo("git", "rev-parse HEAD")
-        {
-            RedirectStandardOutput = true,
-            WorkingDirectory = AppContext.BaseDirectory
-        })!;
-        var gitHeadSha = gitRevParseProcess.StandardOutput.ReadToEnd().Trim();
-        gitRevParseProcess.WaitForExit();
-        return gitHeadSha;
     }
 }

@@ -1,5 +1,4 @@
 using Flowa.Commons.Database;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Npgsql;
 
 namespace Flowa.OrderAccumulator.Tests;
@@ -58,14 +57,12 @@ public sealed class PostgresConnectionPoolTests
     }
 
     [Fact]
-    public void Order_accumulator_reads_the_key_at_startup_and_does_not_start_with_an_invalid_pool_size()
+    public async Task Order_accumulator_reads_the_key_at_startup_and_does_not_start_with_an_invalid_pool_size()
     {
-        using var orderAccumulatorWithInvalidPool = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(orderAccumulatorHost => orderAccumulatorHost
-                .UseSetting("ConnectionStrings:Flowa", SecretConnectionString)
-                .UseSetting("Database:MaximumPoolSize", "zero"));
+        var orderAccumulatorWithInvalidPool = new OrderAccumulatorFixTestHost(
+            SecretConnectionString, extraOrderAccumulatorSettings: new Dictionary<string, string?> { ["Database:MaximumPoolSize"] = "zero" });
 
-        var startupFailure = Assert.Throws<InvalidOperationException>(() => orderAccumulatorWithInvalidPool.CreateClient());
+        var startupFailure = await Assert.ThrowsAsync<InvalidOperationException>(orderAccumulatorWithInvalidPool.StartWithFixAcceptorAsync);
 
         Assert.Equal("Set Database:MaximumPoolSize to a whole number greater than zero.", startupFailure.Message);
     }

@@ -1,5 +1,4 @@
 using Flowa.Commons.Database;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
@@ -24,19 +23,13 @@ public sealed class DatabasePoolLimitTests(OrderAccumulatorPostgresFixture order
 
     private async Task<int> ReadMaximumPoolSizeOfAnAppConnectionAsync(string? configuredMaximumPoolSize)
     {
-        await using var orderAccumulatorApp = new WebApplicationFactory<Program>()
-            .WithWebHostBuilder(orderAccumulatorHost =>
-            {
-                orderAccumulatorHost
-                    .UseSetting("ConnectionStrings:Flowa", orderAccumulatorDatabase.OrderDatabaseConnectionString)
-                    .UseSetting("Fix:AcceptorPort", "0")
-                    .UseSetting("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost);
-                if (configuredMaximumPoolSize is not null)
-                    orderAccumulatorHost.UseSetting("Database:MaximumPoolSize", configuredMaximumPoolSize);
-            });
-        orderAccumulatorApp.CreateClient();
+        var maximumPoolSizeSettings = configuredMaximumPoolSize is null
+            ? new Dictionary<string, string?>()
+            : new Dictionary<string, string?> { ["Database:MaximumPoolSize"] = configuredMaximumPoolSize };
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(
+            orderAccumulatorDatabase.OrderDatabaseConnectionString, extraOrderAccumulatorSettings: maximumPoolSizeSettings).StartWithFixAcceptorAsync();
 
-        await using var appConnection = await orderAccumulatorApp.Services.GetRequiredService<IDatabaseConnectionSource>().OpenDatabaseConnectionAsync();
+        await using var appConnection = await orderAccumulatorTestApp.Services.GetRequiredService<IDatabaseConnectionSource>().OpenDatabaseConnectionAsync();
         return new NpgsqlConnectionStringBuilder(appConnection.ConnectionString).MaxPoolSize;
     }
 }
