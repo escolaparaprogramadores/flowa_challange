@@ -95,7 +95,9 @@ public sealed class DecideIncomingOrderUseCase
         var answeredOrder = await orderDecisionDomainService.DecideIncomingOrderAsync(incomingOrder, cancellationToken);
         if (await orderRepository.TryAddOrderAsync(answeredOrder, cancellationToken))
         {
-            await unitOfWork.CommitTransactionAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var tokenThatLetsTheSentCommitFinish = CancellationToken.None;
+            await unitOfWork.CommitTransactionAsync(tokenThatLetsTheSentCommitFinish);
             return OrderAnswer.AnswerNewOrder(answeredOrder);
         }
 
