@@ -51,6 +51,11 @@ locals {
   banco_usuario = "flowa"
   banco_porta   = 5432
 
+  # Teto de conexões do Generator no banco. A db.t3.micro aceita LEAST(DBInstanceClassMemory/9531392, 5000)
+  # conexões (perto de 80 com 1 GiB, 3 delas reservadas ao superusuário); 10 por task deixa folga para o
+  # Accumulator, o worker de métricas e as duas tasks que convivem durante o deploy.
+  limite_do_pool_do_generator = 10
+
   porta_fix                 = 9876
   porta_http_do_accumulator = 8081
 }
