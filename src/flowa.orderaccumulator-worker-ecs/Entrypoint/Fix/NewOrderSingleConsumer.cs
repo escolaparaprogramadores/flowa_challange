@@ -91,6 +91,9 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
                 return BuildRejectedExecutionReport(receivedClOrdId, receivedOrderSymbol, receivedOrderSide, InternalFailureRejectReason);
             }
 
+            if (orderDecisionMessage.ErrorCode == DecideIncomingOrderUseCase.DuplicateClOrdIdErrorCode)
+                return AnswerDuplicateClOrdId(receivedClOrdId, receivedOrderSymbol, receivedOrderSide, orderDecisionMessage.Message);
+
             var orderDecision = orderDecisionMessage.Data!;
             LogOrderDecision(orderDecision);
             return BuildExecutionReport(orderDecision);
@@ -113,6 +116,16 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
             new { ErrorCode = OrderDecisionTimeoutErrorCode, OrderDecisionTimeoutSeconds = orderDecisionTimeoutSeconds });
         return BuildRejectedExecutionReport(
             receivedClOrdId, receivedOrderSymbol, receivedOrderSide, BuildOrderDeadlineRejectReason(orderDecisionTimeoutSeconds));
+    }
+
+    private ExecutionReport AnswerDuplicateClOrdId(
+        string receivedClOrdId, string receivedOrderSymbol, char receivedOrderSide, string duplicateClOrdIdRejectReason)
+    {
+        orderFixLogger.LogWarning("Order rejected: ClOrdID already used with other fields.",
+            new { ErrorCode = DecideIncomingOrderUseCase.DuplicateClOrdIdErrorCode });
+        var duplicateOrderExecutionReport = BuildRejectedExecutionReport(receivedClOrdId, receivedOrderSymbol, receivedOrderSide, duplicateClOrdIdRejectReason);
+        duplicateOrderExecutionReport.OrdRejReason = new OrdRejReason(OrdRejReason.DUPLICATE_ORDER);
+        return duplicateOrderExecutionReport;
     }
 
     private async Task LogOrderDecisionFinishedAfterTheDeadlineAsync(Task<DataMessage<DecideIncomingOrderResponse>> lateOrderDecisionTask)
