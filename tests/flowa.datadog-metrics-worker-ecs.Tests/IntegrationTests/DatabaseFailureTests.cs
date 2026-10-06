@@ -20,7 +20,7 @@ public sealed class DatabaseFailureTests(DatadogMetricsPostgresFixture datadogMe
         await flowaTestDatabase.ApplyAccumulatorSchemaAsync();
         await flowaTestDatabase.StoreExposureAsync("PETR4", 300m);
         await using var datadogMetricsWorker = new DatadogMetricsTestWorker(flowaTestDatabase.FlowaConnectionString, dogStatsdUdpListener, TimeProvider.System);
-        var metricsLoopLogger = datadogMetricsWorker.LoggerOf<DatadogMetricsBackgroundService>();
+        var metricsLoopLogger = datadogMetricsWorker.GetRecordingLoggerOf<DatadogMetricsBackgroundService>();
 
         // Act
         var metricsWithoutTheRows = await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync();
@@ -33,13 +33,13 @@ public sealed class DatabaseFailureTests(DatadogMetricsPostgresFixture datadogMe
         Assert.Empty(metricsWithoutTheRows);
         Assert.Equal([ExposureGaugesNotSentLogLine], metricsLoopLogger.RecordedLogLines);
         Assert.Equal(
-            DatadogMetricsTestWorker.InComparisonOrder([
-                new DogStatsdMetricLine("flowa.exposicao", "300", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:PETR4")),
-                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:VALE3")),
-                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:VIIA4")),
-                new DogStatsdMetricLine("flowa.ordens.aceitas", "1", "c", DatadogMetricsTestWorker.ExpectedTags("symbol:PETR4", "side:buy"))
+            DatadogMetricsTestWorker.SortMetricLinesForComparison([
+                new DogStatsdMetricLine("flowa.exposicao", "300", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:PETR4")),
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VALE3")),
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VIIA4")),
+                new DogStatsdMetricLine("flowa.ordens.aceitas", "1", "c", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:PETR4", "side:buy"))
             ]),
-            DatadogMetricsTestWorker.InComparisonOrder(metricsWithTheRows));
+            DatadogMetricsTestWorker.SortMetricLinesForComparison(metricsWithTheRows));
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class DatabaseFailureTests(DatadogMetricsPostgresFixture datadogMe
         // Arrange
         var flowaTestDatabase = await datadogMetricsDatabase.CreateEmptyFlowaDatabaseAsync();
         await using var datadogMetricsWorker = new DatadogMetricsTestWorker(flowaTestDatabase.FlowaConnectionString, dogStatsdUdpListener, TimeProvider.System);
-        var metricsLoopLogger = datadogMetricsWorker.LoggerOf<DatadogMetricsBackgroundService>();
+        var metricsLoopLogger = datadogMetricsWorker.GetRecordingLoggerOf<DatadogMetricsBackgroundService>();
 
         // Act
         var metricsWithoutTables = await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync();
@@ -64,10 +64,15 @@ public sealed class DatabaseFailureTests(DatadogMetricsPostgresFixture datadogMe
         // Assert
         Assert.Empty(metricsWithoutTables);
         Assert.Equal([ExposureGaugesNotSentLogLine, OrderCountsNotSentLogLine], metricsLoopLogger.RecordedLogLines);
-        Assert.Equal(3, metricsOnceTheTablesExist.Count(sentMetric => sentMetric.MetricName == "flowa.exposicao"));
-        Assert.DoesNotContain(metricsOnceTheTablesExist, sentMetric => sentMetric.MetricName.StartsWith("flowa.ordens."));
         Assert.Equal(
-            [new DogStatsdMetricLine("flowa.ordens.rejeitadas", "1", "c", DatadogMetricsTestWorker.ExpectedTags("symbol:VIIA4", "side:buy"))],
+            DatadogMetricsTestWorker.SortMetricLinesForComparison([
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:PETR4")),
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VALE3")),
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VIIA4"))
+            ]),
+            DatadogMetricsTestWorker.SortMetricLinesForComparison(metricsOnceTheTablesExist));
+        Assert.Equal(
+            [new DogStatsdMetricLine("flowa.ordens.rejeitadas", "1", "c", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VIIA4", "side:buy"))],
             metricsOnTheNextCycle.Where(sentMetric => sentMetric.MetricName.StartsWith("flowa.ordens.")));
     }
 
@@ -77,9 +82,9 @@ public sealed class DatabaseFailureTests(DatadogMetricsPostgresFixture datadogMe
         // Arrange
         var manualMetricsClock = new ManualMetricsClock();
         await using var datadogMetricsWorker = new DatadogMetricsTestWorker(
-            UnreachableFlowaConnectionString(), dogStatsdUdpListener, manualMetricsClock);
+            BuildUnreachableFlowaConnectionString(), dogStatsdUdpListener, manualMetricsClock);
         var metricsBackgroundService = datadogMetricsWorker.MetricsBackgroundService;
-        var metricsLoopLogger = datadogMetricsWorker.LoggerOf<DatadogMetricsBackgroundService>();
+        var metricsLoopLogger = datadogMetricsWorker.GetRecordingLoggerOf<DatadogMetricsBackgroundService>();
 
         // Act
         await metricsBackgroundService.StartAsync(CancellationToken.None);
@@ -105,7 +110,7 @@ public sealed class DatabaseFailureTests(DatadogMetricsPostgresFixture datadogMe
             metricsLoopLogger.RecordedLogLines);
     }
 
-    private static string UnreachableFlowaConnectionString()
+    private static string BuildUnreachableFlowaConnectionString()
     {
         var closedPortListener = new TcpListener(IPAddress.Loopback, 0);
         closedPortListener.Start();

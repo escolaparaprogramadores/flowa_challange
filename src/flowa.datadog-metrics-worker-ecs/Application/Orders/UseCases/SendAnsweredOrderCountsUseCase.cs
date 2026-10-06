@@ -52,7 +52,13 @@ public sealed class SendAnsweredOrderCountsUseCase
             var sentOrderCounts = new SendAnsweredOrderCountsResponse(
                 answeredOrderCounts.Select(answeredOrderCount => answeredOrderCount.LastOrderId).DefaultIfEmpty(lastCountedOrderId).Max(),
                 answeredOrderCounts.Sum(answeredOrderCount => answeredOrderCount.OrderCount));
-            orderCountsLogger.LogInformation("Answered order counts sent.", new { sentOrderCounts.CountedOrders, sentOrderCounts.LastCountedOrderId });
+            orderCountsLogger.LogInformation("Answered order counts sent.", new
+            {
+                SentOrderCounts = string.Join(' ', answeredOrderCounts.Select(answeredOrderCount =>
+                    $"{answeredOrderCount.Symbol}/{answeredOrderCount.Side}/{(answeredOrderCount.Accepted ? "accepted" : "rejected")}={answeredOrderCount.OrderCount}")),
+                sentOrderCounts.CountedOrders,
+                sentOrderCounts.LastCountedOrderId
+            });
             return DataMessage<SendAnsweredOrderCountsResponse>.CreateSuccessMessage(sentOrderCounts, OrderCountsSentMessage);
         }
         catch (Exception orderCountsFailure)

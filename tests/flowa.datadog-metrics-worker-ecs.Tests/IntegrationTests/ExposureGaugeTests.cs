@@ -21,12 +21,12 @@ public sealed class ExposureGaugeTests(DatadogMetricsPostgresFixture datadogMetr
 
         // Assert
         Assert.Equal(
-            DatadogMetricsTestWorker.InComparisonOrder([
-                new DogStatsdMetricLine("flowa.exposicao", "12340", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:PETR4")),
-                new DogStatsdMetricLine("flowa.exposicao", "-15030", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:VALE3")),
-                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:VIIA4"))
+            DatadogMetricsTestWorker.SortMetricLinesForComparison([
+                new DogStatsdMetricLine("flowa.exposicao", "12340", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:PETR4")),
+                new DogStatsdMetricLine("flowa.exposicao", "-15030", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VALE3")),
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VIIA4"))
             ]),
-            DatadogMetricsTestWorker.InComparisonOrder(sentMetrics));
+            DatadogMetricsTestWorker.SortMetricLinesForComparison(sentMetrics));
     }
 
     [Fact]
@@ -42,9 +42,13 @@ public sealed class ExposureGaugeTests(DatadogMetricsPostgresFixture datadogMetr
         var sentMetricsAfterTheChange = await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync();
 
         // Assert
-        Assert.Contains(
-            new DogStatsdMetricLine("flowa.exposicao", "2500.75", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:PETR4")),
-            sentMetricsAfterTheChange);
+        Assert.Equal(
+            DatadogMetricsTestWorker.SortMetricLinesForComparison([
+                new DogStatsdMetricLine("flowa.exposicao", "2500.75", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:PETR4")),
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VALE3")),
+                new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VIIA4"))
+            ]),
+            DatadogMetricsTestWorker.SortMetricLinesForComparison(sentMetricsAfterTheChange));
     }
 
     [Fact]
@@ -54,13 +58,13 @@ public sealed class ExposureGaugeTests(DatadogMetricsPostgresFixture datadogMetr
         var flowaTestDatabase = await datadogMetricsDatabase.CreateFlowaDatabaseWithTheThreeExposuresAsync(petr4Exposure: 20m);
         var manualMetricsClock = new ManualMetricsClock();
         await using var datadogMetricsWorker = new DatadogMetricsTestWorker(flowaTestDatabase.FlowaConnectionString, dogStatsdUdpListener, manualMetricsClock);
-        var metricsLoopLogger = datadogMetricsWorker.LoggerOf<DatadogMetricsBackgroundService>();
-        var exposureGaugesLogger = datadogMetricsWorker.LoggerOf<SendSymbolExposureGaugesUseCase>();
-        var expectedExposureGauges = DatadogMetricsTestWorker.InComparisonOrder(
+        var metricsLoopLogger = datadogMetricsWorker.GetRecordingLoggerOf<DatadogMetricsBackgroundService>();
+        var exposureGaugesLogger = datadogMetricsWorker.GetRecordingLoggerOf<SendSymbolExposureGaugesUseCase>();
+        var expectedExposureGauges = DatadogMetricsTestWorker.SortMetricLinesForComparison(
         [
-            new DogStatsdMetricLine("flowa.exposicao", "20", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:PETR4")),
-            new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:VALE3")),
-            new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.ExpectedTags("symbol:VIIA4"))
+            new DogStatsdMetricLine("flowa.exposicao", "20", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:PETR4")),
+            new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VALE3")),
+            new DogStatsdMetricLine("flowa.exposicao", "0", "g", DatadogMetricsTestWorker.BuildExpectedMetricTags("symbol:VIIA4"))
         ]);
 
         // Act
@@ -76,11 +80,13 @@ public sealed class ExposureGaugeTests(DatadogMetricsPostgresFixture datadogMetr
         // Assert
         Assert.Equal(TimeSpan.FromMinutes(5), manualMetricsClock.MetricsTimerDueTime);
         Assert.Equal(TimeSpan.FromMinutes(5), manualMetricsClock.MetricsTimerPeriod);
-        Assert.Equal(expectedExposureGauges, DatadogMetricsTestWorker.InComparisonOrder(gaugesAtStartup));
+        Assert.Equal(expectedExposureGauges, DatadogMetricsTestWorker.SortMetricLinesForComparison(gaugesAtStartup));
         Assert.Empty(gaugesBeforeTheTick);
-        Assert.Equal(expectedExposureGauges, DatadogMetricsTestWorker.InComparisonOrder(gaugesAfterTheTick));
+        Assert.Equal(expectedExposureGauges, DatadogMetricsTestWorker.SortMetricLinesForComparison(gaugesAfterTheTick));
         Assert.Equal(["Information Datadog metrics loop started."], metricsLoopLogger.RecordedLogLines);
         Assert.Equal(["Information Symbol exposure gauges sent.", "Information Symbol exposure gauges sent."], exposureGaugesLogger.RecordedLogLines);
+        Assert.All(exposureGaugesLogger.RecordedInformationContexts, exposureGaugesSentContext =>
+            Assert.Equal("PETR4=20 VALE3=0 VIIA4=0", exposureGaugesSentContext.GetProperty("SentExposures").GetString()));
     }
 
     public void Dispose() => dogStatsdUdpListener.Dispose();

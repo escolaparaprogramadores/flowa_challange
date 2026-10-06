@@ -1,18 +1,17 @@
-using Flowa.Commons.DependencyInjection;
 using Flowa.Commons.Logging;
 using Flowa.Commons.Observability;
-using Flowa.DatadogMetrics.Application.Exposures.UseCases;
-using Flowa.DatadogMetrics.Application.Orders.UseCases;
 using Flowa.DatadogMetrics.Entrypoint.BackgroundService;
-using Flowa.DatadogMetrics.Entrypoint.Observability;
+using Flowa.DatadogMetrics.Entrypoint.DependencyInjection;
 using Flowa.DatadogMetrics.Infrastructure.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Flowa.DatadogMetrics.Tests;
 
-// The worker as Program wires it, with the DogStatsD client pointed at a local UDP listener in place of the
-// agent and each log line recorded. A new instance is a restart: nothing but the database survives.
+// The worker with the same registration Program uses (AddDatadogMetricsWorker), then the DogStatsD client pointed at
+// a local UDP listener in place of the agent, each log line recorded and the test clock. A new instance is a restart:
+// nothing but the database survives.
 public sealed class DatadogMetricsTestWorker : IAsyncDisposable
 {
     public const string SentinelMetricName = "flowa.test.sentinel";
@@ -37,20 +36,17 @@ public sealed class DatadogMetricsTestWorker : IAsyncDisposable
 
         var workerServiceCollection = new ServiceCollection();
         workerServiceCollection.AddMetrics();
+        workerServiceCollection.AddDatadogMetricsWorker(flowaConnectionString, unifiedServiceConfiguration);
         workerServiceCollection.AddSingleton(typeof(IApplicationLogger<>), typeof(RecordingApplicationLogger<>));
-        workerServiceCollection.AddOperationMonitoring(DatadogMetricsUseCaseDurationMetric.MeterName, DatadogMetricsUseCaseDurationMetric.MetricName);
-        workerServiceCollection.AddDatadogMetricsInfrastructure(flowaConnectionString, unifiedServiceConfiguration);
         workerServiceCollection.AddSingleton<IMetricsClient>(datadogMetricsClient);
         workerServiceCollection.AddSingleton(metricsClock);
-        workerServiceCollection.AddScoped<SendSymbolExposureGaugesUseCase>();
-        workerServiceCollection.AddScoped<SendAnsweredOrderCountsUseCase>();
-        workerServiceCollection.AddSingleton<DatadogMetricsBackgroundService>();
         workerServices = workerServiceCollection.BuildServiceProvider();
     }
 
-    public DatadogMetricsBackgroundService MetricsBackgroundService => workerServices.GetRequiredService<DatadogMetricsBackgroundService>();
+    public DatadogMetricsBackgroundService MetricsBackgroundService =>
+        workerServices.GetServices<IHostedService>().OfType<DatadogMetricsBackgroundService>().Single();
 
-    public RecordingApplicationLogger<T> LoggerOf<T>() => (RecordingApplicationLogger<T>)workerServices.GetRequiredService<IApplicationLogger<T>>();
+    public RecordingApplicationLogger<T> GetRecordingLoggerOf<T>() => (RecordingApplicationLogger<T>)workerServices.GetRequiredService<IApplicationLogger<T>>();
 
     public async Task<List<DogStatsdMetricLine>> RunOneMetricsCycleAndReadSentMetricsAsync()
     {
@@ -68,11 +64,11 @@ public sealed class DatadogMetricsTestWorker : IAsyncDisposable
         return receivedFlowaMetrics.Where(receivedFlowaMetric => receivedFlowaMetric.MetricName != SentinelMetricName).ToList();
     }
 
-    public static IReadOnlySet<string> ExpectedTags(params string[] metricTags) =>
+    public static IReadOnlySet<string> BuildExpectedMetricTags(params string[] metricTags) =>
         new SortedSet<string>(UnifiedServiceTags.Concat(metricTags));
 
     // The client sends the lines in no fixed order: both sides of a comparison go through the same sort.
-    public static List<DogStatsdMetricLine> InComparisonOrder(IEnumerable<DogStatsdMetricLine> metricLines) =>
+    public static List<DogStatsdMetricLine> SortMetricLinesForComparison(IEnumerable<DogStatsdMetricLine> metricLines) =>
         metricLines.OrderBy(metricLine => metricLine.ToString(), StringComparer.Ordinal).ToList();
 
     public async ValueTask DisposeAsync()

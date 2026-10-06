@@ -40,7 +40,8 @@ public sealed class SendSymbolExposureGaugesUseCase
 
             exposureGaugesLogger.LogInformation("Symbol exposure gauges sent.", new
             {
-                SentExposures = string.Join(' ', symbolExposures.Select(symbolExposure => $"{symbolExposure.Symbol}={symbolExposure.Exposure}"))
+                SentExposures = string.Join(' ', symbolExposures.Select(symbolExposure =>
+                    FormattableString.Invariant($"{symbolExposure.Symbol}={symbolExposure.Exposure}")))
             });
             return DataMessage<IReadOnlyList<SymbolExposure>>.CreateSuccessMessage(symbolExposures, ExposureGaugesSentMessage);
         }

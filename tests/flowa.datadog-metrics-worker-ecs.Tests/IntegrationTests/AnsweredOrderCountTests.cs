@@ -24,29 +24,42 @@ public sealed class AnsweredOrderCountTests(DatadogMetricsPostgresFixture datado
         await flowaTestDatabase.StoreAnsweredOrderAsync("VIIA4", BuyOrderSide, accepted: false);
 
         // Act
-        var firstCycleOrderCounts = AnsweredOrderCountsOf(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var firstCycleOrderCounts = FilterAnsweredOrderCountLines(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
         await flowaTestDatabase.StoreAnsweredOrderAsync("VALE3", BuyOrderSide, accepted: false);
         await flowaTestDatabase.StoreAnsweredOrderAsync("PETR4", BuyOrderSide, accepted: true);
-        var secondCycleOrderCounts = AnsweredOrderCountsOf(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
-        var cycleWithoutNewOrdersCounts = AnsweredOrderCountsOf(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var secondCycleOrderCounts = FilterAnsweredOrderCountLines(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var cycleWithoutNewOrdersCounts = FilterAnsweredOrderCountLines(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
 
         // Assert
         Assert.Equal(
-            DatadogMetricsTestWorker.InComparisonOrder([
-                AcceptedOrderCount("2", "symbol:PETR4", "side:buy"),
-                AcceptedOrderCount("1", "symbol:VALE3", "side:sell"),
-                RejectedOrderCount("1", "symbol:PETR4", "side:sell"),
-                RejectedOrderCount("1", "symbol:VIIA4", "side:buy")
+            DatadogMetricsTestWorker.SortMetricLinesForComparison([
+                BuildAcceptedOrderCountLine("2", "symbol:PETR4", "side:buy"),
+                BuildAcceptedOrderCountLine("1", "symbol:VALE3", "side:sell"),
+                BuildRejectedOrderCountLine("1", "symbol:PETR4", "side:sell"),
+                BuildRejectedOrderCountLine("1", "symbol:VIIA4", "side:buy")
             ]),
             firstCycleOrderCounts);
         Assert.Equal(
-            DatadogMetricsTestWorker.InComparisonOrder([
-                AcceptedOrderCount("1", "symbol:PETR4", "side:buy"),
-                RejectedOrderCount("1", "symbol:VALE3", "side:buy")
+            DatadogMetricsTestWorker.SortMetricLinesForComparison([
+                BuildAcceptedOrderCountLine("1", "symbol:PETR4", "side:buy"),
+                BuildRejectedOrderCountLine("1", "symbol:VALE3", "side:buy")
             ]),
             secondCycleOrderCounts);
         Assert.Empty(cycleWithoutNewOrdersCounts);
+        var orderCountsSentContexts = datadogMetricsWorker.GetRecordingLoggerOf<SendAnsweredOrderCountsUseCase>().RecordedInformationContexts.Skip(1).ToList();
+        Assert.Equal(3, orderCountsSentContexts.Count);
+        Assert.Equal(
+            ["PETR4/1/accepted=2", "PETR4/2/rejected=1", "VALE3/2/accepted=1", "VIIA4/1/rejected=1"],
+            ReadSentOrderCountsOf(orderCountsSentContexts[0]));
+        Assert.Equal(5, orderCountsSentContexts[0].GetProperty("CountedOrders").GetInt64());
+        Assert.Equal(["PETR4/1/accepted=1", "VALE3/1/rejected=1"], ReadSentOrderCountsOf(orderCountsSentContexts[1]));
+        Assert.Equal(2, orderCountsSentContexts[1].GetProperty("CountedOrders").GetInt64());
+        Assert.Equal(string.Empty, orderCountsSentContexts[2].GetProperty("SentOrderCounts").GetString());
+        Assert.Equal(0, orderCountsSentContexts[2].GetProperty("CountedOrders").GetInt64());
     }
+
+    private static List<string> ReadSentOrderCountsOf(System.Text.Json.JsonElement orderCountsSentContext) =>
+        orderCountsSentContext.GetProperty("SentOrderCounts").GetString()!.Split(' ').Order(StringComparer.Ordinal).ToList();
 
     [Fact]
     public async Task Orders_stored_before_the_worker_starts_are_not_counted()
@@ -58,15 +71,15 @@ public sealed class AnsweredOrderCountTests(DatadogMetricsPostgresFixture datado
         await using var datadogMetricsWorker = new DatadogMetricsTestWorker(flowaTestDatabase.FlowaConnectionString, dogStatsdUdpListener, TimeProvider.System);
 
         // Act
-        var startupCycleOrderCounts = AnsweredOrderCountsOf(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
-        var nextCycleOrderCounts = AnsweredOrderCountsOf(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var startupCycleOrderCounts = FilterAnsweredOrderCountLines(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var nextCycleOrderCounts = FilterAnsweredOrderCountLines(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
 
         // Assert
         Assert.Empty(startupCycleOrderCounts);
         Assert.Empty(nextCycleOrderCounts);
         Assert.Equal(
             ["Information Order count starts after the stored orders.", "Information Answered order counts sent."],
-            datadogMetricsWorker.LoggerOf<SendAnsweredOrderCountsUseCase>().RecordedLogLines);
+            datadogMetricsWorker.GetRecordingLoggerOf<SendAnsweredOrderCountsUseCase>().RecordedLogLines);
     }
 
     [Fact]
@@ -78,20 +91,20 @@ public sealed class AnsweredOrderCountTests(DatadogMetricsPostgresFixture datado
         {
             await workerBeforeTheRestart.RunOneMetricsCycleAndReadSentMetricsAsync();
             await flowaTestDatabase.StoreAnsweredOrderAsync("PETR4", BuyOrderSide, accepted: true);
-            Assert.Equal([AcceptedOrderCount("1", "symbol:PETR4", "side:buy")],
-                AnsweredOrderCountsOf(await workerBeforeTheRestart.RunOneMetricsCycleAndReadSentMetricsAsync()));
+            Assert.Equal([BuildAcceptedOrderCountLine("1", "symbol:PETR4", "side:buy")],
+                FilterAnsweredOrderCountLines(await workerBeforeTheRestart.RunOneMetricsCycleAndReadSentMetricsAsync()));
         }
 
         await using var workerAfterTheRestart = new DatadogMetricsTestWorker(flowaTestDatabase.FlowaConnectionString, dogStatsdUdpListener, TimeProvider.System);
 
         // Act
-        var restartCycleOrderCounts = AnsweredOrderCountsOf(await workerAfterTheRestart.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var restartCycleOrderCounts = FilterAnsweredOrderCountLines(await workerAfterTheRestart.RunOneMetricsCycleAndReadSentMetricsAsync());
         await flowaTestDatabase.StoreAnsweredOrderAsync("VIIA4", SellOrderSide, accepted: true);
-        var cycleAfterTheRestartCounts = AnsweredOrderCountsOf(await workerAfterTheRestart.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var cycleAfterTheRestartCounts = FilterAnsweredOrderCountLines(await workerAfterTheRestart.RunOneMetricsCycleAndReadSentMetricsAsync());
 
         // Assert
         Assert.Empty(restartCycleOrderCounts);
-        Assert.Equal([AcceptedOrderCount("1", "symbol:VIIA4", "side:sell")], cycleAfterTheRestartCounts);
+        Assert.Equal([BuildAcceptedOrderCountLine("1", "symbol:VIIA4", "side:sell")], cycleAfterTheRestartCounts);
     }
 
     [Fact]
@@ -106,13 +119,13 @@ public sealed class AnsweredOrderCountTests(DatadogMetricsPostgresFixture datado
         await flowaTestDatabase.StoreAnsweredOrderAsync("PETR4", "3", accepted: false);
 
         // Act
-        var invalidOrderCounts = AnsweredOrderCountsOf(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var invalidOrderCounts = FilterAnsweredOrderCountLines(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
 
         // Assert
         Assert.Equal(
-            DatadogMetricsTestWorker.InComparisonOrder([
-                RejectedOrderCount("1", "symbol:PETR4", "side:invalido"),
-                RejectedOrderCount("2", "symbol:invalido", "side:invalido")
+            DatadogMetricsTestWorker.SortMetricLinesForComparison([
+                BuildRejectedOrderCountLine("1", "symbol:PETR4", "side:invalido"),
+                BuildRejectedOrderCountLine("2", "symbol:invalido", "side:invalido")
             ]),
             invalidOrderCounts);
     }
@@ -130,20 +143,20 @@ public sealed class AnsweredOrderCountTests(DatadogMetricsPostgresFixture datado
         await flowaTestDatabase.StoreAnsweredOrderAsync("VALE3", BuyOrderSide, accepted: true);
 
         // Act
-        var cycleAfterTheDeleteCounts = AnsweredOrderCountsOf(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
+        var cycleAfterTheDeleteCounts = FilterAnsweredOrderCountLines(await datadogMetricsWorker.RunOneMetricsCycleAndReadSentMetricsAsync());
 
         // Assert
-        Assert.Equal([AcceptedOrderCount("1", "symbol:VALE3", "side:buy")], cycleAfterTheDeleteCounts);
+        Assert.Equal([BuildAcceptedOrderCountLine("1", "symbol:VALE3", "side:buy")], cycleAfterTheDeleteCounts);
     }
 
-    private static List<DogStatsdMetricLine> AnsweredOrderCountsOf(IEnumerable<DogStatsdMetricLine> sentMetrics) =>
-        DatadogMetricsTestWorker.InComparisonOrder(sentMetrics.Where(sentMetric => sentMetric.MetricName.StartsWith("flowa.ordens.")));
+    private static List<DogStatsdMetricLine> FilterAnsweredOrderCountLines(IEnumerable<DogStatsdMetricLine> sentMetrics) =>
+        DatadogMetricsTestWorker.SortMetricLinesForComparison(sentMetrics.Where(sentMetric => sentMetric.MetricName.StartsWith("flowa.ordens.")));
 
-    private static DogStatsdMetricLine AcceptedOrderCount(string orderCount, params string[] orderTags) =>
-        new("flowa.ordens.aceitas", orderCount, "c", DatadogMetricsTestWorker.ExpectedTags(orderTags));
+    private static DogStatsdMetricLine BuildAcceptedOrderCountLine(string orderCount, params string[] orderTags) =>
+        new("flowa.ordens.aceitas", orderCount, "c", DatadogMetricsTestWorker.BuildExpectedMetricTags(orderTags));
 
-    private static DogStatsdMetricLine RejectedOrderCount(string orderCount, params string[] orderTags) =>
-        new("flowa.ordens.rejeitadas", orderCount, "c", DatadogMetricsTestWorker.ExpectedTags(orderTags));
+    private static DogStatsdMetricLine BuildRejectedOrderCountLine(string orderCount, params string[] orderTags) =>
+        new("flowa.ordens.rejeitadas", orderCount, "c", DatadogMetricsTestWorker.BuildExpectedMetricTags(orderTags));
 
     public void Dispose() => dogStatsdUdpListener.Dispose();
 }
