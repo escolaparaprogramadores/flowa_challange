@@ -2,7 +2,7 @@
 # tem a chave (decisão 3): sem ela, cada task continua só com o app, do tamanho da onda 2.
 
 variable "datadog_ligado" {
-  description = "Põe o agente do Datadog nas duas tasks. A esteira só passa true quando o cofre tem versão AWSCURRENT."
+  description = "Põe o agente do Datadog em todas as tasks. A esteira só passa true quando o cofre tem versão AWSCURRENT."
   type        = bool
   default     = false
 }
