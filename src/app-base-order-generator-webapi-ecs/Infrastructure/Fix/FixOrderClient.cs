@@ -3,6 +3,7 @@ using Base.OrderGenerator.Application.Orders.Interfaces;
 using Base.OrderGenerator.Domain.Orders.Enums;
 using Base.OrderGenerator.Domain.Orders.ValueObjects;
 using Base.OrderGenerator.Infrastructure.Orders.Options;
+using Microsoft.Extensions.Options;
 using QuickFix;
 using QuickFix.Fields;
 using QuickFix.Store;
@@ -11,7 +12,7 @@ using FixSide = QuickFix.Fields.Side;
 
 namespace Base.OrderGenerator.Infrastructure.Fix;
 
-public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHostedService, IDisposable
+internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHostedService, IDisposable
 {
     public static readonly TimeSpan ExecutionReportTimeout = TimeSpan.FromSeconds(5);
 
@@ -19,10 +20,12 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
     private readonly SocketInitiator _fixSocketInitiator;
     private SessionID? _initiatorSessionId;
 
-    public FixOrderClient(IConfiguration orderGeneratorConfiguration, FixSessionLogFactory fixSessionLogFactory)
+    public FixOrderClient(IOptions<FixOptions> fixOptions, FixSessionLogFactory fixSessionLogFactory)
     {
+        var receivedFixOptions = fixOptions ?? throw new ArgumentNullException(nameof(fixOptions));
+        var receivedFixSessionLogFactory = fixSessionLogFactory ?? throw new ArgumentNullException(nameof(fixSessionLogFactory));
         _fixSocketInitiator = new SocketInitiator(
-            this, new MemoryStoreFactory(), LoadInitiatorSessionSettings(orderGeneratorConfiguration), fixSessionLogFactory, null);
+            this, new MemoryStoreFactory(), LoadInitiatorSessionSettings(receivedFixOptions.Value), receivedFixSessionLogFactory, null);
     }
 
     internal int OrdersAwaitingExecutionReportCount => _ordersAwaitingExecutionReport.Count;
@@ -64,19 +67,15 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
         }
     }
 
-    private static SessionSettings LoadInitiatorSessionSettings(IConfiguration orderGeneratorConfiguration)
+    private static SessionSettings LoadInitiatorSessionSettings(FixOptions fixOptions)
     {
         var initiatorSettings = new SessionSettings(Path.Combine(AppContext.BaseDirectory, "initiator.cfg"));
-        var acceptorHost = orderGeneratorConfiguration[OrderGeneratorConfigurationKeys.FixAcceptorHost]
-            ?? throw new InvalidOperationException("Configuration Fix:AcceptorHost is missing.");
-        var acceptorPort = orderGeneratorConfiguration.GetValue<int?>(OrderGeneratorConfigurationKeys.FixAcceptorPort)
-            ?? throw new InvalidOperationException("Configuration Fix:AcceptorPort is missing.");
 
         foreach (var configuredSessionId in initiatorSettings.GetSessions())
         {
             var configuredSession = initiatorSettings.Get(configuredSessionId);
-            configuredSession.SetString(SessionSettings.SOCKET_CONNECT_HOST, acceptorHost);
-            configuredSession.SetLong(SessionSettings.SOCKET_CONNECT_PORT, acceptorPort);
+            configuredSession.SetString(SessionSettings.SOCKET_CONNECT_HOST, fixOptions.AcceptorHost);
+            configuredSession.SetLong(SessionSettings.SOCKET_CONNECT_PORT, fixOptions.AcceptorPort);
             configuredSession.SetString(SessionSettings.DATA_DICTIONARY, Path.Combine(AppContext.BaseDirectory, "FIX44-flowa.xml"));
         }
 
@@ -88,7 +87,7 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
         var newOrderSingle = new QuickFix.FIX44.NewOrderSingle(
             new ClOrdID(clOrdId),
             new Symbol(orderToSend.Symbol),
-            new FixSide(orderToSend.Side == OrderSide.Buy ? FixSide.BUY : FixSide.SELL),
+            new FixSide(ConvertToFixSide(orderToSend.Side)),
             new TransactTime(DateTime.UtcNow),
             new OrdType(OrdType.LIMIT));
         newOrderSingle.Set(new OrderQty(orderToSend.Quantity));
@@ -97,6 +96,13 @@ public sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHoste
             newOrderSingle.SetField(new StringField(FixOrderTraceProvider.TraceParentTag, orderSendingTraceParent));
         return newOrderSingle;
     }
+
+    private static char ConvertToFixSide(OrderSide orderSide) => orderSide switch
+    {
+        OrderSide.Buy => FixSide.BUY,
+        OrderSide.Sell => FixSide.SELL,
+        _ => throw new ArgumentOutOfRangeException(nameof(orderSide), orderSide, "The order side has no FIX side.")
+    };
 
     private static SentOrderResult ConvertToSentOrderResult(string clOrdId, Message executionReport)
     {

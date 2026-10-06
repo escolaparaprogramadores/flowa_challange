@@ -4,9 +4,16 @@ using QuickFix.Logger;
 
 namespace Base.OrderGenerator.Infrastructure.Fix;
 
-public sealed class FixSessionLogFactory(IApplicationLogger<FixSessionLog> fixSessionLogger) : ILogFactory
+internal sealed class FixSessionLogFactory : ILogFactory
 {
-    public ILog Create(SessionID fixSessionId) => new FixSessionLog(fixSessionLogger, fixSessionId.ToString());
+    private readonly IApplicationLogger<FixSessionLog> _fixSessionLogger;
 
-    public ILog CreateNonSessionLog() => new FixSessionLog(fixSessionLogger, null);
+    public FixSessionLogFactory(IApplicationLogger<FixSessionLog> fixSessionLogger)
+    {
+        _fixSessionLogger = fixSessionLogger ?? throw new ArgumentNullException(nameof(fixSessionLogger));
+    }
+
+    public ILog Create(SessionID fixSessionId) => new FixSessionLog(_fixSessionLogger, fixSessionId.ToString());
+
+    public ILog CreateNonSessionLog() => new FixSessionLog(_fixSessionLogger, null);
 }

@@ -7,11 +7,18 @@ using Base.OrderGenerator.Infrastructure.Orders.Adapters;
 
 namespace Base.OrderGenerator.Infrastructure.Exposures.Adapters;
 
-public sealed class HttpSymbolExposuresAdapter(IHttpRequestClient httpRequestClient) : ISymbolExposuresPort
+internal sealed class HttpSymbolExposuresAdapter : ISymbolExposuresPort
 {
+    private readonly IHttpRequestClient _httpRequestClient;
+
+    public HttpSymbolExposuresAdapter(IHttpRequestClient httpRequestClient)
+    {
+        _httpRequestClient = httpRequestClient ?? throw new ArgumentNullException(nameof(httpRequestClient));
+    }
+
     public async Task<DataMessage<JsonElement>> GetSymbolExposuresAsync(CancellationToken cancellationToken)
     {
-        var exposuresResponse = await httpRequestClient.SendGetRequestAsync(HttpStoredOrdersAdapter.OrderAccumulatorApiName, "/api/exposures", cancellationToken);
+        var exposuresResponse = await _httpRequestClient.SendGetRequestAsync(HttpStoredOrdersAdapter.OrderAccumulatorApiName, "/api/exposures", cancellationToken);
         exposuresResponse.EnsureHttpStatusCode(HttpStatusCode.OK);
         return exposuresResponse.ReadSuccessDataMessage();
     }

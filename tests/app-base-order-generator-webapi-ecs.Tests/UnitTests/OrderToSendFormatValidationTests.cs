@@ -1,12 +1,11 @@
 using Base.OrderGenerator.Domain.Orders.Enums;
 using Base.OrderGenerator.Domain.Orders.ValueObjects;
-using Base.OrderGenerator.Entrypoint.Orders.Requests;
 
 namespace Base.OrderGenerator.Tests;
 
 // Decision 24: the OrderGenerator checks only what a NewOrderSingle cannot carry. Limits, symbols,
 // whole quantity and the 0.01 step are left to the OrderAccumulator (decision 12).
-public class OrderRequestFormatValidatorTests
+public class OrderToSendFormatValidationTests
 {
     private const string ValidOrderSymbol = "PETR4";
     private const string ValidOrderSideText = "buy";
@@ -14,10 +13,10 @@ public class OrderRequestFormatValidatorTests
     private const string ValidOrderPriceText = "10.50";
 
     private static void AssertOrderRefusedWithSingleFormatError(
-        OrderRequestFormatValidation orderRequestFormatValidation, string expectedOrderField, string expectedOrderFieldFormatMessage)
+        OrderFormatValidation orderFormatValidation, string expectedOrderField, string expectedOrderFieldFormatMessage)
     {
-        Assert.Null(orderRequestFormatValidation.OrderToSend);
-        Assert.Equal(new OrderFieldFormatError(expectedOrderField, expectedOrderFieldFormatMessage), Assert.Single(orderRequestFormatValidation.OrderFieldFormatErrors));
+        Assert.Null(orderFormatValidation.OrderToSend);
+        Assert.Equal(new OrderFieldFormatError(expectedOrderField, expectedOrderFieldFormatMessage), Assert.Single(orderFormatValidation.OrderFieldFormatErrors));
     }
 
     // These break the field rule but fit FIX: they must go out as typed, for the OrderAccumulator to judge.
@@ -31,16 +30,16 @@ public class OrderRequestFormatValidatorTests
         string orderSymbol, string orderSide, string orderQuantity, string orderPrice,
         string expectedSymbol, OrderSide expectedSide, double expectedQuantity, double expectedPrice)
     {
-        var orderRequestFormatValidation = OrderRequestFormatValidator.ValidateOrderRequestFormat(orderSymbol, orderSide, orderQuantity, orderPrice);
+        var orderFormatValidation = OrderToSend.ValidateOrderFormat(orderSymbol, orderSide, orderQuantity, orderPrice);
 
-        Assert.Empty(orderRequestFormatValidation.OrderFieldFormatErrors);
-        Assert.Equal(new OrderToSend(expectedSymbol, expectedSide, (decimal)expectedQuantity, (decimal)expectedPrice), orderRequestFormatValidation.OrderToSend);
+        Assert.Empty(orderFormatValidation.OrderFieldFormatErrors);
+        Assert.Equal(new OrderToSend(expectedSymbol, expectedSide, (decimal)expectedQuantity, (decimal)expectedPrice), orderFormatValidation.OrderToSend);
     }
 
     [Fact]
     public void Price_keeps_the_decimal_places_that_were_typed()
     {
-        var orderToSend = OrderRequestFormatValidator.ValidateOrderRequestFormat(ValidOrderSymbol, ValidOrderSideText, "100.0", "10.500").OrderToSend!;
+        var orderToSend = OrderToSend.ValidateOrderFormat(ValidOrderSymbol, ValidOrderSideText, "100.0", "10.500").OrderToSend!;
 
         Assert.Equal("100.0", orderToSend.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture));
         Assert.Equal("10.500", orderToSend.Price.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -54,7 +53,7 @@ public class OrderRequestFormatValidatorTests
     public void Symbol_missing_or_with_control_character_is_refused(string? orderSymbol, string expectedOrderFieldFormatMessage)
     {
         AssertOrderRefusedWithSingleFormatError(
-            OrderRequestFormatValidator.ValidateOrderRequestFormat(orderSymbol, ValidOrderSideText, ValidOrderQuantityText, ValidOrderPriceText),
+            OrderToSend.ValidateOrderFormat(orderSymbol, ValidOrderSideText, ValidOrderQuantityText, ValidOrderPriceText),
             "symbol", expectedOrderFieldFormatMessage);
     }
 
@@ -63,7 +62,7 @@ public class OrderRequestFormatValidatorTests
     [InlineData("sell", OrderSide.Sell)]
     public void Buy_and_sell_are_the_only_sides(string orderSide, OrderSide expectedOrderSide)
     {
-        var orderToSend = OrderRequestFormatValidator.ValidateOrderRequestFormat(ValidOrderSymbol, orderSide, ValidOrderQuantityText, ValidOrderPriceText).OrderToSend!;
+        var orderToSend = OrderToSend.ValidateOrderFormat(ValidOrderSymbol, orderSide, ValidOrderQuantityText, ValidOrderPriceText).OrderToSend!;
 
         Assert.Equal(expectedOrderSide, orderToSend.Side);
     }
@@ -78,7 +77,7 @@ public class OrderRequestFormatValidatorTests
     public void Unknown_or_missing_side_is_refused(string? orderSide, string expectedOrderFieldFormatMessage)
     {
         AssertOrderRefusedWithSingleFormatError(
-            OrderRequestFormatValidator.ValidateOrderRequestFormat(ValidOrderSymbol, orderSide, ValidOrderQuantityText, ValidOrderPriceText),
+            OrderToSend.ValidateOrderFormat(ValidOrderSymbol, orderSide, ValidOrderQuantityText, ValidOrderPriceText),
             "side", expectedOrderFieldFormatMessage);
     }
 
@@ -96,7 +95,7 @@ public class OrderRequestFormatValidatorTests
     public void Quantity_that_is_not_a_fix_number_is_refused(string? orderQuantity, string expectedOrderFieldFormatMessage)
     {
         AssertOrderRefusedWithSingleFormatError(
-            OrderRequestFormatValidator.ValidateOrderRequestFormat(ValidOrderSymbol, ValidOrderSideText, orderQuantity, ValidOrderPriceText),
+            OrderToSend.ValidateOrderFormat(ValidOrderSymbol, ValidOrderSideText, orderQuantity, ValidOrderPriceText),
             "quantity", expectedOrderFieldFormatMessage);
     }
 
@@ -112,16 +111,16 @@ public class OrderRequestFormatValidatorTests
     public void Price_that_is_not_a_fix_number_is_refused(string? orderPrice, string expectedOrderFieldFormatMessage)
     {
         AssertOrderRefusedWithSingleFormatError(
-            OrderRequestFormatValidator.ValidateOrderRequestFormat(ValidOrderSymbol, ValidOrderSideText, ValidOrderQuantityText, orderPrice),
+            OrderToSend.ValidateOrderFormat(ValidOrderSymbol, ValidOrderSideText, ValidOrderQuantityText, orderPrice),
             "price", expectedOrderFieldFormatMessage);
     }
 
     [Fact]
     public void Every_field_out_of_format_gets_one_error_in_the_contract_order()
     {
-        var orderRequestFormatValidation = OrderRequestFormatValidator.ValidateOrderRequestFormat(null, "hold", "abc", null);
+        var orderFormatValidation = OrderToSend.ValidateOrderFormat(null, "hold", "abc", null);
 
-        Assert.Null(orderRequestFormatValidation.OrderToSend);
+        Assert.Null(orderFormatValidation.OrderToSend);
         Assert.Equal(
             [
                 new OrderFieldFormatError("symbol", "Informe o símbolo."),
@@ -129,6 +128,6 @@ public class OrderRequestFormatValidatorTests
                 new OrderFieldFormatError("quantity", "A quantidade deve ser um número inteiro."),
                 new OrderFieldFormatError("price", "Informe o preço.")
             ],
-            orderRequestFormatValidation.OrderFieldFormatErrors);
+            orderFormatValidation.OrderFieldFormatErrors);
     }
 }

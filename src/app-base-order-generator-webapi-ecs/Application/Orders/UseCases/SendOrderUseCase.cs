@@ -1,29 +1,73 @@
+using Base.OrderGenerator.Application.ErrorHandling;
+using Base.OrderGenerator.Application.Orders.Commands;
 using Base.OrderGenerator.Application.Orders.Interfaces;
+using Base.OrderGenerator.Application.Orders.Responses;
+using Base.OrderGenerator.Commons.Logging;
+using Base.OrderGenerator.Commons.Observability;
 using Base.OrderGenerator.Commons.Responses;
-using Base.OrderGenerator.Domain.Orders.Enums;
-using Base.OrderGenerator.Domain.Orders.Exceptions;
 using Base.OrderGenerator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderGenerator.Application.Orders.UseCases;
 
-public sealed class SendOrderUseCase(IOrderAccumulatorPort orderAccumulatorPort)
+public sealed class SendOrderUseCase
 {
-    public const string AcceptedOrderMessage = "Ordem aceita.";
-    public const string RejectedOrderWithoutTextMessage = "Ordem rejeitada.";
-    public const string FixSessionNotLoggedOnErrorCode = "fix-session-not-logged-on";
-    public const string ExecutionReportTimeoutErrorCode = "execution-report-timeout";
+    public const string OperationName = "orders.send-order";
+    public const string AcceptedOrderResult = "accepted";
+    public const string RejectedOrderResult = "rejected";
+    public const string InvalidOrderMessage = "A ordem tem campos inválidos.";
+    public const string InvalidOrderErrorCode = "invalid-order";
 
-    public async Task<DataMessage<SentOrderResult>> SendOrderAsync(OrderToSend orderToSend)
+    private readonly IOrderAccumulatorPort _orderAccumulatorPort;
+    private readonly IOperationMonitoring _operationMonitoring;
+    private readonly IApplicationLogger<SendOrderUseCase> _logger;
+
+    public SendOrderUseCase(IOrderAccumulatorPort orderAccumulatorPort, IOperationMonitoring operationMonitoring, IApplicationLogger<SendOrderUseCase> logger)
     {
-        var sentOrderResult = await orderAccumulatorPort.SendOrderAsync(orderToSend);
-        return sentOrderResult.Status switch
+        _orderAccumulatorPort = orderAccumulatorPort ?? throw new ArgumentNullException(nameof(orderAccumulatorPort));
+        _operationMonitoring = operationMonitoring ?? throw new ArgumentNullException(nameof(operationMonitoring));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    public async Task<DataMessage<SentOrderResponse>> SendOrderAsync(SendOrderCommand sendOrderCommand)
+    {
+        ArgumentNullException.ThrowIfNull(sendOrderCommand);
+
+        using var orderSending = _operationMonitoring.StartOperationMonitoring(OperationName);
+        try
         {
-            SentOrderStatus.Accepted => DataMessage<SentOrderResult>.CreateSuccessMessage(sentOrderResult, AcceptedOrderMessage),
-            SentOrderStatus.Rejected => DataMessage<SentOrderResult>.CreateSuccessMessage(
-                sentOrderResult, sentOrderResult.RejectionText ?? RejectedOrderWithoutTextMessage),
-            SentOrderStatus.NoLoggedOnSession => throw new OrderNotAnsweredException(sentOrderResult.ClOrdId, FixSessionNotLoggedOnErrorCode),
-            SentOrderStatus.ExecutionReportTimeout => throw new OrderNotAnsweredException(sentOrderResult.ClOrdId, ExecutionReportTimeoutErrorCode),
-            _ => throw new UnexpectedExecutionReportException(sentOrderResult.ClOrdId)
-        };
+            var orderFormatValidation = OrderToSend.ValidateOrderFormat(
+                sendOrderCommand.Symbol, sendOrderCommand.Side, sendOrderCommand.Quantity, sendOrderCommand.Price);
+            if (orderFormatValidation.OrderToSend is not { } orderToSend)
+            {
+                orderSending.RecordOperationResult(OperationResults.InvalidInput);
+                return DataMessage<SentOrderResponse>.CreateErrorMessage(
+                    InvalidOrderMessage, ResultStatus.InvalidInput, orderFormatValidation.ListOrderFieldFormatMessages(), InvalidOrderErrorCode);
+            }
+
+            var sentOrderResult = await _orderAccumulatorPort.SendOrderAsync(orderToSend);
+            sentOrderResult.ConfirmOrderWasAnswered();
+
+            if (sentOrderResult.IsAccepted)
+            {
+                orderSending.RecordOperationResult(AcceptedOrderResult);
+                _logger.LogInformation("Order accepted by the OrderAccumulator.", new
+                {
+                    sentOrderResult.ClOrdId,
+                    sentOrderResult.OrderId,
+                    orderToSend.Symbol,
+                    Side = orderToSend.DescribeOrderSideCode()
+                });
+            }
+            else
+                orderSending.RecordOperationResult(RejectedOrderResult);
+
+            return DataMessage<SentOrderResponse>.CreateSuccessMessage(
+                SentOrderResponse.MapFromSentOrder(sentOrderResult, orderToSend), sentOrderResult.DescribeOrderAnswer());
+        }
+        catch (Exception orderSendingFailure)
+        {
+            orderSending.RecordOperationResult(OperationResults.Failed);
+            return UseCaseFailureDataMessageMapper.MapFailureToDataMessage<SentOrderResponse>(orderSendingFailure);
+        }
     }
 }

@@ -9,6 +9,7 @@ using Base.OrderGenerator.Commons.Observability;
 using Base.OrderGenerator.Entrypoint.DependencyInjection;
 using Base.OrderGenerator.Entrypoint.ErrorHandling;
 using Base.OrderGenerator.Entrypoint.Exposures.Endpoints;
+using Base.OrderGenerator.Entrypoint.Logging;
 using Base.OrderGenerator.Entrypoint.Orders.Endpoints;
 using Base.OrderGenerator.Infrastructure.DependencyInjection;
 
@@ -25,6 +26,7 @@ var orderGeneratorBuilder = WebApplication.CreateBuilder(new WebApplicationOptio
 orderGeneratorBuilder.UseDefaultHttpPortWhenMissing();
 orderGeneratorBuilder.Logging.AddJsonLogsWithTraceId();
 orderGeneratorBuilder.Services.AddApplicationLogger();
+orderGeneratorBuilder.Services.AddOperationMonitoring();
 orderGeneratorBuilder.Services.AddSingleton<DistributedContextPropagator>(new IncomingTraceContextIgnoringPropagator());
 
 orderGeneratorBuilder.Services.AddOrderGeneratorInfrastructure();
@@ -34,6 +36,7 @@ orderGeneratorBuilder.Services.AddScoped<ListOrdersUseCase>();
 orderGeneratorBuilder.Services.AddScoped<DeleteAllOrdersUseCase>();
 
 orderGeneratorBuilder.Services.ConfigureHttpJsonOptions(jsonOptions => jsonOptions.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+orderGeneratorBuilder.Services.AddSingleton<DataMessageHttpResponseConverter>();
 orderGeneratorBuilder.Services.AddSingleton<IProblemDetailsWriter, AnyClientProblemDetailsWriter>();
 orderGeneratorBuilder.Services.AddProblemDetails(problemDetailsOptions => problemDetailsOptions.CustomizeProblemDetails = ApiProblemDetailsExtensions.CompleteProblemDetails);
 orderGeneratorBuilder.Services.AddExceptionHandler<OrderGeneratorExceptionHandler>();
@@ -42,6 +45,7 @@ var orderGeneratorApp = orderGeneratorBuilder.Build();
 
 orderGeneratorApp.UseExceptionHandler();
 orderGeneratorApp.UseStatusCodePages();
+orderGeneratorApp.UseMiddleware<RequestReceivedLoggingMiddleware>();
 
 orderGeneratorApp.UseDefaultFiles();
 orderGeneratorApp.UseStaticFiles();
@@ -51,6 +55,10 @@ orderGeneratorApp.MapGet("/health", () => Results.Text("Healthy"));
 orderGeneratorApp.MapGet("/version", () => Results.Json(new { commit = buildCommitSha }));
 orderGeneratorApp.Map("/api/{**unknownApiPath}", () => Results.NotFound());
 orderGeneratorApp.MapFallbackToFile("index.html");
+
+orderGeneratorApp.Lifetime.ApplicationStarted.Register(() =>
+    orderGeneratorApp.Services.GetRequiredService<IApplicationLogger<Program>>()
+        .LogInformation("Application started.", new { Environment = orderGeneratorApp.Environment.EnvironmentName, BuildCommitSha = buildCommitSha }));
 
 orderGeneratorApp.Run();
 
