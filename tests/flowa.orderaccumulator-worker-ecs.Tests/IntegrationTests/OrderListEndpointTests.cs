@@ -30,7 +30,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     }
 
     [Fact]
-    public async Task Each_listed_order_carries_the_eight_contract_fields_for_accepted_and_rejected_orders()
+    public async Task Each_listed_order_carries_the_nine_contract_fields_for_accepted_and_rejected_orders()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         var appOrderDecisionServices = orderAccumulatorTestApp.Services;
@@ -45,9 +45,31 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         Assert.Equal((1, 10, 2L), ReadOrderPageHeader(orderPage));
         Assert.Equal(2, listedOrders.Count);
         AssertListedOrder(listedOrders[0], storedReceivedAtByClOrdId[rejectedSellOutcome.ClOrdId], "rejected", "VALE3", "sell", 100_000m, 1.00m,
-            rejectedSellOutcome.OrderId, rejectedSellOutcome.ClOrdId);
+            rejectedSellOutcome.OrderId, rejectedSellOutcome.ClOrdId, "A quantidade deve ser menor que 100.000.");
         AssertListedOrder(listedOrders[1], storedReceivedAtByClOrdId[acceptedBuyOutcome.ClOrdId], "accepted", "PETR4", "buy", 100m, 10.50m,
-            acceptedBuyOutcome.OrderId, acceptedBuyOutcome.ClOrdId);
+            acceptedBuyOutcome.OrderId, acceptedBuyOutcome.ClOrdId, expectedRejectReason: null);
+    }
+
+    [Fact]
+    public async Task Order_rejected_over_the_exposure_limit_lists_the_limit_reason_and_the_accepted_one_lists_null()
+    {
+        // Arrange
+        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        var appOrderDecisionServices = orderAccumulatorTestApp.Services;
+        // 2 × 50,000 × 999.99 = 99,999,000; another 2,000 × 1.00 would exceed 100,000,000.
+        await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 50_000, 999.99m));
+        var acceptedBuyOutcome = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 50_000, 999.99m));
+        var overLimitOutcome = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 2_000, 1.00m));
+
+        // Act
+        var listedOrders = (await GetOrderPageJsonAsync(orderAccumulatorTestApp, "/api/orders?page=1")).GetProperty("orders").EnumerateArray().ToList();
+
+        // Assert
+        Assert.Equal(
+            [overLimitOutcome.ClOrdId, acceptedBuyOutcome.ClOrdId],
+            listedOrders.Take(2).Select(listedOrder => listedOrder.GetProperty("clOrdId").GetString()).ToList());
+        Assert.Equal("Ordem rejeitada: a exposição de VALE3 passaria do limite de 100.000.000,00.", listedOrders[0].GetProperty("rejectReason").GetString());
+        Assert.Equal(JsonValueKind.Null, listedOrders[1].GetProperty("rejectReason").ValueKind);
     }
 
     [Fact]
@@ -236,10 +258,10 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
 
     // Reads by the contract names (camelCase): a name changed in the code breaks the test.
     private static void AssertListedOrder(
-        JsonElement listedOrder, DateTime storedReceivedAt, string expectedOrderStatus, string expectedOrderSymbol, string expectedOrderSide, decimal expectedOrderQuantity, decimal expectedOrderPrice, string expectedOrderId, string expectedClOrdId)
+        JsonElement listedOrder, DateTime storedReceivedAt, string expectedOrderStatus, string expectedOrderSymbol, string expectedOrderSide, decimal expectedOrderQuantity, decimal expectedOrderPrice, string expectedOrderId, string expectedClOrdId, string? expectedRejectReason)
     {
         Assert.Equal(
-            ["receivedAt", "status", "symbol", "side", "quantity", "price", "orderId", "clOrdId"],
+            ["receivedAt", "status", "symbol", "side", "quantity", "price", "orderId", "clOrdId", "rejectReason"],
             listedOrder.EnumerateObject().Select(listedOrderField => listedOrderField.Name).ToList());
         var listedReceivedAt = listedOrder.GetProperty("receivedAt").GetString()!;
         Assert.EndsWith("Z", listedReceivedAt);
@@ -251,5 +273,6 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
         Assert.Equal(expectedOrderPrice, listedOrder.GetProperty("price").GetDecimal());
         Assert.Equal(expectedOrderId, listedOrder.GetProperty("orderId").GetString());
         Assert.Equal(expectedClOrdId, listedOrder.GetProperty("clOrdId").GetString());
+        Assert.Equal(expectedRejectReason, listedOrder.GetProperty("rejectReason").GetString());
     }
 }

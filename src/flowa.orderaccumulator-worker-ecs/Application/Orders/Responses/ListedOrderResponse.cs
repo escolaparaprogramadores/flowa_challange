@@ -3,7 +3,7 @@ using Flowa.OrderAccumulator.Domain.Orders.Enums;
 namespace Flowa.OrderAccumulator.Application.Orders.Responses;
 
 public sealed record ListedOrderResponse(
-    DateTime ReceivedAt, string Status, string? Symbol, string? Side, decimal Quantity, decimal Price, string OrderId, string ClOrdId)
+    DateTime ReceivedAt, string Status, string? Symbol, string? Side, decimal Quantity, decimal Price, string OrderId, string ClOrdId, string? RejectReason)
 {
     public const string AcceptedOrderStatus = "accepted";
     public const string RejectedOrderStatus = "rejected";
@@ -22,7 +22,8 @@ public sealed record ListedOrderResponse(
             storedOrder.Quantity,
             storedOrder.Price,
             storedOrder.OrderId,
-            storedOrder.ClOrdId);
+            storedOrder.ClOrdId,
+            storedOrder.RejectReason);
     }
 
     private static string? MapOrderSide(OrderSide? storedOrderSide) => storedOrderSide switch
