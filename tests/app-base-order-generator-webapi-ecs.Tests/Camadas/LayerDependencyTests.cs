@@ -17,8 +17,8 @@ public sealed class LayerDependencyTests
     private static readonly Assembly OrderGeneratorAssembly = typeof(SentOrderResult).Assembly;
     private static readonly string[] LayerNames = ["Entrypoint", "Application", "Domain", "Infrastructure", "Commons"];
 
-    // Decision G-2 (a) and rule 12 of the owner: the Domain may also use the shared core of the Commons; the Commons
-    // may use the technical libraries of the rule (Microsoft.Extensions here: HTTP client and logging, rules 22 and 39).
+    // The Domain may also use the shared core of the Commons; the Commons may use the technical libraries
+    // (Microsoft.Extensions here: HTTP client and logging).
     private const string MicrosoftExtensionsNamespace = "Microsoft.Extensions";
     private static readonly string[] DomainAllowedNamespaces =
     [
@@ -108,7 +108,7 @@ public sealed class LayerDependencyTests
     }
 
     // CA-7: the application logs only through IApplicationLogger<T> (Commons); the logging SDK of the framework
-    // is used only by the Commons.Logging implementation, never by the other layers (decision G-2 (a)).
+    // is used only by the Commons.Logging implementation, never by the other layers.
     [Fact]
     public void Only_the_commons_logging_uses_the_logging_sdk()
     {

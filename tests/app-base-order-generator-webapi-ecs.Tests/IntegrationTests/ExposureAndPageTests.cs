@@ -44,6 +44,26 @@ public sealed class ExposureProxyTests
         Assert.False(exposuresDataMessage.GetProperty("data").TryGetProperty("data", out _));
     }
 
+    // The JSON body is read as UTF-8 bytes, so a charset in the Content-Type that .NET does not know does not turn
+    // a valid answer of the OrderAccumulator into an error.
+    [Fact]
+    public async Task Passes_on_the_data_of_the_accumulator_when_its_content_type_has_an_unknown_charset()
+    {
+        await using var fakeAccumulator = await StartFakeAccumulator(async exposuresHttpContext =>
+        {
+            exposuresHttpContext.Response.ContentType = "application/json; charset=unknown-charset";
+            await exposuresHttpContext.Response.WriteAsync(
+                $$"""{"success":true,"status":"Ok","message":"{{AccumulatorExposuresMessage}}","data":{{AccumulatorExposuresDataJson}},"errors":[],"errorCode":null}""");
+        });
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl);
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+
+        var exposuresDataMessage = await OrderApiTests.ReadSuccessDataMessageAsync(await orderGeneratorClient.GetAsync("/api/exposures"));
+
+        Assert.Equal(AccumulatorExposuresMessage, exposuresDataMessage.GetProperty("message").GetString());
+        Assert.Equal(AccumulatorExposuresDataJson, exposuresDataMessage.GetProperty("data").GetRawText());
+    }
+
     [Fact]
     public async Task Accumulator_down_answers_503_in_portuguese()
     {

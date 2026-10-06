@@ -16,5 +16,5 @@ public sealed class HttpRequestClient(IHttpClientFactory httpClientFactory) : IH
 
     private static async Task<HttpApiResponse> ReadHttpApiResponseAsync(string apiName, HttpResponseMessage httpResponse, CancellationToken cancellationToken) =>
         new(apiName, httpResponse.StatusCode, httpResponse.Content.Headers.ContentType?.MediaType,
-            await httpResponse.Content.ReadAsStringAsync(cancellationToken));
+            await httpResponse.Content.ReadAsByteArrayAsync(cancellationToken));
 }

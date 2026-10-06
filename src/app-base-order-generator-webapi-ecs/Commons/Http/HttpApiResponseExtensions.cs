@@ -20,7 +20,8 @@ public static class HttpApiResponseExtensions
             if (httpApiResponse.MediaType != "application/json")
                 throw new HttpRequestException($"The {httpApiResponse.ApiName} answered 200 without a JSON body.", null, httpApiResponse.StatusCode);
 
-            using var successBody = JsonDocument.Parse(httpApiResponse.Body);
+            using var successBodyStream = new MemoryStream(httpApiResponse.Utf8Body);
+            using var successBody = JsonDocument.Parse(successBodyStream);
             var successMessage = successBody.RootElement;
             if (successMessage.ValueKind != JsonValueKind.Object
                 || !successMessage.TryGetProperty("data", out var successData)
@@ -35,7 +36,8 @@ public static class HttpApiResponseExtensions
             if (httpApiResponse.MediaType != "application/problem+json")
                 throw new HttpRequestException($"The {httpApiResponse.ApiName} answered 400 without a problem+json body.", null, httpApiResponse.StatusCode);
 
-            using var problemBody = JsonDocument.Parse(httpApiResponse.Body);
+            using var problemBodyStream = new MemoryStream(httpApiResponse.Utf8Body);
+            using var problemBody = JsonDocument.Parse(problemBodyStream);
             var invalidInputProblem = problemBody.RootElement;
             if (!invalidInputProblem.TryGetProperty("type", out var problemTypeElement) || problemTypeElement.ValueKind != JsonValueKind.String
                 || !invalidInputProblem.TryGetProperty("detail", out var problemDetail) || problemDetail.ValueKind != JsonValueKind.String
