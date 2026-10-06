@@ -16,7 +16,7 @@ namespace Flowa.OrderGenerator.Infrastructure.Fix;
 internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHostedService, IDisposable
 {
     public const string SessionRejectWithoutReasonText = "A sessão FIX recusou a ordem.";
-    public const string LateExecutionReportLogMessage = "ExecutionReport arrived with no order waiting for it, after the deadline.";
+    public const string LateExecutionReportLogMessage = "ExecutionReport arrived for an order that is no longer waiting for it.";
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<SentOrderResult>> _ordersAwaitingExecutionReport = new();
     private readonly ConcurrentDictionary<string, ulong> _sentSeqNumsOfOrdersAwaitingExecutionReport = new();
@@ -59,10 +59,6 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
         {
             if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, orderToSend, orderSendingTraceParent), initiatorSessionId))
                 return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
-
-            // OnLogout may have run before this order was registered; then nobody else would end its wait.
-            if (!initiatorSession.IsLoggedOn)
-                orderAnswerWaiter.TrySetResult(new SentOrderResult(SentOrderStatus.FixSessionLost, clOrdId));
 
             using var executionReportDeadline = new CancellationTokenSource();
             var orderAnswerOrDeadlineFinishedFirst = await Task.WhenAny(orderAnswerWaiter.Task, Task.Delay(_executionReportTimeout, executionReportDeadline.Token));

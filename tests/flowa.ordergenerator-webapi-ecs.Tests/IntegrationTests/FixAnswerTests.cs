@@ -204,8 +204,17 @@ public sealed class FixAnswerTests
         Assert.Equal(("Warning", typeof(FixOrderClient).FullName), (lateExecutionReportLine.LogLevel, lateExecutionReportLine.Category));
         Assert.Equal(lateClOrdId, lateExecutionReportLine.ReadLogField("ClOrdId"));
         Assert.Equal(lateClOrdId, lateExecutionReportLine.TraceId);
-        Assert.Equal(2, stdoutJsonLogCapture.JsonLogLines.Count(jsonLogLine =>
-            jsonLogLine.LogLevel is "Warning" or "Error" && jsonLogLine.Category != "Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware"));
+        // Only two warnings in the whole run: the 503 of the request and the late answer; no extra log per request.
+        var warningOrErrorLines = stdoutJsonLogCapture.JsonLogLines
+            .Where(jsonLogLine => jsonLogLine.LogLevel is "Warning" or "Error" && jsonLogLine.Category != "Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware")
+            .Select(jsonLogLine => (jsonLogLine.LogLevel, jsonLogLine.Category, jsonLogLine.Message))
+            .ToList();
+        Assert.Equal(
+            [
+                ("Warning", "Flowa.OrderGenerator.Entrypoint.ErrorHandling.OrderGeneratorExceptionHandler", "Expected error in request."),
+                ("Warning", typeof(FixOrderClient).FullName!, FixOrderClient.LateExecutionReportLogMessage)
+            ],
+            warningOrErrorLines);
     }
 
     private static FixTestAcceptor StartFixTestAcceptor()
