@@ -267,6 +267,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(
             new DatadogOrderMetricsAdapter(orderMetricsClient), failingOnceReadServices.GetRequiredService<IServiceScopeFactory>(),
             manualGaugeClock, recordingGaugeLogger);
+        await SetStoredExposureAsync("PETR4", 77.25m);
 
         await symbolExposureGaugeService.StartAsync(CancellationToken.None);
         await exposureReaderFailingOnce.FirstReadFailed.WaitAsync(TimeSpan.FromSeconds(15));
@@ -276,11 +277,38 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await symbolExposureGaugeService.StopAsync(CancellationToken.None);
 
         Assert.Empty(gaugesAfterTheFailedRead);
-        Assert.Equal(3, gaugesAfterTheNextTick.Count);
+        Assert.Equal(
+            [
+                new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "77.25", "g", ExpectedTags("symbol:PETR4")),
+                new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "0", "g", ExpectedTags("symbol:VALE3")),
+                new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "0", "g", ExpectedTags("symbol:VIIA4"))
+            ],
+            gaugesAfterTheNextTick);
         Assert.False(symbolExposureGaugeService.ExecuteTask!.IsFaulted);
         Assert.Equal(
             ["Information Symbol exposure gauge loop started.", "Error Symbol exposure gauge could not read the stored exposures."],
             recordingGaugeLogger.RecordedLogLines);
+    }
+
+    // Shutting down in the middle of a read is not a failure: the cancellation ends the loop without an Error line.
+    [Fact]
+    public async Task Exposure_gauge_stopped_in_the_middle_of_a_read_ends_without_an_error_line()
+    {
+        var recordingGaugeLogger = new RecordingApplicationLogger<SymbolExposureGaugeBackgroundService>();
+        var exposureReaderWaitingForTheStop = new SymbolExposureReaderWaitingForCancellation();
+        await using var waitingReadServices = new ServiceCollection()
+            .AddSingleton<ISymbolExposureReadRepository>(exposureReaderWaitingForTheStop)
+            .BuildServiceProvider();
+        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(
+            new DatadogOrderMetricsAdapter(orderMetricsClient), waitingReadServices.GetRequiredService<IServiceScopeFactory>(),
+            new ManualGaugeClock(), recordingGaugeLogger);
+
+        await symbolExposureGaugeService.StartAsync(CancellationToken.None);
+        await exposureReaderWaitingForTheStop.ReadStarted.WaitAsync(TimeSpan.FromSeconds(15));
+        await symbolExposureGaugeService.StopAsync(CancellationToken.None);
+
+        Assert.True(symbolExposureGaugeService.ExecuteTask!.IsCanceled);
+        Assert.Equal(["Information Symbol exposure gauge loop started."], recordingGaugeLogger.RecordedLogLines);
     }
 
     [Fact]
@@ -465,6 +493,20 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
 
             firstReadFailed.SetResult();
             return Task.FromException<IReadOnlyList<SymbolExposure>>(new NpgsqlException("database down"));
+        }
+    }
+
+    private sealed class SymbolExposureReaderWaitingForCancellation : ISymbolExposureReadRepository
+    {
+        private readonly TaskCompletionSource readStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task ReadStarted => readStarted.Task;
+
+        public async Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default)
+        {
+            readStarted.SetResult();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+            return [];
         }
     }
 
