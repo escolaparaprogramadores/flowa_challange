@@ -2,6 +2,7 @@ using System.Diagnostics.Metrics;
 using Flowa.Commons.Database;
 using Flowa.Commons.Logging;
 using Flowa.Commons.Observability;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Flowa.Commons.DependencyInjection;
@@ -23,9 +24,11 @@ public static class CommonsServiceCollectionExtensions
             return services;
         }
 
-        public IServiceCollection AddPostgresDatabase(string databaseConnectionString)
+        public IServiceCollection AddPostgresDatabase(string databaseConnectionString, IConfiguration appConfiguration)
         {
-            services.AddSingleton<IDatabaseConnectionSource>(_ => new PostgresConnectionSource(databaseConnectionString));
+            var pooledConnectionString = PostgresConnectionPool.ApplyMaximumPoolSize(
+                databaseConnectionString, appConfiguration[PostgresConnectionPool.MaximumPoolSizeKey]);
+            services.AddSingleton<IDatabaseConnectionSource>(_ => new PostgresConnectionSource(pooledConnectionString));
             services.AddScoped<DatabaseUnitOfWork>();
             services.AddScoped<IUnitOfWork>(operationServices => operationServices.GetRequiredService<DatabaseUnitOfWork>());
             services.AddScoped<IDatabase, DapperDatabase>();

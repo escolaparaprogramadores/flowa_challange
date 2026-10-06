@@ -19,7 +19,5 @@ public sealed record OrderAnswer
 
     public static OrderAnswer RepeatStoredAnswer(Order storedOrder) => new(storedOrder, isRepeat: true);
 
-    public bool ShouldMoveSymbolExposure() => !IsRepeat && AnsweredOrder.Accepted;
-
     public bool ShouldCountInOrderMetrics() => !IsRepeat;
 }

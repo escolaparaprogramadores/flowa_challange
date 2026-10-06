@@ -370,7 +370,9 @@ for (const windowWidth of [1440, 1920]) {
       expect(await readCssSizeInPx(assetCard.locator('.exposure-icon'), 'width')).toBeCloseTo(34, 1);
       expect(await readCssSizeInPx(assetCard.locator('.exposure-icon'), 'height')).toBeCloseTo(34, 1);
       await expect(assetCard.locator('dt', { hasText: 'Exposição atual' })).toHaveCount(1);
-      await expect(assetCard.locator('dt', { hasText: 'Falta até o limite' })).toHaveCount(1);
+      await expect(assetCard.locator('dt', { hasText: 'Falta para comprar' })).toHaveCount(1);
+      await expect(assetCard.locator('dt', { hasText: 'Falta para vender' })).toHaveCount(1);
+      await expect(assetCard.getByText('Falta até o limite')).toHaveCount(0);
       await expect(assetCard.getByTestId('exposicao-atual')).toHaveCSS('font-family', /^Sora/);
       await expect(assetCard.getByTestId('exposicao-atual')).toHaveCSS('font-size', '20px');
       await expect(assetCard).toHaveCSS('border-radius', '20px');
@@ -394,16 +396,20 @@ for (const windowWidth of [1440, 1920]) {
       firstCardTop ??= assetCardBox.y;
       expect(assetCardBox.y).toBeCloseTo(firstCardTop, 0);
 
+      // As in mockup 01: "Exposição atual" alone on the top line; below it, "Falta para comprar" on the left and
+      // "Falta para vender" on the right, with both labels at the same height and both values on the same baseline.
       const currentExposureBox = await measureRectangleOnScreen(assetCard.getByTestId('exposicao-atual'));
-      const remainingToLimitBox = await measureRectangleOnScreen(assetCard.getByTestId('exposicao-restante'));
-      expect(remainingToLimitBox.x).toBeGreaterThan(currentExposureBox.x);
-      // As in the mockup: both labels start at the same height and the digits of both values sit on the same line.
-      const exposureLabelBox = await measureRectangleOnScreen(assetCard.locator('dt', { hasText: 'Exposição atual' }));
-      const remainingLabelBox = await measureRectangleOnScreen(assetCard.locator('dt', { hasText: 'Falta até o limite' }));
-      expect(Math.abs(remainingLabelBox.y - exposureLabelBox.y)).toBeLessThanOrEqual(0.5);
-      const currentExposureBaseline = await measureBaselineOnScreen(assetCard.getByTestId('exposicao-atual'));
-      const remainingToLimitBaseline = await measureBaselineOnScreen(assetCard.getByTestId('exposicao-restante'));
-      expect(Math.abs(remainingToLimitBaseline - currentExposureBaseline)).toBeLessThanOrEqual(1);
+      const remainingToBuyBox = await measureRectangleOnScreen(assetCard.getByTestId('falta-para-comprar'));
+      const remainingToSellBox = await measureRectangleOnScreen(assetCard.getByTestId('falta-para-vender'));
+      const remainingToBuyLabelBox = await measureRectangleOnScreen(assetCard.locator('dt', { hasText: 'Falta para comprar' }));
+      const remainingToSellLabelBox = await measureRectangleOnScreen(assetCard.locator('dt', { hasText: 'Falta para vender' }));
+      expect(remainingToBuyLabelBox.y).toBeGreaterThan(currentExposureBox.y + currentExposureBox.height);
+      expect(remainingToBuyBox.x).toBeCloseTo(currentExposureBox.x, 0);
+      expect(remainingToSellBox.x).toBeGreaterThan(remainingToBuyBox.x + remainingToBuyBox.width);
+      expect(Math.abs(remainingToSellLabelBox.y - remainingToBuyLabelBox.y)).toBeLessThanOrEqual(0.5);
+      const remainingToBuyBaseline = await measureBaselineOnScreen(assetCard.getByTestId('falta-para-comprar'));
+      const remainingToSellBaseline = await measureBaselineOnScreen(assetCard.getByTestId('falta-para-vender'));
+      expect(Math.abs(remainingToSellBaseline - remainingToBuyBaseline)).toBeLessThanOrEqual(1);
     }
 
     // The limit text ends at the same right edge as the last card, as in the mockup.
@@ -447,7 +453,7 @@ test('CA-6 and CA-39: the limit usage comes from the server, is truncated withou
     filledTrackFraction: 0.95,
   });
 
-  // Buy through the order ticket itself: the screen rereads the exposure and the card changes with it, with no client-side math.
+  // Buy through the order ticket itself: the screen rereads the exposure from the server and the card changes with it.
   // −95,000,000.00 + 99,999 × 950.00 = −950.00, which is more than zero and less than 0.01% of the limit.
   await expect(page.getByLabel('Quantidade de PETR4')).toBeVisible();
   await page.getByLabel('Quantidade de PETR4').fill('99999');
@@ -511,7 +517,7 @@ for (const windowWidth of [860, 375]) {
       firstCardLeft ??= assetCardBox.x;
       expect(assetCardBox.x).toBeCloseTo(firstCardLeft, 0);
       // No value breaks in the middle of the number: each one takes a single line and fits in the card.
-      for (const cardFigureTestId of ['exposicao-atual', 'exposicao-restante']) {
+      for (const cardFigureTestId of ['exposicao-atual', 'falta-para-comprar', 'falta-para-vender']) {
         const cardFigure = locateAssetCard(page, assetSymbol).getByTestId(cardFigureTestId);
         const isFigureOnOneLine = await cardFigure.evaluate(
           (figureOnPage) => figureOnPage.getBoundingClientRect().height < parseFloat(getComputedStyle(figureOnPage).fontSize) * 2,

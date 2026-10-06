@@ -10,10 +10,10 @@ using Flowa.OrderAccumulator.Domain.Orders.Enums;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using Flowa.OrderAccumulator.Infrastructure.Exposures.Repositories;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Flowa.OrderAccumulator.Tests;
@@ -217,7 +217,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task Services_registered_for_the_app_process_orders_against_the_database()
     {
         var orderAccumulatorAppServices = new ServiceCollection()
-            .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString);
+            .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString, new ConfigurationBuilder().Build());
         await using var orderAccumulatorServiceProvider = orderAccumulatorAppServices.BuildServiceProvider();
 
         await using var orderOperationScope = orderAccumulatorServiceProvider.CreateAsyncScope();
@@ -229,7 +229,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>();
         var registeredServicesOrderDecision = await new DecideIncomingOrderUseCase(
                 registeredUnitOfWork, registeredOrderRepository, new OrderDecisionDomainService(registeredSymbolExposureRepository),
-                new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics(),
+                new UncountedOrderMetrics(),
                 TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>())
             .DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
 
