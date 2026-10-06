@@ -398,7 +398,7 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         finally
         {
             await composeUnderTest.RunComposeCommandAsync(TimeSpan.FromMinutes(2), "up", "-d", "--wait", "postgres");
-            await WaitForOrdersPageToAnswerAsync();
+            await WaitForOrdersPageAndOrderDecisionAfterPostgresRestartAsync();
         }
 
         await AssertSingleErrorLineCarriesTheTraceIdAsync("ordergenerator", ordersPageTraceId, "Error", "Unexpected application error.", expectedProblemType);
@@ -524,18 +524,25 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
             .ToDictionary(symbolAndExposure => symbolAndExposure[0], symbolAndExposure => decimal.Parse(symbolAndExposure[1], System.Globalization.CultureInfo.InvariantCulture));
     }
 
-    // The tests after this one send orders, which the OrderAccumulator stores in the Postgres.
-    private async Task WaitForOrdersPageToAnswerAsync()
+    // The tests after this one send orders, which the OrderAccumulator stores in the Postgres. The OrderAccumulator only
+    // notices that the Postgres restarted on its next order (57P01 on a pooled connection, P04-7), so the wait ends with a
+    // tiny order decided: the orders page answers and the OrderAccumulator decides again.
+    private async Task WaitForOrdersPageAndOrderDecisionAfterPostgresRestartAsync()
     {
-        var ordersPageDeadline = DateTime.UtcNow.AddMinutes(1);
-        while (DateTime.UtcNow < ordersPageDeadline)
+        var postgresBackDeadline = DateTime.UtcNow.AddMinutes(1);
+        while (DateTime.UtcNow < postgresBackDeadline)
         {
             using var ordersPageResponse = await composeUnderTest.OrderGeneratorHttp.GetAsync("/api/orders?page=1");
             if (ordersPageResponse.StatusCode == HttpStatusCode.OK)
-                return;
+            {
+                using var probeOrderResponse = await composeUnderTest.OrderGeneratorHttp.PostAsJsonAsync(
+                    "/api/orders", new { symbol = "PETR4", side = "buy", quantity = 1, price = 0.01m });
+                if (probeOrderResponse.StatusCode == HttpStatusCode.OK)
+                    return;
+            }
             await Task.Delay(500);
         }
-        throw new TimeoutException("the orders page did not answer 200 again within 1 minute after the Postgres came back");
+        throw new TimeoutException("the orders page and the order decision did not come back within 1 minute after the Postgres came back");
     }
 
     private async Task<decimal> ReadSymbolExposureAsync(string symbol)
