@@ -13,7 +13,7 @@ public sealed class StoredOrderColumnsTests(OrderAccumulatorPostgresFixture orde
         SELECT received_at AS ReceivedAt, accepted AS Accepted, symbol AS Symbol, side AS Side, quantity AS Quantity,
                price AS Price, order_id AS OrderId, cl_ord_id AS ClOrdId, reject_reason AS RejectReason
         FROM orders
-        ORDER BY received_at, id
+        ORDER BY id
         """;
 
     public Task InitializeAsync() => orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
@@ -27,9 +27,12 @@ public sealed class StoredOrderColumnsTests(OrderAccumulatorPostgresFixture orde
         await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         var appOrderDecisionServices = orderAccumulatorTestApp.Services;
 
+        var databaseClockBeforeTheOrders = await ReadDatabaseClockAsync();
+
         // Act
         var acceptedBuyOutcome = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
         var rejectedSellOutcome = await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 100_000, 1.00m));
+        var databaseClockAfterTheOrders = await ReadDatabaseClockAsync();
         var storedOrderRows = await ReadStoredOrderRowsInArrivalOrderAsync();
 
         // Assert
@@ -41,8 +44,8 @@ public sealed class StoredOrderColumnsTests(OrderAccumulatorPostgresFixture orde
         Assert.Equal(
             (false, "VALE3", "2", 100_000m, 1.00m, rejectedSellOutcome.OrderId, rejectedSellOutcome.ClOrdId, "A quantidade deve ser menor que 100.000."),
             ReadListedColumnsOf(storedOrderRows[1]));
-        Assert.True(storedOrderRows[1].ReceivedAt >= storedOrderRows[0].ReceivedAt);
-        Assert.Equal(DateTimeKind.Utc, storedOrderRows[0].ReceivedAt.Kind);
+        Assert.InRange(storedOrderRows[0].ReceivedAt, databaseClockBeforeTheOrders, storedOrderRows[1].ReceivedAt);
+        Assert.InRange(storedOrderRows[1].ReceivedAt, storedOrderRows[0].ReceivedAt, databaseClockAfterTheOrders);
     }
 
     [Fact]
@@ -98,6 +101,12 @@ public sealed class StoredOrderColumnsTests(OrderAccumulatorPostgresFixture orde
     {
         await using var orderDatabaseConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
         return (await orderDatabaseConnection.QueryAsync<StoredOrderRow>(SelectStoredOrderRowsInArrivalOrderSql)).ToList();
+    }
+
+    private async Task<DateTime> ReadDatabaseClockAsync()
+    {
+        await using var orderDatabaseConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
+        return await orderDatabaseConnection.ExecuteScalarAsync<DateTime>("SELECT clock_timestamp()");
     }
 
     private static (bool, string?, string, decimal, decimal, string, string, string?) ReadListedColumnsOf(StoredOrderRow storedOrderRow) =>
