@@ -1,3 +1,4 @@
+using System.Data;
 using Flowa.OrderAccumulator.Application.ErrorHandling;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
@@ -100,7 +101,7 @@ public sealed class DecideIncomingOrderUseCase
         if (storedOrder is not null)
             return OrderAnswer.RepeatStoredAnswer(storedOrder);
 
-        await unitOfWork.BeginTransactionAsync(cancellationToken);
+        await unitOfWork.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         var answeredOrder = await orderDecisionDomainService.DecideIncomingOrderAsync(incomingOrder, cancellationToken);
         if (await orderRepository.TryAddOrderAsync(answeredOrder, cancellationToken))
         {

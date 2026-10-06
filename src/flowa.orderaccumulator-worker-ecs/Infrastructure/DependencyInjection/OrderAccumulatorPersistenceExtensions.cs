@@ -1,3 +1,4 @@
+using System.Data;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.Commons.Database;
@@ -19,9 +20,9 @@ public static class OrderAccumulatorPersistenceExtensions
         """;
 
     public static IServiceCollection AddOrderAccumulatorPersistence(
-        this IServiceCollection orderAccumulatorServices, string orderDatabaseConnectionString)
+        this IServiceCollection orderAccumulatorServices, string orderDatabaseConnectionString, IConfiguration orderAccumulatorConfiguration)
     {
-        orderAccumulatorServices.AddPostgresDatabase(orderDatabaseConnectionString);
+        orderAccumulatorServices.AddPostgresDatabase(orderDatabaseConnectionString, orderAccumulatorConfiguration);
         orderAccumulatorServices.AddScoped<IOrderRepository, OrderRepository>();
         orderAccumulatorServices.AddScoped<IExposureRepository, ExposureRepository>();
         orderAccumulatorServices.AddScoped<ISymbolExposureReadRepository, SymbolExposureReadRepository>();
@@ -35,7 +36,7 @@ public static class OrderAccumulatorPersistenceExtensions
     {
         await using var schemaUnitOfWork = new DatabaseUnitOfWork(orderDatabaseConnectionSource);
         var schemaDatabase = new DapperDatabase(schemaUnitOfWork);
-        await schemaUnitOfWork.BeginTransactionAsync(cancellationToken);
+        await schemaUnitOfWork.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         await schemaDatabase.ExecuteSqlCommandAsync(LockSchemaSql, null, cancellationToken);
         await schemaDatabase.ExecuteSqlCommandAsync(ReadOrderAccumulatorSchema(), null, cancellationToken);
         await schemaDatabase.ExecuteSqlCommandAsync(

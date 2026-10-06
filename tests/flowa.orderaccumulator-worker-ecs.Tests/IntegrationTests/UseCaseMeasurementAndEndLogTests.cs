@@ -1,3 +1,4 @@
+using System.Data;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Exposures.UseCases;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
@@ -141,7 +142,7 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
 
     private sealed class UnitOfWorkWithoutDatabase : IUnitOfWork
     {
-        public Task BeginTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task BeginTransactionAsync(IsolationLevel transactionIsolationLevel, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task CommitTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 

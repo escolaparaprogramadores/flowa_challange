@@ -14,6 +14,7 @@ using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using Flowa.OrderAccumulator.Infrastructure.Exposures.Repositories;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Flowa.OrderAccumulator.Tests;
@@ -217,7 +218,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     public async Task Services_registered_for_the_app_process_orders_against_the_database()
     {
         var orderAccumulatorAppServices = new ServiceCollection()
-            .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString);
+            .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString, new ConfigurationBuilder().Build());
         await using var orderAccumulatorServiceProvider = orderAccumulatorAppServices.BuildServiceProvider();
 
         await using var orderOperationScope = orderAccumulatorServiceProvider.CreateAsyncScope();

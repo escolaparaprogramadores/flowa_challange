@@ -1,3 +1,4 @@
+using System.Data;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
@@ -281,7 +282,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
 
     private sealed class UnitOfWorkWithoutDatabase : IUnitOfWork
     {
-        public Task BeginTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task BeginTransactionAsync(IsolationLevel transactionIsolationLevel, CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task CommitTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 

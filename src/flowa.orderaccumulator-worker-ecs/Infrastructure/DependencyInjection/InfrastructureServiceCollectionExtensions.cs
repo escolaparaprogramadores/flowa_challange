@@ -8,7 +8,7 @@ internal static class InfrastructureServiceCollectionExtensions
     public static IServiceCollection AddOrderAccumulatorInfrastructure(
         this IServiceCollection orderAccumulatorServices, string orderDatabaseConnectionString, IConfiguration orderAccumulatorConfiguration)
     {
-        orderAccumulatorServices.AddOrderAccumulatorPersistence(orderDatabaseConnectionString);
+        orderAccumulatorServices.AddOrderAccumulatorPersistence(orderDatabaseConnectionString, orderAccumulatorConfiguration);
         orderAccumulatorServices.AddOrderMetrics(orderAccumulatorConfiguration);
         orderAccumulatorServices.AddSingleton<ISymbolExposureMemoryPort, InMemorySymbolExposureAdapter>();
         return orderAccumulatorServices;

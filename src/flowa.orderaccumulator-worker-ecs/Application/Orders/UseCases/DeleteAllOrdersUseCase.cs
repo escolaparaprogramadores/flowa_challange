@@ -1,3 +1,4 @@
+using System.Data;
 using Flowa.OrderAccumulator.Application.ErrorHandling;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
@@ -59,7 +60,7 @@ public sealed class DeleteAllOrdersUseCase
 
     private async Task DeleteAllStoredOrdersAndZeroExposuresAsync()
     {
-        await unitOfWork.BeginTransactionAsync(CancellationToken.None);
+        await unitOfWork.BeginTransactionAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
         await exposureRepository.ZeroSymbolExposuresAsync(OrderFieldPolicy.AllowedOrderSymbols, CancellationToken.None);
         await orderRepository.DeleteAllOrdersAsync(CancellationToken.None);
         await unitOfWork.CommitTransactionAsync(CancellationToken.None);
