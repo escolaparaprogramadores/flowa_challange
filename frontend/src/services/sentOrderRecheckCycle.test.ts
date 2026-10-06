@@ -3,7 +3,7 @@ import type { AttemptedOrder, ListedOrder, OrderListPage } from './ordersService
 import {
   MAX_READS_AFTER_UNCONFIRMED_SEND,
   RECHECK_INTERVAL_IN_MS,
-  isSentOrderOnListPage,
+  isSentOrderOnFirstPage,
   startSentOrderRecheckCycle,
 } from './sentOrderRecheckCycle';
 
@@ -13,33 +13,47 @@ function buildListedOrder(clOrdId: string, symbol: string, side: 'buy' | 'sell')
   return { receivedAt: '2026-10-06T12:00:00Z', outcome: 'accepted', symbol, side, quantity: 100, priceInReais: 10, orderId: `order-${clOrdId}`, clOrdId };
 }
 
-function buildFirstPage(listedOrders: ListedOrder[]): OrderListPage {
-  return { page: 1, totalOrders: listedOrders.length, orders: listedOrders };
-}
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('isSentOrderOnListPage', () => {
-  const clOrdIdsBeforeSend = new Set(['old-1']);
+describe('isSentOrderOnFirstPage', () => {
+  const ordersOnServerBeforeSend = 25;
 
-  it('RF-11: a new order with the same asset and side on page 1 is the sent order', () => {
-    const firstPage = buildFirstPage([buildListedOrder('new-1', 'PETR4', 'buy'), buildListedOrder('old-1', 'PETR4', 'buy')]);
-    expect(isSentOrderOnListPage(firstPage, sentPetr4Buy, clOrdIdsBeforeSend)).toBe(true);
+  function buildFirstPageWithTotal(totalOrders: number, listedOrders: ListedOrder[]): OrderListPage {
+    return { page: 1, totalOrders, orders: listedOrders };
+  }
+
+  it('RF-11: one more order on the server, with the same asset and side at the top of page 1, is the sent order', () => {
+    const firstPage = buildFirstPageWithTotal(26, [buildListedOrder('new-1', 'PETR4', 'buy'), buildListedOrder('old-1', 'PETR4', 'buy')]);
+    expect(isSentOrderOnFirstPage(firstPage, sentPetr4Buy, ordersOnServerBeforeSend)).toBe(true);
   });
 
-  it('RF-11: an order the screen already showed before the send does not count', () => {
-    expect(isSentOrderOnListPage(buildFirstPage([buildListedOrder('old-1', 'PETR4', 'buy')]), sentPetr4Buy, clOrdIdsBeforeSend)).toBe(false);
+  it('RF-11: the same total as before the send means the order has not entered yet, even with a PETR4 buy at the top', () => {
+    const firstPage = buildFirstPageWithTotal(25, [buildListedOrder('old-1', 'PETR4', 'buy')]);
+    expect(isSentOrderOnFirstPage(firstPage, sentPetr4Buy, ordersOnServerBeforeSend)).toBe(false);
   });
 
-  it('RF-11: a new order of another asset or another side does not count', () => {
-    const firstPage = buildFirstPage([buildListedOrder('new-1', 'VALE3', 'buy'), buildListedOrder('new-2', 'PETR4', 'sell')]);
-    expect(isSentOrderOnListPage(firstPage, sentPetr4Buy, clOrdIdsBeforeSend)).toBe(false);
+  it('RF-11: an old PETR4 buy below a newer order of another asset or side does not count', () => {
+    const otherAssetOnTop = buildFirstPageWithTotal(26, [buildListedOrder('new-1', 'VALE3', 'buy'), buildListedOrder('old-1', 'PETR4', 'buy')]);
+    const otherSideOnTop = buildFirstPageWithTotal(26, [buildListedOrder('new-2', 'PETR4', 'sell'), buildListedOrder('old-1', 'PETR4', 'buy')]);
+    expect(isSentOrderOnFirstPage(otherAssetOnTop, sentPetr4Buy, ordersOnServerBeforeSend)).toBe(false);
+    expect(isSentOrderOnFirstPage(otherSideOnTop, sentPetr4Buy, ordersOnServerBeforeSend)).toBe(false);
+  });
+
+  it('RF-11: the user on page 2 or with the list failed before the send gives no count, so nothing counts as found', () => {
+    const firstPage = buildFirstPageWithTotal(26, [buildListedOrder('new-1', 'PETR4', 'buy')]);
+    expect(isSentOrderOnFirstPage(firstPage, sentPetr4Buy, undefined)).toBe(false);
+  });
+
+  it('RF-11: in the test mode the typed asset matches the stored one without case or spaces', () => {
+    const firstPage = buildFirstPageWithTotal(26, [buildListedOrder('new-1', 'ITUB4', 'buy')]);
+    expect(isSentOrderOnFirstPage(firstPage, { ...sentPetr4Buy, symbol: ' itub4 ' }, ordersOnServerBeforeSend)).toBe(true);
   });
 
   it('RF-12: a failed read (no page) does not count as found', () => {
-    expect(isSentOrderOnListPage(undefined, sentPetr4Buy, clOrdIdsBeforeSend)).toBe(false);
+    expect(isSentOrderOnFirstPage(undefined, sentPetr4Buy, ordersOnServerBeforeSend)).toBe(false);
   });
 });
 

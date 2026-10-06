@@ -108,6 +108,7 @@ describe('OrderListCard: response box of the last send (CA-3)', () => {
     const cardHtml = renderOrderListCardAfterSend({ outcome: 'not-entered', serverMessage: 'Required tag missing.', attemptedOrder: petr4BuyAttempt });
     expect(cardHtml).toContain('class="order-response-box order-response-box-not-entered" role="alert" data-testid="faixa-da-falha-no-envio"');
     expect(readResponseBoxText(cardHtml, 'status-da-ordem')).toBe('Não entrou');
+    expect(readResponseBoxText(cardHtml, 'ordem-da-resposta')).toBe('PETR4 · Compra · 100 × R$ 10,00');
     expect(readResponseBoxText(cardHtml, 'mensagem-da-ordem')).toBe('Required tag missing.');
   });
 
@@ -126,7 +127,9 @@ describe('OrderListCard: response box of the last send (CA-3)', () => {
       attemptedOrder: petr4BuyAttempt,
     });
     expect(readResponseBoxText(cardHtml, 'status-da-ordem')).toBe('Erro de comunicação');
-    expect(cardHtml).toContain('class="order-response-box order-response-box-communication-failure" role="alert"');
+    expect(readResponseBoxText(cardHtml, 'ordem-da-resposta')).toBe('PETR4 · Compra · 100 × R$ 10,00');
+    expect(readResponseBoxText(cardHtml, 'mensagem-da-ordem')).toBe('A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.');
+    expect(cardHtml).toContain('class="order-response-box order-response-box-communication-failure" role="alert" data-testid="faixa-da-falha-no-envio"');
   });
 
   it('RF-04: before any send there is no box', () => {

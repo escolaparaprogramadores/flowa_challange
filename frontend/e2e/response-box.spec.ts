@@ -72,10 +72,15 @@ for (const viewportWidth of [1440, 375]) {
     await expect(rejectedBox).toHaveCSS('background-color', REJECTED_BOX_COLORS.background);
     await expectBoxAboveTable(page, 'caixa-de-resposta');
 
-    // The pill sits on the left of the order line (maquete-01), also at 375 px where the text wraps below it if needed.
+    // maquete-01: at 1440 the pill sits on the left of the order line; at 375 the text wraps below the pill.
     const pillBox = (await rejectedBox.getByTestId('status-da-ordem').boundingBox())!;
     const orderLineBox = (await rejectedBox.getByTestId('ordem-da-resposta').boundingBox())!;
-    expect(pillBox.x).toBeLessThanOrEqual(orderLineBox.x);
+    if (viewportWidth === 1440) {
+      expect(pillBox.x + pillBox.width).toBeLessThan(orderLineBox.x);
+      expect(Math.abs(pillBox.y - orderLineBox.y)).toBeLessThan(pillBox.height);
+    } else {
+      expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(orderLineBox.y);
+    }
 
     // RNF-02: no horizontal scroll of the page.
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);

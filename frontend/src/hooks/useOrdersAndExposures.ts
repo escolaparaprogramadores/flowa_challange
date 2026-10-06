@@ -10,7 +10,7 @@ import {
   type OrderToSend,
   type SymbolExposure,
 } from '../services/ordersService';
-import { isSentOrderOnListPage, startSentOrderRecheckCycle } from '../services/sentOrderRecheckCycle';
+import { isSentOrderOnFirstPage, startSentOrderRecheckCycle } from '../services/sentOrderRecheckCycle';
 
 export type ExposuresState =
   | { status: 'loading' }
@@ -97,9 +97,7 @@ export function useOrdersAndExposures() {
     const thisOrderSendNumber = ++latestOrderSendNumber.current;
     cancelRunningRecheckCycle.current?.();
     cancelRunningRecheckCycle.current = undefined;
-    const clOrdIdsBeforeSend = new Set(
-      orderListState.status === 'ready' ? orderListState.orderListPage.orders.map((listedOrder) => listedOrder.clOrdId) : [],
-    );
+    const totalOrdersBeforeSend = orderListState.status === 'ready' ? orderListState.orderListPage.totalOrders : undefined;
     setIsSendingOrder(true);
     setLastSendResult(undefined);
     let orderSendResult: OrderSendResult;
@@ -114,9 +112,9 @@ export function useOrdersAndExposures() {
     // Without an answer in time the order may have entered: the screen rereads by itself, with a ceiling, until it shows up.
     if (orderSendResult.outcome !== 'maybe-accepted' || thisOrderSendNumber !== latestOrderSendNumber.current) return;
     const { attemptedOrder } = orderSendResult;
-    if (isSentOrderOnListPage(firstOrderListPage, attemptedOrder, clOrdIdsBeforeSend)) return;
+    if (isSentOrderOnFirstPage(firstOrderListPage, attemptedOrder, totalOrdersBeforeSend)) return;
     cancelRunningRecheckCycle.current = startSentOrderRecheckCycle(async () =>
-      isSentOrderOnListPage(await refreshExposuresAndFirstOrderListPage(), attemptedOrder, clOrdIdsBeforeSend),
+      isSentOrderOnFirstPage(await refreshExposuresAndFirstOrderListPage(), attemptedOrder, totalOrdersBeforeSend),
     );
   }
 
