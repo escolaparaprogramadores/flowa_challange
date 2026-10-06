@@ -35,11 +35,39 @@ public sealed class DogStatsdUdpListener : IDisposable
     private static readonly TimeSpan SentinelWaitLimit = TimeSpan.FromSeconds(15);
     private readonly UdpClient dogStatsdUdpClient;
 
-    public DogStatsdUdpListener()
+    private static readonly TimeSpan BusyPortWaitLimit = TimeSpan.FromSeconds(60);
+
+    public DogStatsdUdpListener(int listenerPort = 0)
     {
         dogStatsdUdpClient = new UdpClient(AddressFamily.InterNetworkV6);
         dogStatsdUdpClient.Client.DualMode = true;
-        dogStatsdUdpClient.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, 0));
+        try
+        {
+            dogStatsdUdpClient.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, listenerPort));
+        }
+        catch
+        {
+            dogStatsdUdpClient.Dispose();
+            throw;
+        }
+    }
+
+    // The Accumulator test project also listens on the agent port and runs in parallel with this one:
+    // the listener waits for the port to be free instead of failing the test.
+    public static async Task<DogStatsdUdpListener> ListenOnTheAgentPortWhenFreeAsync(int agentPort)
+    {
+        using var busyPortWait = new CancellationTokenSource(BusyPortWaitLimit);
+        while (true)
+        {
+            try
+            {
+                return new DogStatsdUdpListener(agentPort);
+            }
+            catch (SocketException portFailure) when (portFailure.SocketErrorCode == SocketError.AddressAlreadyInUse)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200), busyPortWait.Token);
+            }
+        }
     }
 
     public int ListenerPort => ((IPEndPoint)dogStatsdUdpClient.Client.LocalEndPoint!).Port;
