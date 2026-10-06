@@ -17,11 +17,10 @@
     <ProjectReference Include="..\flowa.commons\Commons.csproj" />
   </ItemGroup>
 
-  <!-- The FIX session and the FIX 4.4 dictionaries (the package one and the one with tag 5100) sit next to the executable. -->
+  <!-- A sessão FIX e os dicionários FIX 4.4 ficam ao lado do executável: o do pacote vem daqui, o com a tag 5100 vem da Commons. -->
   <ItemGroup>
     <None Update="acceptor.cfg" CopyToOutputDirectory="PreserveNewest" />
     <None Include="$(PkgQuickFIXn_FIX44)\DataDictionary\FIX44.xml" Link="FIX44.xml" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Infrastructure\Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
