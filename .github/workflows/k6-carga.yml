@@ -47,7 +47,7 @@ jobs:
 
       # k6 itself fails the run on errors, on a missing outcome kind per symbol and on exposure not restored.
       - name: Run k6
-        run: k6 run --no-usage-report -e FLOWA_URL="$FLOWA_URL" -e FLOWA_SUMMARY_DIR="$RESULT_DIR" k6/carga-ordens.js
+        run: k6 run --no-usage-report -e FLOWA_URL="$FLOWA_URL" -e FLOWA_SUMMARY_DIR="$RESULT_DIR" "performance testing/carga-ordens.js"
 
       - name: Read the exposure after
         id: read_after_load

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Flowa.OrderAccumulator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Infrastructure\Persistence\Schema.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.89" />
+    <PackageReference Include="DogStatsD-CSharp-Client" Version="9.2.1" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+    <PackageReference Include="QuickFIXn.Core" Version="1.14.1" />
+    <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <!-- The FIX session and the FIX 4.4 dictionaries (the package one and the one with tag 5100) sit next to the executable. -->
+  <ItemGroup>
+    <None Update="acceptor.cfg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgQuickFIXn_FIX44)\DataDictionary\FIX44.xml" Link="FIX44.xml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Infrastructure\Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

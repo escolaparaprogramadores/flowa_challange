@@ -23,7 +23,7 @@ services:
   orderaccumulator:
     build:
       context: .
-      dockerfile: src/app-base-order-accumulator-webapi-ecs/Dockerfile
+      dockerfile: src/flowa.orderaccumulator-worker-ecs/Dockerfile
       args:
         SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
     # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
@@ -40,7 +40,7 @@ services:
   ordergenerator:
     build:
       context: .
-      dockerfile: src/app-base-order-generator-webapi-ecs/Dockerfile
+      dockerfile: src/flowa.ordergenerator-webapi-ecs/Dockerfile
       args:
         SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
     # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.

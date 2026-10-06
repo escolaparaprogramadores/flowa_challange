@@ -79,7 +79,7 @@ Depois o OrderAccumulator, num terminal (troque pela senha que você deu ao usu�
 export POSTGRES_PASSWORD=<senha do usuário flowa>
 ASPNETCORE_HTTP_PORTS=8081 Fix__AcceptorPort=9876 \
 ConnectionStrings__Flowa="Host=localhost;Port=5432;Database=flowa;Username=flowa;Password=$POSTGRES_PASSWORD" \
-dotnet run --no-launch-profile --project src/app-base-order-accumulator-webapi-ecs
+dotnet run --no-launch-profile --project src/flowa.orderaccumulator-worker-ecs
 ```
 
 E o OrderGenerator, em outro terminal:
@@ -87,7 +87,7 @@ E o OrderGenerator, em outro terminal:
 ```bash
 ASPNETCORE_HTTP_PORTS=8080 Fix__AcceptorHost=localhost Fix__AcceptorPort=9876 \
 OrderAccumulator__BaseUrl=http://localhost:8081 \
-dotnet run --no-launch-profile --project src/app-base-order-generator-webapi-ecs
+dotnet run --no-launch-profile --project src/flowa.ordergenerator-webapi-ecs
 ```
 
 A página abre em http://localhost:8080. O `--no-launch-profile` faz o app usar as portas das
@@ -109,7 +109,7 @@ conferem a ida e volta FIX entre os containers e a religação depois de recriar
 deles clona o repositório, então também precisa do `git`:
 
 ```bash
-dotnet test tests/Base.IntegrationTests/Base.IntegrationTests.csproj
+dotnet test tests/IntegrationTests/IntegrationTests.csproj
 ```
 
 Na tela, dentro de `frontend/`: `npm test` roda os testes de unidade. Para o teste de ponta a ponta,
@@ -127,11 +127,11 @@ isso, sem travar.
 a das vendas aceitas, então pode ficar negativa. Uma ordem só é aceita se a exposição depois dela
 ficar, em valor absoluto, até R$ 100.000.000,00. A borda exata é aceita: o enunciado fala em não passar
 do limite, e chegar a 100 milhões não passa. Um centavo acima é rejeitado. As duas bordas têm teste
-(`tests/app-base-order-accumulator-webapi-ecs.Tests/IntegrationTests/ExposureRulesTests.cs`).
+(`tests/flowa.orderaccumulator-worker-ecs.Tests/IntegrationTests/ExposureRulesTests.cs`).
 
 **Concorrência resolvida no banco.** A exposição só muda num `UPDATE` que testa o limite na própria
 cláusula `WHERE`
-(`src/app-base-order-accumulator-webapi-ecs/Infrastructure/Persistence/ExposureRepository.cs`). Se a ordem não couber,
+(`src/flowa.orderaccumulator-worker-ecs/Infrastructure/Persistence/ExposureRepository.cs`). Se a ordem não couber,
 nenhuma linha muda e ela é rejeitada. Como o PostgreSQL trava a linha durante o `UPDATE`, duas ordens
 ao mesmo tempo no mesmo ativo não conseguem passar juntas do limite. Isso não depende de lock em
 memória e continuaria valendo com mais de uma instância. Há um teste com 200 ordens simultâneas,
@@ -152,7 +152,7 @@ sempre em zero e o limite nunca barraria nada.
 
 **A regra de campo mora só no OrderAccumulator.** Símbolo, lado, quantidade e preço são validados pelo
 OrderAccumulator, no que chega pelo FIX
-(`src/app-base-order-accumulator-webapi-ecs/Domain/Orders/OrderFieldRule.cs`). Campo inválido volta como ordem rejeitada, com o motivo em
+(`src/flowa.orderaccumulator-worker-ecs/Domain/Orders/OrderFieldRule.cs`). Campo inválido volta como ordem rejeitada, com o motivo em
 português, igual a uma ordem rejeitada pelo limite. O que nem cabe numa ordem FIX (campo faltando, tipo
 errado, lado desconhecido) o OrderGenerator responde com erro 400, sem mandar nada. A tela mantém um
 aviso local que aparece antes do envio, só para avisar cedo: ele não é a proteção, e o OrderAccumulator
@@ -223,7 +223,7 @@ No OrderAccumulator as pastas `Orders` e `Exposures` têm o mesmo nome no Domain
 OrderGenerator só `Orders` tem Domain: a exposição ali é só repassada do OrderAccumulator, sem regra.
 
 ```
-src/app-base-order-accumulator-webapi-ecs/
+src/flowa.orderaccumulator-worker-ecs/
 ├─ Entrypoint/        rotas HTTP, sessão FIX (NewOrderSingleConsumer) e workers
 ├─ Application/
 │  ├─ Orders/
@@ -238,7 +238,7 @@ src/app-base-order-accumulator-webapi-ecs/
 ├─ Infrastructure/    Persistence, Fix, Metrics, Logging
 └─ Commons/
 
-src/app-base-order-generator-webapi-ecs/
+src/flowa.ordergenerator-webapi-ecs/
 ├─ Entrypoint/        rotas HTTP e a página
 ├─ Application/
 │  ├─ Orders/
@@ -270,7 +270,7 @@ fora. Nenhuma tarefa aceita conexão vinda da internet. Cada serviço roda uma c
 1 GB, que o app divide com o agente do Datadog, o banco é um `db.t3.micro` numa zona só, e o API
 Gateway aceita até 20 pedidos por segundo (rajada de 40); acima disso responde 429.
 
-**Como publica.** Os serviços, a rede, o banco, o ECR e os logs são criados pelo Terraform de `infra/`.
+**Como publica.** Os serviços, a rede, o banco, o ECR e os logs são criados pelo Terraform de `infra-aws/`.
 A role que a esteira assume e o bucket do state vêm de uma base Terraform separada, fora deste
 repositório. Nada é criado pelo console. Quando um PR que muda código é mesclado em `develop`, o
 workflow `.github/workflows/2-develop.yml` roda o CI no mesmo commit e, com ele verde, constrói só a
@@ -305,11 +305,11 @@ aparece como um rastro só, da tela até o OrderAccumulator: o OrderGenerator p�
 numa tag FIX própria da `NewOrderSingle`, a 5100 (`TraceParent`), e o OrderAccumulator continua o
 mesmo rastro (`Infrastructure/Fix/FixOrderTraceProvider.cs` em cada app). O OrderAccumulator conta
 `flowa.ordens.aceitas` e `flowa.ordens.rejeitadas` por ativo e lado, e publica `flowa.exposicao` por
-ativo (`src/app-base-order-accumulator-webapi-ecs/Infrastructure/Metrics/DatadogOrderMetricsAdapter.cs`). O ClOrdID não vira etiqueta, para o
+ativo (`src/flowa.orderaccumulator-worker-ecs/Infrastructure/Metrics/DatadogOrderMetricsAdapter.cs`). O ClOrdID não vira etiqueta, para o
 número de séries ficar pequeno.
 
 A esteira só põe o agente nas tasks quando o cofre do Datadog no Secrets Manager já tem a chave
-(`infra/datadog-agente.tf`, variável `datadog_ligado`). O painel de ordens e exposição nasceu no
+(`infra-aws/datadog-agente.tf`, variável `datadog_ligado`). O painel de ordens e exposição nasceu no
 Terraform de `observabilidade/datadog/`, aplicado pelo workflow
 `.github/workflows/2-develop-painel-datadog.yml`, com quatro gráficos. Depois ele foi ampliado direto no
 Datadog, e essa versão, a do print, ainda não voltou para o código: um novo apply desse workflow volta o
@@ -320,7 +320,7 @@ plano contratado, os três painéis param de receber dado novo depois disso.
 
 ### Teste de carga
 
-O k6 (`k6/carga-ordens.js`) manda cerca de 15 ordens por segundo durante 5 minutos, abaixo do limite
+O k6 (`performance testing/carga-ordens.js`) manda cerca de 15 ordens por segundo durante 5 minutos, abaixo do limite
 de 20 por segundo do API Gateway. Em PETR4, VALE3 e VIIA4 ele provoca três resultados:
 
 - **Aceitas:** pares de compra e venda do mesmo ativo, quantidade e preço, que se compensam.
@@ -345,6 +345,6 @@ Medição na máquina, contra o `docker compose` do commit 62979f4 (5 minutos, 4
 
 Para rodar no ambiente dev: em Actions, escolha o workflow `k6-carga.yml` e clique em "Run workflow".
 Só rode quando ninguém mais estiver mandando ordens para dev, senão a exposição não fecha. O resumo
-aparece na página do run e fica como anexo. Na máquina: `k6 run -e FLOWA_URL=http://localhost:8080 k6/carga-ordens.js`.
+aparece na página do run e fica como anexo. Na máquina: `k6 run -e FLOWA_URL=http://localhost:8080 "performance testing/carga-ordens.js"`.
 
 This is a challenge by [Coodesh](https://coodesh.com/)

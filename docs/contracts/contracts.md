@@ -281,7 +281,7 @@ basta publicar a porta `8080` do OrderGenerator; as outras podem ficar só na re
 
 ## 5. A página
 
-- O build do Vite (fatia da tela) sai em `src/app-base-order-generator-webapi-ecs/wwwroot/`. Essa pasta é gerada e fica
+- O build do Vite (fatia da tela) sai em `src/flowa.ordergenerator-webapi-ecs/wwwroot/`. Essa pasta é gerada e fica
   fora do Git.
 - O OrderGenerator serve essa pasta na raiz (`/`), com `index.html` como página padrão. Caminhos que
   começam com `/api` nunca caem no `index.html`.
