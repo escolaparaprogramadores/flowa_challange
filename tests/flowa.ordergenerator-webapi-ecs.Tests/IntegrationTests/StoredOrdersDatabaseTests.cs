@@ -181,8 +181,9 @@ public sealed class StoredOrdersDatabaseTests : IAsyncLifetime, IDisposable
     }
 
     // O-12 / decision 19: the delete runs in READ COMMITTED. An order decided while the delete waits on the exposure row
-    // is seen by the delete after it commits: at the end the exposure is zero and no order is left. In REPEATABLE READ
-    // the waiting UPDATE would fail with a serialization error and the delete would answer 500.
+    // is seen by the delete after it commits: at the end the exposure is zero and no order is left. The test only commits
+    // once the zeroing UPDATE is seen waiting on the row lock, so the two transactions really overlap; in REPEATABLE READ
+    // that waiting UPDATE would fail with a serialization error and the delete would answer 500.
     [Fact]
     public async Task Delete_waiting_on_an_order_being_decided_deletes_it_too_and_ends_with_zero_exposure()
     {
@@ -196,7 +197,7 @@ public sealed class StoredOrdersDatabaseTests : IAsyncLifetime, IDisposable
             transaction: decidingOrderTransaction);
 
         var ordersDeletionCall = orderGeneratorClient.DeleteAsync("/api/orders");
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        await OrderGeneratorTestHost.WaitUntilTestConditionHolds(() => IsExposureZeroingWaitingOnARowLock().GetAwaiter().GetResult());
         Assert.False(ordersDeletionCall.IsCompleted, "the delete did not wait for the exposure row being decided");
         await decidingOrderTransaction.CommitAsync();
         var ordersDeletionResponse = await ordersDeletionCall;
@@ -415,6 +416,13 @@ public sealed class StoredOrdersDatabaseTests : IAsyncLifetime, IDisposable
 
     private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> CreateOrderGeneratorFactoryOnTheTestDatabase() =>
         OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), _orderGeneratorPostgres.OrderDatabaseConnectionString);
+
+    private async Task<bool> IsExposureZeroingWaitingOnARowLock()
+    {
+        await using var lockObserverConnection = await _orderGeneratorPostgres.OrderDatabaseDataSource.OpenConnectionAsync();
+        return await lockObserverConnection.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'UPDATE exposures SET exposure = 0%'") == 1;
+    }
 
     private static StoredOrderTestRow AcceptedBuyOrder(int orderNumber) =>
         new($"cl-{orderNumber}", $"order-{orderNumber}", $"exec-{orderNumber}", "PETR4", "1", 100m, 10.5m, true, null,
