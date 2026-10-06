@@ -35,7 +35,7 @@ public sealed class ListOrdersUseCase
             }
 
             ordersListing.RecordOperationResult(OperationResults.Succeeded);
-            _logger.LogInformation("Stored orders page read.", new { RequestedPageNumber = requestedPageNumber });
+            _logger.LogInformation("Stored orders page read.");
             return storedOrdersPage;
         }
         catch (Exception ordersListingFailure)

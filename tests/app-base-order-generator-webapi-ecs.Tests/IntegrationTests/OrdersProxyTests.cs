@@ -258,6 +258,7 @@ public sealed class OrdersProxyTests : IDisposable
         Assert.DoesNotContain(crossSiteResponseHeaderNames, headerName => headerName.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase));
     }
 
+    private const string OrderGeneratorExceptionHandlerCategory = "Base.OrderGenerator.Entrypoint.ErrorHandling.OrderGeneratorExceptionHandler";
     private const string RequestReceivedInformationLine =
         "Information Base.OrderGenerator.Entrypoint.Logging.RequestReceivedLoggingMiddleware: Request received.";
     private const string HttpCallCompletedInformationLine = "Information Base.OrderGenerator.Commons.Http.HttpRequestClient: HTTP call completed.";
@@ -335,6 +336,33 @@ public sealed class OrdersProxyTests : IDisposable
         Assert.DoesNotContain(orderGeneratorLogCaptureProvider.CapturedLogLines, capturedLogLine =>
             (capturedLogLine.StartsWith($"{LogLevel.Warning} ") || capturedLogLine.StartsWith($"{LogLevel.Error} "))
             && !capturedLogLine.StartsWith($"{LogLevel.Warning} Microsoft.AspNetCore.StaticFiles."));
+    }
+
+    // Regression of the F4 architecture review (F-01): the new Information lines never copy what the caller typed in the path
+    // or in the page, so a huge URL cannot turn into a huge log line; the request line carries the route template, and an
+    // unknown /api path writes no request line (its 404 Warning, with the path in the ASP.NET request scope, is the one of c41ed4b).
+    [Fact]
+    public async Task Huge_path_and_page_typed_by_the_caller_do_not_reach_the_log_lines()
+    {
+        var hugePageNumber = new string('0', 6000) + "1";
+        var hugeUnknownApiPath = new string('x', 6000);
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(AnswerOrdersPageOrDeletion);
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        await using (var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl))
+        {
+            using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+            Assert.Equal(HttpStatusCode.OK, (await orderGeneratorClient.GetAsync($"/api/orders?page={hugePageNumber}")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await orderGeneratorClient.GetAsync($"/api/{hugeUnknownApiPath}")).StatusCode);
+        }
+
+        var requestReceivedLines = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.Message == "Request received.").ToList();
+        Assert.Equal(["/api/orders"], requestReceivedLines.Select(requestReceivedLine => requestReceivedLine.ReadLogField("Route")));
+        Assert.Null(Assert.Single(requestReceivedLines).ReadLogField("Path"));
+        Assert.DoesNotContain(stdoutJsonLogCapture.StdoutLines, stdoutLine => stdoutLine.Contains(hugePageNumber));
+        var linesWithTheHugePath = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.ReadLogField("RequestPath")?.Contains(hugeUnknownApiPath) == true).ToList();
+        Assert.Equal((OrderGeneratorExceptionHandlerCategory, "Warning", "Expected error in request."),
+            (Assert.Single(linesWithTheHugePath).Category, linesWithTheHugePath[0].LogLevel, linesWithTheHugePath[0].Message));
+        Assert.Equal(1, stdoutJsonLogCapture.StdoutLines.Count(stdoutLine => stdoutLine.Contains(hugeUnknownApiPath)));
     }
 
     private static async Task AnswerOrdersPageOrDeletion(HttpContext ordersHttpContext)

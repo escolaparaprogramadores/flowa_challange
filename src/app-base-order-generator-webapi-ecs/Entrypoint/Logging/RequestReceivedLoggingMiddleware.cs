@@ -1,4 +1,5 @@
 using Base.OrderGenerator.Commons.Logging;
+using Base.OrderGenerator.Entrypoint.ErrorHandling;
 
 namespace Base.OrderGenerator.Entrypoint.Logging;
 
@@ -19,9 +20,13 @@ public sealed class RequestReceivedLoggingMiddleware
     {
         ArgumentNullException.ThrowIfNull(httpContext);
 
-        if (httpContext.Request.Path.StartsWithSegments(ApiRoutesPrefix, StringComparison.OrdinalIgnoreCase))
-            _logger.LogInformation("Request received.", new { Method = httpContext.Request.Method, Path = httpContext.Request.Path.Value });
+        if (httpContext.Request.Path.StartsWithSegments(ApiRoutesPrefix, StringComparison.OrdinalIgnoreCase) && MatchedAKnownApiRoute(httpContext))
+            _logger.LogInformation("Request received.", new { Method = httpContext.Request.Method, Route = ApiProblemDetailsExtensions.ReadRouteTemplate(httpContext) });
 
         return _nextMiddleware(httpContext);
     }
+
+    private static bool MatchedAKnownApiRoute(HttpContext httpContext) =>
+        httpContext.GetEndpoint() is RouteEndpoint matchedRouteEndpoint
+        && !matchedRouteEndpoint.RoutePattern.Parameters.Any(routeParameter => routeParameter.IsCatchAll);
 }
