@@ -1,3 +1,4 @@
+using Base.OrderAccumulator.Domain.Orders.Enums;
 using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Application.Orders.Responses;
@@ -16,6 +17,7 @@ public sealed record DecideIncomingOrderResponse(
     bool IsRepeat)
 {
     public decimal LeavesQuantity { get; init; }
+    public OrderDecisionOutcome DecisionOutcome { get; init; }
 
     public static DecideIncomingOrderResponse MapFromOrderAnswer(OrderAnswer orderAnswer)
     {
@@ -27,7 +29,8 @@ public sealed record DecideIncomingOrderResponse(
             answeredOrder.Quantity, answeredOrder.Price, answeredOrder.Accepted, answeredOrder.RejectReason,
             answeredOrder.WasRejectedForInvalidFields(), orderAnswer.IsRepeat)
         {
-            LeavesQuantity = answeredOrder.CalculateLeavesQuantity()
+            LeavesQuantity = answeredOrder.CalculateLeavesQuantity(),
+            DecisionOutcome = answeredOrder.ClassifyOrderDecision()
         };
     }
 }

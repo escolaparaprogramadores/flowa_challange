@@ -1,5 +1,6 @@
 using Base.OrderAccumulator.Commons.Entities;
 using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Enums;
 using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Domain.Orders.Entities;
@@ -69,6 +70,14 @@ public sealed class Order : Entity, IAggregateRoot
 
     public bool WasRejectedForInvalidFields() =>
         !Accepted && OrderFieldPolicy.ValidateIncomingOrderFields(new IncomingOrder(ClOrdId, Symbol, Side, Quantity, Price)).ValidOrderFields is null;
+
+    public OrderDecisionOutcome ClassifyOrderDecision()
+    {
+        if (Accepted)
+            return OrderDecisionOutcome.Accepted;
+
+        return WasRejectedForInvalidFields() ? OrderDecisionOutcome.RejectedForInvalidFields : OrderDecisionOutcome.RejectedOverExposureLimit;
+    }
 
     public decimal CalculateLeavesQuantity() => Accepted ? Quantity : 0m;
 }

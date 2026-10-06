@@ -2,6 +2,7 @@ using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Application.Orders.UseCases;
 using Base.OrderAccumulator.Commons.Logging;
 using Base.OrderAccumulator.Commons.Responses;
+using Base.OrderAccumulator.Domain.Orders.Enums;
 using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.FIX44;
@@ -72,9 +73,9 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
     {
         if (orderDecision.IsRepeat)
             orderFixLogger.LogInformation("Repeated ClOrdID: sending the stored answer back.");
-        else if (orderDecision is { Accepted: false, RejectedForInvalidFields: true })
+        else if (orderDecision.DecisionOutcome == OrderDecisionOutcome.RejectedForInvalidFields)
             orderFixLogger.LogWarning("Order rejected: invalid fields.", new { ErrorCode = OrderRejectionErrorCodes.InvalidOrderFields });
-        else if (!orderDecision.Accepted)
+        else if (orderDecision.DecisionOutcome == OrderDecisionOutcome.RejectedOverExposureLimit)
             orderFixLogger.LogWarning("Order rejected: exposure limit exceeded.", new { ErrorCode = OrderRejectionErrorCodes.ExposureLimitExceeded });
     }
 
