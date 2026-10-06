@@ -1,5 +1,6 @@
-using Base.OrderGenerator.Domain.Orders;
-using Base.OrderGenerator.Entrypoint;
+using Base.OrderGenerator.Domain.Orders.Enums;
+using Base.OrderGenerator.Domain.Orders.ValueObjects;
+using Base.OrderGenerator.Entrypoint.Orders.Requests;
 
 namespace Base.OrderGenerator.Tests;
 

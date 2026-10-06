@@ -1,11 +1,10 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
-using Base.OrderGenerator.Commons;
+using Base.OrderGenerator.Commons.Logging;
 using QuickFix.Logger;
 
 namespace Base.OrderGenerator.Infrastructure.Fix;
 
-// One JSON line per FIX message, with SOH shown as "|". Heartbeats (35=0) are not logged (decision 22).
 public sealed class FixSessionLog(IApplicationLogger<FixSessionLog> fixSessionLogger, string? fixSessionId) : ILog
 {
     private const char FixFieldSeparator = '\u0001';
@@ -36,8 +35,6 @@ public sealed class FixSessionLog(IApplicationLogger<FixSessionLog> fixSessionLo
         });
     }
 
-    // A message read by the QuickFIX thread is logged outside any span, so the framework adds no TraceId.
-    // An order message carries its trace id anyway: the ClOrdID (tag 11) is the trace id (decision 21).
     private static string? ReadOrderTraceIdOutsideSpan(string fixMessage)
     {
         if (Activity.Current is not null)
