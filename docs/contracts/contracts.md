@@ -93,6 +93,10 @@ Pedido:
 - O servidor lê `quantity` e `price` como texto cru (número ou string JSON) e confere o formato desse
   texto. Assim, `"abc"` na quantidade volta com a mensagem certa, e não com um erro genérico do
   framework. `1.5` na quantidade cabe no FIX: vai para o OrderAccumulator, que a rejeita.
+- O serviço da tela tem um modo de teste (`mode: 'test'` em `frontend/src/services/ordersService.ts`): nele
+  `symbol`, `quantity` e `price` vão como texto JSON, do jeito que foram digitados, só com a vírgula decimal
+  trocada por ponto (`"1,5"` vira `"1.5"`). Quem confere o formato é o servidor, como acima. Fora do modo de
+  teste, `quantity` e `price` vão como número.
 - O `ClOrdID` é gerado pelo OrderGenerator: é o trace id de 128 bits do rastro do pedido (32 caracteres
   hexadecimais). Sem tracer ligado, é um identificador aleatório de 32 caracteres. A tela não manda.
 
