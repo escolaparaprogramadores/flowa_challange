@@ -129,6 +129,20 @@ test('CA-1 (F5): typing 9999999 leaves the quantity at 99999, and the + is disab
   await expect(quantityField).toHaveValue('99999');
 });
 
+// Theme colors (base-theme.css --color-text and --color-border-strong) as the browser returns them.
+const STEP_TEXT_COLOR = 'rgb(232, 239, 238)';
+const DISABLED_STEP_TEXT_COLOR = 'rgb(46, 75, 80)';
+
+test('CA-1 (F5): the disabled + looks dimmed, with the not-allowed cursor, and the enabled one keeps the usual color', async ({ page }) => {
+  const increaseQuantityButton = page.getByRole('button', { name: 'Aumentar quantidade' });
+  await page.mouse.move(0, 0);
+  await expect.poll(async () => increaseQuantityButton.evaluate((buttonOnPage) => getComputedStyle(buttonOnPage).color)).toBe(STEP_TEXT_COLOR);
+  await page.getByLabel(/^Quantidade de/).fill('99999');
+  await expect(increaseQuantityButton).toBeDisabled();
+  await expect.poll(async () => increaseQuantityButton.evaluate((buttonOnPage) => ({ color: getComputedStyle(buttonOnPage).color, cursor: getComputedStyle(buttonOnPage).cursor })))
+    .toEqual({ color: DISABLED_STEP_TEXT_COLOR, cursor: 'not-allowed' });
+});
+
 test('CA-1 (F5): below 99999 the + stays enabled, and reaching 99999 with it disables it', async ({ page }) => {
   const increaseQuantityButton = page.getByRole('button', { name: 'Aumentar quantidade' });
   await page.getByLabel(/^Quantidade de/).fill('99998');

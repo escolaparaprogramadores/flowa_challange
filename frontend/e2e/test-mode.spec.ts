@@ -6,7 +6,6 @@ const SYMBOLS_IN_ORDER = ['PETR4', 'VALE3', 'VIIA4'];
 // Theme warning yellow (base-theme.css --color-warning-text / --color-warning-background) as the browser returns them.
 const WARNING_TEXT_COLOR = 'rgb(244, 197, 106)';
 const WARNING_BACKGROUND_COLOR = 'rgba(242, 184, 75, 0.14)';
-const CARD_COLOR = 'rgb(14, 27, 30)';
 const YELLOW_FOCUS_RING = 'rgba(242, 184, 75, 0.22) 0px 0px 0px 3px';
 
 // After every send the screen reads exposure and list page 1 again (useOrdersAndExposures.ts): wait for both,
@@ -56,9 +55,9 @@ function readRgbaChannels(cssColor: string) {
 }
 
 // A translucent background is seen over the card: blend it before measuring the contrast.
-function blendOverCard(translucentColor: string) {
+function blendOverCard(translucentColor: string, cardColor: string) {
   const translucentChannels = readRgbaChannels(translucentColor);
-  const cardChannels = readRgbaChannels(CARD_COLOR);
+  const cardChannels = readRgbaChannels(cardColor);
   const blendChannel = (topChannel: number, cardChannel: number) => Math.round(topChannel * translucentChannels.alphaChannel + cardChannel * (1 - translucentChannels.alphaChannel));
   return `rgb(${blendChannel(translucentChannels.redChannel, cardChannels.redChannel)}, ${blendChannel(translucentChannels.greenChannel, cardChannels.greenChannel)}, ${blendChannel(translucentChannels.blueChannel, cardChannels.blueChannel)})`;
 }
@@ -125,12 +124,13 @@ test('CA-7: the badge sits beside "Nova ordem" and the notice right below, both 
   expect(noticeBox.y).toBeGreaterThanOrEqual(titleBox.y + titleBox.height);
   expect(noticeBox.y).toBeLessThan((await locateOrderTicketForm(page).getByRole('group', { name: 'Lado da ordem' }).boundingBox())!.y);
 
+  const cardColor = (await readComputedStyle(locateOrderTicketForm(page), ['background-color']))['background-color'];
   const badgeStyle = await readComputedStyle(locateTestModeBadge(page), ['color', 'background-color']);
   expect(badgeStyle).toEqual({ color: WARNING_TEXT_COLOR, 'background-color': WARNING_BACKGROUND_COLOR });
-  expect(calculateWcagContrast(badgeStyle.color, blendOverCard(badgeStyle['background-color']))).toBeGreaterThanOrEqual(4.5);
+  expect(calculateWcagContrast(badgeStyle.color, blendOverCard(badgeStyle['background-color'], cardColor))).toBeGreaterThanOrEqual(4.5);
   const noticeColor = (await readComputedStyle(locateTestModeNotice(page), ['color'])).color;
   expect(noticeColor).toBe(WARNING_TEXT_COLOR);
-  expect(calculateWcagContrast(noticeColor, CARD_COLOR)).toBeGreaterThanOrEqual(4.5);
+  expect(calculateWcagContrast(noticeColor, cardColor)).toBeGreaterThanOrEqual(4.5);
 });
 
 test('CA-7: the test mode symbol field has a yellow border and a yellow ring on keyboard focus', async ({ page }) => {
@@ -167,15 +167,49 @@ test('CA-7: in test mode symbol, quantity and price take any text, and the summa
 });
 
 test('CA-7: double click on the symbol field turns the test mode off and brings back the buttons and the CA-1/CA-2 rules', async ({ page }) => {
+  await locateOrderTicketForm(page).getByLabel(/^Quantidade de/).fill('250');
+  await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill('12,34');
   await locateSymbolButton(page, 'VIIA4').dblclick();
+  await expect(locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true })).toHaveValue('250');
+  await expect(locateOrderTicketForm(page).getByLabel('Preço por ação (R$)')).toHaveValue('12,34');
   await locateTestModeSymbolField(page).fill('ITUB4');
   await locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true }).fill('1,5');
   await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill('10,005');
   await locateTestModeSymbolField(page).dblclick();
   await expectNormalModeScreen(page);
-  await expect(locateOrderTicketForm(page).getByLabel(/^Quantidade de/)).toHaveValue('100');
-  await expect(locateOrderTicketForm(page).getByLabel('Preço por ação (R$)')).toHaveValue('0,00');
+  await expect(locateSymbolButton(page, 'VIIA4')).toHaveAttribute('aria-pressed', 'true');
+  await expect(locateOrderTicketForm(page).getByLabel(/^Quantidade de/)).toHaveValue('250');
+  await expect(locateOrderTicketForm(page).getByLabel('Preço por ação (R$)')).toHaveValue('12,34');
   await expectNormalModeFieldRules(page);
+});
+
+const testModeQuantitySteps: Array<{ quantityTextBefore: string; buttonName: string; expectedQuantityText: string }> = [
+  { quantityTextBefore: '7', buttonName: 'Aumentar quantidade', expectedQuantityText: '8' },
+  { quantityTextBefore: '7', buttonName: 'Diminuir quantidade', expectedQuantityText: '6' },
+  { quantityTextBefore: '99999', buttonName: 'Aumentar quantidade', expectedQuantityText: '100000' },
+  { quantityTextBefore: '0', buttonName: 'Diminuir quantidade', expectedQuantityText: '-1' },
+  { quantityTextBefore: '1,5', buttonName: 'Aumentar quantidade', expectedQuantityText: '1' },
+  { quantityTextBefore: 'abc', buttonName: 'Diminuir quantidade', expectedQuantityText: '-1' },
+];
+
+for (const { quantityTextBefore, buttonName, expectedQuantityText } of testModeQuantitySteps) {
+  test(`CA-7 (ASSUMI-05): in test mode, with "${quantityTextBefore}", "${buttonName}" leads to ${expectedQuantityText}, with no range limit`, async ({ page }) => {
+    await locateSymbolButton(page, 'PETR4').dblclick();
+    const testModeQuantityField = locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true });
+    await testModeQuantityField.fill(quantityTextBefore);
+    await locateOrderTicketForm(page).getByRole('button', { name: buttonName }).click();
+    await expect(testModeQuantityField).toHaveValue(expectedQuantityText);
+  });
+}
+
+test('CA-7: turning the test mode on clears the field errors of the normal mode', async ({ page }) => {
+  await locateOrderTicketForm(page).getByLabel(/^Quantidade de/).fill('');
+  await locateOrderTicketForm(page).getByRole('button', { name: 'Enviar ordem de compra' }).click();
+  await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveText(['Informe a quantidade.', 'O preço deve ser maior que zero.']);
+  await locateSymbolButton(page, 'PETR4').dblclick();
+  await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveCount(0);
+  await expect(locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true })).not.toHaveAttribute('aria-invalid');
+  await expect(locateOrderTicketForm(page).getByLabel('Preço por ação (R$)')).not.toHaveAttribute('aria-invalid');
 });
 
 test('CA-25: reloading with the test mode on brings back the normal screen, and nothing is kept between reloads', async ({ page }) => {
