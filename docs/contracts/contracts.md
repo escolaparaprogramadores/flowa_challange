@@ -251,8 +251,13 @@ campos como obrigatórios. O motivo da rejeição em `58`:
 - `ClOrdID` repetido com outro símbolo, lado, quantidade ou preço:
   `Ordem rejeitada: o ClOrdID <id> já foi usado com outros dados.`, com `103=6`.
 
-Na falha interna, no prazo e no `ClOrdID` repetido com outros dados, nada é gravado: `37` e `17` são
-novos, `11`, `55` e `54` repetem o que chegou, e a ordem original (se houver) não muda.
+Nessas três respostas, `37` e `17` são novos, e `11`, `55` e `54` repetem o que chegou. Na falha interna
+e no `ClOrdID` repetido com outros dados, nada é gravado e a ordem original (se houver) não muda.
+
+No prazo há uma exceção. Se o `COMMIT` já tinha sido enviado ao banco quando o prazo venceu, ele termina:
+a ordem respondida `Rejected` pode ficar gravada como aceita e contar na exposição. O OrderAccumulator
+registra esse caso num log Error com `ErrorCode` `order_accepted_after_the_deadline`. Por isso, uma ordem
+rejeitada pelo prazo pode ter entrado: confira a lista antes de enviar de novo.
 
 Ordem repetida com os mesmos dados (mesmo `ClOrdID`, símbolo, lado, quantidade e preço): o
 OrderAccumulator devolve o `ExecutionReport` original que gravou (mesmos `37`, `17`, `150`, `39`, `58`)
