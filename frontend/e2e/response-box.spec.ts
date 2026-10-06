@@ -136,9 +136,14 @@ test('P02-10: the box shows the answer of the POST without waiting for the list 
   await page.goto('/');
   await deleteAllOrdersOnServer(page);
   await page.reload();
-  // The real reads of list and exposure after the send are held for 4 s, as a slow database would hold them.
+  // The opening reads must be over before the hold starts, or they would be held too (F-07).
+  await expect(page.getByTestId('lista-de-ordens-vazia')).toBeVisible();
+  await expect(page.getByTestId('exposicao-VALE3').getByTestId('exposicao-atual')).toHaveText('R$ 0,00');
+  // Only the real reads of list and exposure that start after the click are held for 4 s, as a slow database would hold them.
+  let hasClickedSend = false;
   let heldReadsStillPending = 0;
   const holdReadAfterSend = async (heldReadRoute: Route) => {
+    if (!hasClickedSend) return heldReadRoute.continue();
     heldReadsStillPending += 1;
     await new Promise((releaseHeldRead) => setTimeout(releaseHeldRead, 4_000));
     heldReadsStillPending -= 1;
@@ -153,6 +158,7 @@ test('P02-10: the box shows the answer of the POST without waiting for the list 
   await page.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'VALE3', exact: true }).click();
   await page.getByLabel(/^Quantidade de/).fill('3');
   await page.getByLabel('Preço por ação (R$)').fill('3,33');
+  hasClickedSend = true;
   await page.getByRole('button', { name: /^Enviar ordem/ }).click();
   expect((await createOrderResponse).status()).toBe(200);
 
