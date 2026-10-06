@@ -215,6 +215,8 @@ test('CA-7: turning the test mode on clears the field errors of the normal mode'
 test('CA-25: reloading with the test mode on brings back the normal screen, and nothing is kept between reloads', async ({ page }) => {
   await locateSymbolButton(page, 'PETR4').dblclick();
   await expect(locateTestModeBadge(page)).toBeVisible();
+  // The opening reads (exposure and list) must finish first: a reload would cut them off.
+  await page.waitForLoadState('networkidle');
   await page.reload();
   await expectNormalModeScreen(page);
   await expectNormalModeFieldRules(page);
