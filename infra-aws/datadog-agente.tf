@@ -27,14 +27,16 @@ locals {
   memoria_da_task_flowa = var.datadog_ligado ? 1024 : 512
 
   nome_no_datadog_por_servico_flowa = {
-    generator   = "order-generator"
-    accumulator = "order-accumulator"
+    generator       = "order-generator"
+    accumulator     = "order-accumulator"
+    datadog_metrics = "datadog-metrics"
   }
 
   # A versão de cada serviço é a tag da imagem dele, a mesma que o /version devolve (D-05).
   versao_no_datadog_por_servico_flowa = {
-    generator   = var.generator_image_tag
-    accumulator = var.accumulator_image_tag
+    generator       = var.generator_image_tag
+    accumulator     = var.accumulator_image_tag
+    datadog_metrics = var.datadog_metrics_image_tag
   }
 
   # O tracer acha o agente em localhost:8126 e as métricas vão para localhost:8125 (UDP), os padrões

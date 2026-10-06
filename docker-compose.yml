@@ -61,5 +61,23 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  # Manda ao Datadog, a cada 5 minutos, a exposição e a contagem de ordens que lê no banco. Sem porta e sem
+  # checagem de saúde (decisão 20); sem agente do Datadog aqui, o envio por UDP só não chega a lugar nenhum.
+  datadogmetrics:
+    build:
+      context: .
+      dockerfile: src/flowa.datadog-metrics-worker-ecs/Dockerfile
+      args:
+        SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
+    # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
+    pull_policy: build
+    environment:
+      ConnectionStrings__Flowa: "Host=postgres;Port=5432;Database=flowa;Username=flowa;Password=${POSTGRES_PASSWORD:-flowa_dev}"
+      Database__MaximumPoolSize: "2"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
