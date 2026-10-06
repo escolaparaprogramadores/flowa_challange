@@ -4,23 +4,28 @@ import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/servic
 
 // CA-11 and CA-27 against the real stack: the OrderGenerator waits only Fix__ExecutionReportTimeoutSeconds (2 s in the
 // scenario override) and the database is paused for E2E_DB_PAUSE_MS at the click, so the POST answers 503 and the
-// order enters later. It needs the Postgres container of the stack under test, so it only runs where that name is given.
+// order enters later. It needs the Postgres container of the stack under test, so it has its own config
+// (playwright.slow-answer.config.ts) and stays out of the default run.
 
-const POSTGRES_CONTAINER = process.env.E2E_POSTGRES_CONTAINER;
+function readPostgresContainerName() {
+  const postgresContainerName = process.env.E2E_POSTGRES_CONTAINER;
+  if (!postgresContainerName) throw new Error('E2E_POSTGRES_CONTAINER is required: the scenario pauses the database of the stack under test');
+  return postgresContainerName;
+}
+
+const POSTGRES_CONTAINER = readPostgresContainerName();
 const DATABASE_PAUSE_IN_MS = Number(process.env.E2E_DB_PAUSE_MS ?? 3_000);
 const SCREENSHOT_FOLDER = process.env.E2E_PROVAS_DIR;
 const MAYBE_ACCEPTED_MESSAGE = 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.';
 const brazilianReaisFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-test.skip(!POSTGRES_CONTAINER, 'needs E2E_POSTGRES_CONTAINER: the scenario pauses the database of the stack under test');
-
 function isDatabasePaused() {
-  return execFileSync('docker', ['inspect', '-f', '{{.State.Paused}}', POSTGRES_CONTAINER!]).toString().trim() === 'true';
+  return execFileSync('docker', ['inspect', '-f', '{{.State.Paused}}', POSTGRES_CONTAINER]).toString().trim() === 'true';
 }
 
 // A failed assertion must never leave the database of the stack paused.
 test.afterEach(() => {
-  if (POSTGRES_CONTAINER && isDatabasePaused()) execFileSync('docker', ['unpause', POSTGRES_CONTAINER]);
+  if (isDatabasePaused()) execFileSync('docker', ['unpause', POSTGRES_CONTAINER]);
 });
 
 type ScreenRead = { route: string; startedAtInMs: number };
@@ -52,11 +57,11 @@ test('CA-11 and CA-27: a late answer (503) shows the warning, rereads list and e
     (httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE,
   );
   // The pause starts right before the click, so the order is surely held by the database and not decided before it.
-  execFileSync('docker', ['pause', POSTGRES_CONTAINER!]);
+  execFileSync('docker', ['pause', POSTGRES_CONTAINER]);
   await page.getByRole('button', { name: /^Enviar ordem/ }).click();
   const databaseResume = new Promise<void>((resumeDone) =>
     setTimeout(() => {
-      execFileSync('docker', ['unpause', POSTGRES_CONTAINER!]);
+      execFileSync('docker', ['unpause', POSTGRES_CONTAINER]);
       resumeDone();
     }, DATABASE_PAUSE_IN_MS),
   );
