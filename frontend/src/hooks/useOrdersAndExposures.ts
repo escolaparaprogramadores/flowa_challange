@@ -10,6 +10,7 @@ import {
   type OrderToSend,
   type SymbolExposure,
 } from '../services/ordersService';
+import { isSentOrderOnListPage, startSentOrderRecheckCycle } from '../services/sentOrderRecheckCycle';
 
 export type ExposuresState =
   | { status: 'loading' }
@@ -20,8 +21,6 @@ export type OrderListState =
   | { status: 'loading' }
   | { status: 'error'; errorMessage: string }
   | { status: 'ready'; orderListPage: OrderListPage };
-
-export type OrderSendFailure = Extract<OrderSendResult, { outcome: 'invalid' | 'communication-failure' }>;
 
 // Another tab may have deleted orders: a page beyond the last one comes back empty with the real total,
 // and then the screen asks for the last page that still exists instead of showing the list as empty.
@@ -42,10 +41,12 @@ export function useOrdersAndExposures() {
   const [exposuresState, setExposuresState] = useState<ExposuresState>({ status: 'loading' });
   const [orderListState, setOrderListState] = useState<OrderListState>({ status: 'loading' });
   const [isSendingOrder, setIsSendingOrder] = useState(false);
-  const [lastSendFailure, setLastSendFailure] = useState<OrderSendFailure>();
+  const [lastSendResult, setLastSendResult] = useState<OrderSendResult>();
   const [orderListPageBeingLoaded, setOrderListPageBeingLoaded] = useState<number>();
   const latestExposuresReadNumber = useRef(0);
   const latestOrderListReadNumber = useRef(0);
+  const latestOrderSendNumber = useRef(0);
+  const cancelRunningRecheckCycle = useRef<() => void>(undefined);
 
   // Two reads may be open at the same time; only the latest requested one may change the panel,
   // otherwise an old and slow answer would erase the exposure already refreshed after a send.
@@ -64,9 +65,10 @@ export function useOrdersAndExposures() {
     const thisReadNumber = ++latestOrderListReadNumber.current;
     setOrderListPageBeingLoaded(requestedPage);
     const readOrderListState = await readOrderListPage(requestedPage);
-    if (thisReadNumber !== latestOrderListReadNumber.current) return;
+    if (thisReadNumber !== latestOrderListReadNumber.current) return undefined;
     setOrderListState(readOrderListState);
     setOrderListPageBeingLoaded(undefined);
+    return readOrderListState;
   }, []);
 
   useEffect(() => {
@@ -74,18 +76,48 @@ export function useOrdersAndExposures() {
     void loadOrderListPage(1);
   }, [refreshExposures, loadOrderListPage]);
 
+  // Leaving the screen ends the recheck cycle: no read is left running for a screen nobody sees.
+  useEffect(
+    () => () => {
+      latestOrderSendNumber.current += 1;
+      cancelRunningRecheckCycle.current?.();
+    },
+    [],
+  );
+
+  // Exposure and list always come from the server: the screen never sums or builds a row on its own.
+  // The new order is the most recent one, so the list goes back to page 1, where it shows at the top.
+  async function refreshExposuresAndFirstOrderListPage() {
+    const [, firstPageState] = await Promise.all([refreshExposures(), loadOrderListPage(1)]);
+    return firstPageState?.status === 'ready' ? firstPageState.orderListPage : undefined;
+  }
+
   async function sendOrderAndRefresh(orderToSend: OrderToSend) {
+    // One cycle per send: a new send cancels the rechecks of the previous one.
+    const thisOrderSendNumber = ++latestOrderSendNumber.current;
+    cancelRunningRecheckCycle.current?.();
+    cancelRunningRecheckCycle.current = undefined;
+    const clOrdIdsBeforeSend = new Set(
+      orderListState.status === 'ready' ? orderListState.orderListPage.orders.map((listedOrder) => listedOrder.clOrdId) : [],
+    );
     setIsSendingOrder(true);
-    setLastSendFailure(undefined);
+    setLastSendResult(undefined);
+    let orderSendResult: OrderSendResult;
     try {
-      const orderSendResult = await sendOrder(orderToSend);
-      if (orderSendResult.outcome === 'invalid' || orderSendResult.outcome === 'communication-failure') setLastSendFailure(orderSendResult);
+      orderSendResult = await sendOrder(orderToSend);
+      setLastSendResult(orderSendResult);
     } finally {
       setIsSendingOrder(false);
     }
-    // Exposure and list always come from the server: the screen never sums or builds a row on its own.
-    // The new order is the most recent one, so the list goes back to page 1, where it shows at the top.
-    await Promise.all([refreshExposures(), loadOrderListPage(1)]);
+    const firstOrderListPage = await refreshExposuresAndFirstOrderListPage();
+
+    // Without an answer in time the order may have entered: the screen rereads by itself, with a ceiling, until it shows up.
+    if (orderSendResult.outcome !== 'maybe-accepted' || thisOrderSendNumber !== latestOrderSendNumber.current) return;
+    const { attemptedOrder } = orderSendResult;
+    if (isSentOrderOnListPage(firstOrderListPage, attemptedOrder, clOrdIdsBeforeSend)) return;
+    cancelRunningRecheckCycle.current = startSentOrderRecheckCycle(async () =>
+      isSentOrderOnListPage(await refreshExposuresAndFirstOrderListPage(), attemptedOrder, clOrdIdsBeforeSend),
+    );
   }
 
   async function deleteAllOrdersAndRefresh() {
@@ -105,7 +137,7 @@ export function useOrdersAndExposures() {
     exposuresState,
     orderListState,
     isSendingOrder,
-    lastSendFailure,
+    lastSendResult,
     orderListPageBeingLoaded,
     loadOrderListPage,
     sendOrderAndRefresh,

@@ -3,7 +3,6 @@
   --letter-spacing-table-header: 0.06em;
   --space-badge-horizontal: 11px;
   --space-0-5: 2px;
-  --size-banner-icon: 18px;
   --size-empty-list-icon: 32px;
   --max-width-empty-list-text: 360px;
 }
@@ -30,20 +29,27 @@
 .order-badge-rejected { background: var(--color-danger-background); color: var(--color-danger-text); }
 .order-badge-sending { background: var(--color-warning-background); color: var(--color-warning-text); }
 
-.send-failure-banner {
+/* Answer of the last send (maquete-01): status pill on the left, the order in bold and the reason below it. */
+.order-response-box {
+  --response-box-text: var(--color-danger-text);
+  --response-box-background: var(--color-danger-background);
   display: flex;
-  gap: var(--space-3);
-  padding: var(--space-3-5) var(--space-4);
-  border: 1px solid var(--color-danger-text);
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--response-box-text);
   border-radius: var(--radius-tab);
-  background: var(--color-danger-background);
-  color: var(--color-danger-text);
+  background: var(--response-box-background);
 }
-.send-failure-banner-icon { flex: none; width: var(--size-banner-icon); height: var(--size-banner-icon); margin-top: var(--space-0-5); }
-.send-failure-banner-title { margin: 0; font-weight: 800; font-size: var(--font-size-body-small); }
-.send-failure-banner-message,
-.send-failure-banner-errors { margin: var(--space-1) 0 0; font-size: var(--font-size-body-small); line-height: 1.6; color: var(--color-text-secondary); }
-.send-failure-banner-errors { padding-left: var(--space-5); }
+.order-response-box-accepted { --response-box-text: var(--color-success-text); --response-box-background: var(--color-success-background); }
+.order-response-box-maybe-accepted { --response-box-text: var(--color-warning-text); --response-box-background: var(--color-warning-background); }
+.order-response-box-badge { flex: none; background: var(--response-box-background); color: var(--response-box-text); }
+.order-response-box-body { flex: 1 1 16rem; min-width: 0; }
+.order-response-box-order { margin: 0; font-weight: 800; font-size: var(--font-size-body-small); color: var(--color-text); overflow-wrap: anywhere; }
+.order-response-box-message,
+.order-response-box-errors { margin: var(--space-1) 0 0; font-size: var(--font-size-body-small); line-height: 1.6; color: var(--color-text-secondary); }
+.order-response-box-errors { padding-left: var(--space-5); }
 
 .empty-order-list {
   display: flex;
