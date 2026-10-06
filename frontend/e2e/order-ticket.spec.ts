@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
-import { CREATE_ORDER_ROUTE } from '../src/services/ordersService';
+import { expect, test, type Locator, type Page, type Response } from '@playwright/test';
+import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/services/ordersService';
 
 // BRIEF colors (CA-23, CA-24) as the browser returns them in the computed style.
 const TRACK_COLOR = 'rgb(11, 23, 25)';
@@ -16,6 +16,16 @@ const GREEN_FOCUS_RING = 'rgba(79, 227, 176, 0.22) 0px 0px 0px 3px';
 // Path of ShieldIcon (Icons.tsx): ties the disclaimer to the shield and not to any icon.
 const SHIELD_PATH = 'M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z';
 const SYMBOLS_IN_ORDER = ['PETR4', 'VALE3', 'VIIA4'];
+
+// After every send the screen reads exposure and list page 1 again (useOrdersAndExposures.ts): wait for both,
+// so the test ends with every request it caused already answered.
+function waitForRereadAfterSend(orderTicketPage: Page) {
+  const isRead = (httpResponse: Response, readPath: string) => httpResponse.request().method() === 'GET' && new URL(httpResponse.url()).pathname === readPath;
+  return Promise.all([
+    orderTicketPage.waitForResponse((httpResponse) => isRead(httpResponse, EXPOSURES_ROUTE)),
+    orderTicketPage.waitForResponse((httpResponse) => isRead(httpResponse, ORDERS_ROUTE)),
+  ]);
+}
 
 function locateOrderTicketForm(orderTicketPage: Page) {
   return orderTicketPage.getByRole('form', { name: 'Boleta de ordem' });
@@ -103,6 +113,7 @@ test('CA-23: clicking VIIA4 changes the label and the order goes out with VIIA4'
   await expectSelectedSymbolButton(page, 'VIIA4');
   await locateOrderTicketForm(page).getByLabel(/^Quantidade de/).fill('1');
   await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill('1,00');
+  const rereadAfterSend = waitForRereadAfterSend(page);
   const createOrderRequest = page.waitForRequest((httpRequest) => httpRequest.method() === 'POST' && new URL(httpRequest.url()).pathname === CREATE_ORDER_ROUTE);
   const createOrderResponse = page.waitForResponse((httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE);
   await locateOrderTicketForm(page).getByRole('button', { name: 'Enviar ordem de compra' }).click();
@@ -110,6 +121,7 @@ test('CA-23: clicking VIIA4 changes the label and the order goes out with VIIA4'
   const serverResponse = await createOrderResponse;
   expect(serverResponse.status()).toBe(200);
   expect((await serverResponse.json()).data.symbol).toBe('VIIA4');
+  await rereadAfterSend;
 });
 
 test('CA-23/CA-27: with the keyboard, Tab reaches the symbols, Enter and Space select, and the focus shows', async ({ page }) => {

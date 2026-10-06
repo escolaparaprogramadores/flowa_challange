@@ -1,5 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
-import { CREATE_ORDER_ROUTE } from '../src/services/ordersService';
+import { expect, test, type Locator, type Page, type Response } from '@playwright/test';
+import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/services/ordersService';
 
 const TEST_MODE_NOTICE = 'Modo de teste: a tela não confere os campos e envia como está. Duplo clique no símbolo para sair.';
 const SYMBOLS_IN_ORDER = ['PETR4', 'VALE3', 'VIIA4'];
@@ -8,6 +8,16 @@ const WARNING_TEXT_COLOR = 'rgb(244, 197, 106)';
 const WARNING_BACKGROUND_COLOR = 'rgba(242, 184, 75, 0.14)';
 const CARD_COLOR = 'rgb(14, 27, 30)';
 const YELLOW_FOCUS_RING = 'rgba(242, 184, 75, 0.22) 0px 0px 0px 3px';
+
+// After every send the screen reads exposure and list page 1 again (useOrdersAndExposures.ts): wait for both,
+// so the test ends with every request it caused already answered.
+function waitForRereadAfterSend(orderTicketPage: Page) {
+  const isRead = (httpResponse: Response, readPath: string) => httpResponse.request().method() === 'GET' && new URL(httpResponse.url()).pathname === readPath;
+  return Promise.all([
+    orderTicketPage.waitForResponse((httpResponse) => isRead(httpResponse, EXPOSURES_ROUTE)),
+    orderTicketPage.waitForResponse((httpResponse) => isRead(httpResponse, ORDERS_ROUTE)),
+  ]);
+}
 
 function locateOrderTicketForm(orderTicketPage: Page) {
   return orderTicketPage.getByRole('form', { name: 'Boleta de ordem' });
@@ -183,20 +193,24 @@ test('CA-26: in test mode the screen blocks nothing and the request leaves with 
   await locateTestModeSymbolField(page).fill('ITUB4');
   await locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true }).fill('1,5');
   await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill('10,005');
+  const rereadAfterSend = waitForRereadAfterSend(page);
   const createOrderRequest = page.waitForRequest((httpRequest) => httpRequest.method() === 'POST' && new URL(httpRequest.url()).pathname === CREATE_ORDER_ROUTE);
   await locateOrderTicketForm(page).getByRole('button', { name: 'Enviar ordem de compra' }).click();
   expect((await createOrderRequest).postDataJSON()).toEqual({ symbol: 'ITUB4', side: 'buy', quantity: '1.5', price: '10.005' });
   await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveCount(0);
+  await rereadAfterSend;
 });
 
 test('CA-26: in test mode a quantity that is not a number still leaves the screen as typed', async ({ page }) => {
   await locateSymbolButton(page, 'VALE3').dblclick();
   await locateOrderTicketForm(page).getByLabel('Quantidade', { exact: true }).fill('abc');
   await locateOrderTicketForm(page).getByLabel('Preço por ação (R$)').fill('10,00');
+  const rereadAfterSend = waitForRereadAfterSend(page);
   const createOrderRequest = page.waitForRequest((httpRequest) => httpRequest.method() === 'POST' && new URL(httpRequest.url()).pathname === CREATE_ORDER_ROUTE);
   const createOrderResponse = page.waitForResponse((httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE);
   await locateOrderTicketForm(page).getByRole('button', { name: 'Enviar ordem de compra' }).click();
   expect((await createOrderRequest).postDataJSON()).toEqual({ symbol: 'VALE3', side: 'buy', quantity: 'abc', price: '10.00' });
   expect((await createOrderResponse).status()).toBe(400);
   await expect(locateOrderTicketForm(page).getByRole('alert')).toHaveCount(0);
+  await rereadAfterSend;
 });
