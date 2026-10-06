@@ -185,7 +185,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     [Fact]
-    public async Task Reader_returns_exposure_and_remaining_room_for_each_symbol()
+    public async Task Reader_returns_the_exposure_of_each_symbol()
     {
         await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
         await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VIIA4", 50, 4.00m));
@@ -193,12 +193,8 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var symbolExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
 
         Assert.Equal(
-            [
-                ("PETR4", 1_000.00m, ExposureLimitPolicy.PerSymbol - 1_000m),
-                ("VALE3", 0m, ExposureLimitPolicy.PerSymbol),
-                ("VIIA4", -200.00m, ExposureLimitPolicy.PerSymbol - 200m)
-            ],
-            symbolExposures.Select(symbolExposure => (symbolExposure.Symbol, symbolExposure.Exposure, symbolExposure.RemainingExposureCapacity)));
+            [("PETR4", 1_000.00m), ("VALE3", 0m), ("VIIA4", -200.00m)],
+            symbolExposures.Select(symbolExposure => (symbolExposure.Symbol, symbolExposure.Exposure)));
     }
 
     [Theory]
@@ -236,7 +232,6 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.IsType<OrderRepository>(registeredOrderRepository);
         Assert.IsType<ExposureRepository>(registeredSymbolExposureRepository);
         Assert.IsType<SymbolExposureReadRepository>(registeredExposureReader);
-        Assert.IsType<OrderListReadRepository>(orderAccumulatorServiceProvider.GetRequiredService<IOrderListReadRepository>());
         Assert.Same(orderOperationServices.GetRequiredService<DatabaseUnitOfWork>(), registeredUnitOfWork);
         Assert.NotSame(registeredUnitOfWork, otherOrderOperationScope.ServiceProvider.GetRequiredService<IUnitOfWork>());
         Assert.True(registeredServicesOrderDecision.Data!.Accepted);

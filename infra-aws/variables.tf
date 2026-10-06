@@ -56,6 +56,9 @@ locals {
   # Accumulator, o worker de métricas e as duas tasks que convivem durante o deploy.
   limite_do_pool_do_generator = 10
 
-  porta_fix                 = 9876
-  porta_http_do_accumulator = 8081
+  # O mesmo teto no Accumulator: a decisão da ordem segura a conexão só durante a transação curta, e 10 + 10
+  # por task (o dobro durante o deploy) ainda deixa folga para o worker de métricas na db.t3.micro.
+  limite_do_pool_do_accumulator = 10
+
+  porta_fix = 9876
 }

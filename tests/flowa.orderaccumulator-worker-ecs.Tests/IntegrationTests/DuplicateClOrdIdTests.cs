@@ -41,7 +41,7 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
         string duplicateOrderSymbol, char duplicateOrderSide, decimal duplicateOrderQuantity, decimal duplicateOrderPrice)
     {
         // Arrange
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         var originalExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder(OriginalClOrdId, "PETR4", '1', 100, 10.50m));
         var storedOriginalOrderBefore = await ReadStoredOrderAsync(OriginalClOrdId);
@@ -71,7 +71,7 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
     {
         // Arrange
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
-        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        await using (var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync())
         {
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
             await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder(OriginalClOrdId, "PETR4", '1', 100, 10.50m));
@@ -119,7 +119,7 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
     public async Task Order_reusing_a_rejected_cl_ord_id_with_other_fields_is_rejected_as_duplicate_and_the_original_reason_stays()
     {
         // Arrange
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder(OriginalClOrdId, "PETR4", '1', 100, 1000m));
         var storedOriginalOrderBefore = await ReadStoredOrderAsync(OriginalClOrdId);
@@ -138,7 +138,7 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
     public async Task Order_reusing_a_cl_ord_id_with_the_same_fields_gets_the_original_report_without_duplicate_reason()
     {
         // Arrange
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         var originalExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder(OriginalClOrdId, "PETR4", '1', 100, 10.50m));
 

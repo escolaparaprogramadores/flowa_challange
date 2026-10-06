@@ -25,7 +25,7 @@ COPY src/flowa.orderaccumulator-worker-ecs/OrderAccumulator.csproj src/flowa.ord
 RUN dotnet restore src/flowa.orderaccumulator-worker-ecs/OrderAccumulator.csproj
 COPY src/flowa.commons/ src/flowa.commons/
 COPY src/flowa.orderaccumulator-worker-ecs/ src/flowa.orderaccumulator-worker-ecs/
-# The apps only start with the commit recorded in the build (/version route). The build needs .git in the context:
+# The apps only start with the commit recorded in the build (/version route; "Application started" log here). The build needs .git in the context:
 # in a clone the SHA comes from it; in a worktree, where .git is just a file, the caller passes SOURCE_REVISION_ID.
 ARG SOURCE_REVISION_ID=
 RUN --mount=type=bind,source=.git,target=/repo/.git \
@@ -34,6 +34,7 @@ RUN --mount=type=bind,source=.git,target=/repo/.git \
     dotnet publish src/flowa.orderaccumulator-worker-ecs/OrderAccumulator.csproj -c Release -o /app --no-restore \
         -p:SourceRevisionId=$sha -p:EnableSourceControlManagerQueries=false
 
+# Worker without HTTP, but the shared Commons brings the ASP.NET Core framework (FrameworkReference), so the runtime is the aspnet one.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
 COPY --from=build /app ./
@@ -46,6 +47,8 @@ ENV CORECLR_ENABLE_PROFILING=1 \
     DD_DOTNET_TRACER_HOME=/opt/datadog \
     DD_TRACE_OTEL_ENABLED=true \
     DD_TRACE_SAMPLE_RATE=1.0
+# The aspnet base sets ASPNETCORE_HTTP_PORTS=8080; the worker has no HTTP, so the inherited value is cleared.
+ENV ASPNETCORE_HTTP_PORTS=
 USER $APP_UID
-EXPOSE 8081 9876
+EXPOSE 9876
 ENTRYPOINT ["dotnet", "OrderAccumulator.dll"]

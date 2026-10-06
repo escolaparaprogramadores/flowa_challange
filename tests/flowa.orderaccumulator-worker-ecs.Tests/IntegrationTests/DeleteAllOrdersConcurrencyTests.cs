@@ -1,14 +1,9 @@
-using Flowa.OrderAccumulator.Application.Orders.Responses;
-using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.Commons.Database;
-using Flowa.Commons.Responses;
+using System.Data;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Domain.Orders.Entities;
 using Flowa.OrderAccumulator.Domain.Orders.Enums;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Repositories;
-using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
 using Xunit.Abstractions;
 
@@ -16,6 +11,8 @@ namespace Flowa.OrderAccumulator.Tests;
 
 // CA-17, CA-42 and O-12: the exposure lives only in the database. An order and "Delete all" are put in line by the
 // exposure rows themselves, in READ COMMITTED, and in the end the exposure equals the sum of the accepted orders that remain.
+// "Delete all" is the Generator's DELETE /api/orders, played here straight in the database as it runs there: one READ
+// COMMITTED transaction that zeroes the three exposure rows and then deletes the orders.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper concurrencyTestOutput)
 {
@@ -30,6 +27,9 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
           AND wait_event_type = 'Lock'
           AND query LIKE '%UPDATE exposures%'
         """;
+
+    private const string ZeroSymbolExposuresAsTheGeneratorDoesSql = "UPDATE exposures SET exposure = 0 WHERE symbol = ANY(@Symbols)";
+    private const string DeleteAllOrdersAsTheGeneratorDoesSql = "DELETE FROM orders";
 
     private static readonly TimeSpan ConcurrencyStepDeadline = TimeSpan.FromSeconds(30);
 
@@ -48,17 +48,16 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await WaitUntilAsync(() => heldOrderStorage is not null);
         await heldOrderStorage.StorageReached.WaitAsync(ConcurrencyStepDeadline);
 
-        var deleteAllOrdersTask = Task.Run(() => DeleteAllOrdersThroughTheUseCaseAsync());
+        var deleteAllOrdersTask = Task.Run(() => DeleteAllOrdersAsTheGeneratorDoesAsync());
         var deletesWaitingOnTheExposureRows = await WaitForTransactionsWaitingOnExposureRowsAsync(1);
         var hadDeleteFinishedWhileTheOrderHeldTheRow = deleteAllOrdersTask.IsCompleted;
         heldOrderStorage.ReleaseTheStorage();
         var heldOrderDecision = await orderHoldingTheExposureRow.WaitAsync(ConcurrencyStepDeadline);
-        var deleteAllOrdersMessage = await deleteAllOrdersTask.WaitAsync(ConcurrencyStepDeadline);
+        await deleteAllOrdersTask.WaitAsync(ConcurrencyStepDeadline);
 
         Assert.Equal(1, deletesWaitingOnTheExposureRows);
         Assert.False(hadDeleteFinishedWhileTheOrderHeldTheRow);
         Assert.True(heldOrderDecision.Accepted);
-        Assert.True(deleteAllOrdersMessage.Success, deleteAllOrdersMessage.Failure?.ToString());
         Assert.Equal(ZeroedSymbolExposures, await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
         Assert.Equal(0L, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }
@@ -72,10 +71,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         var orderNearTheLimit = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(
             TestOrders.NewBuyOrder("PETR4", OrderFieldPolicy.MaxOrderQuantityExclusive - 1, 999.99m));
-        OrderDeletionHeldUntilReleased heldOrderDeletion = null!;
-        var deleteHoldingTheZeroedRows = Task.Run(() => DeleteAllOrdersThroughTheUseCaseAsync(
-            storedOrderRepository => heldOrderDeletion = new OrderDeletionHeldUntilReleased(storedOrderRepository)));
-        await WaitUntilAsync(() => heldOrderDeletion is not null);
+        var heldOrderDeletion = new OrderDeletionHeldUntilReleased();
+        var deleteHoldingTheZeroedRows = Task.Run(() => DeleteAllOrdersAsTheGeneratorDoesAsync(heldOrderDeletion.WaitForTheReleaseAsync));
         await heldOrderDeletion.DeletionReached.WaitAsync(ConcurrencyStepDeadline);
 
         var sellOrderTask = Task.Run(() => orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(
@@ -83,13 +80,12 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         var ordersWaitingOnTheZeroedRows = await WaitForTransactionsWaitingOnExposureRowsAsync(1);
         var hadOrderFinishedWhileTheDeleteHeldTheRows = sellOrderTask.IsCompleted;
         heldOrderDeletion.ReleaseTheDeletion();
-        var deleteAllOrdersMessage = await deleteHoldingTheZeroedRows.WaitAsync(ConcurrencyStepDeadline);
+        await deleteHoldingTheZeroedRows.WaitAsync(ConcurrencyStepDeadline);
         var sellOrderDecision = await sellOrderTask.WaitAsync(ConcurrencyStepDeadline);
 
         Assert.Equal(99_998_000.01m, TestOrders.ExposureDeltaOf(orderNearTheLimit));
         Assert.Equal(1, ordersWaitingOnTheZeroedRows);
         Assert.False(hadOrderFinishedWhileTheDeleteHeldTheRows);
-        Assert.True(deleteAllOrdersMessage.Success, deleteAllOrdersMessage.Failure?.ToString());
         Assert.True(sellOrderDecision.Accepted, sellOrderDecision.RejectReason);
         Assert.Equal(-1_000_000.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
         Assert.Equal(1L, await orderAccumulatorDatabase.CountStoredOrdersAsync());
@@ -106,27 +102,24 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(
             TestOrders.NewBuyOrder("PETR4", OrderFieldPolicy.MaxOrderQuantityExclusive - 1, 999.99m));
-        OrderDeletionHeldUntilReleased heldOrderDeletion = null!;
-        var deleteHoldingTheZeroedRows = Task.Run(() => DeleteAllOrdersThroughTheUseCaseAsync(
-            storedOrderRepository => heldOrderDeletion = new OrderDeletionHeldUntilReleased(storedOrderRepository)));
-        await WaitUntilAsync(() => heldOrderDeletion is not null);
+        var heldOrderDeletion = new OrderDeletionHeldUntilReleased();
+        var deleteHoldingTheZeroedRows = Task.Run(() => DeleteAllOrdersAsTheGeneratorDoesAsync(heldOrderDeletion.WaitForTheReleaseAsync));
         await heldOrderDeletion.DeletionReached.WaitAsync(ConcurrencyStepDeadline);
 
         var largeOrderDecision = await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(
             TestOrders.NewBuyOrder("PETR4", 10_000, 100.00m)).WaitAsync(ConcurrencyStepDeadline);
         heldOrderDeletion.ReleaseTheDeletion();
-        var deleteAllOrdersMessage = await deleteHoldingTheZeroedRows.WaitAsync(ConcurrencyStepDeadline);
+        await deleteHoldingTheZeroedRows.WaitAsync(ConcurrencyStepDeadline);
 
         Assert.False(largeOrderDecision.Accepted);
         Assert.Equal(ExposureLimitPolicy.BuildExposureLimitRejectionText("PETR4"), largeOrderDecision.RejectReason);
-        Assert.True(deleteAllOrdersMessage.Success, deleteAllOrdersMessage.Failure?.ToString());
         Assert.Equal(ZeroedSymbolExposures, await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
         Assert.Equal(0L, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }
 
-    // Through the whole app: 100 orders on the three symbols; when 30 are already stored, 5 deletes through the route
-    // come in among the ones still in progress; after the deletes, 100 more orders. No exception and no deadlock; in the
-    // end orders remain (the ones that came after the last delete) and the exposure in the database equals the sum of the
+    // Through the whole app: 100 orders on the three symbols; when 30 are already stored, 5 deletes of the Generator come
+    // in among the ones still in progress; after the deletes, 100 more orders. No exception and no deadlock; in the end
+    // orders remain (the ones that came after the last delete) and the exposure in the database equals the sum of the
     // remaining accepted orders.
     [Theory]
     [InlineData(1)]
@@ -137,9 +130,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     public async Task Deletes_in_the_middle_of_orders_in_progress_end_with_the_exposure_equal_to_the_remaining_accepted_orders(int concurrencyRound)
     {
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         var appOrderDecisionServices = orderAccumulatorTestApp.Services;
-        var orderAccumulatorClient = orderAccumulatorTestApp.CreateClient();
         var orderQuantityGenerator = new Random(concurrencyRound);
         var storedOrdersCountBeforeTheDeletes = 0;
         var enoughOrdersStoredToFireTheDeletes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -155,8 +147,8 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         // Counts by the orders already stored, not by Task.IsCompleted: the task that fires the signal has not finished
         // yet when the test wakes up and would count as "in progress", adding one too many.
         var ordersInProgressCountWhenTheDeletesFired = OrdersPerWave - Volatile.Read(ref storedOrdersCountBeforeTheDeletes);
-        var deleteResponses = await Task.WhenAll(Enumerable.Range(0, SimultaneousDeletesPerRound)
-            .Select(_ => Task.Run(() => orderAccumulatorClient.DeleteAsync("/api/orders")))).WaitAsync(TimeSpan.FromMinutes(2));
+        await Task.WhenAll(Enumerable.Range(0, SimultaneousDeletesPerRound)
+            .Select(_ => Task.Run(() => DeleteAllOrdersAsTheGeneratorDoesAsync()))).WaitAsync(TimeSpan.FromMinutes(2));
         var ordersAfterTheDeletes = NewOrdersMixingSymbolsAndSides(OrdersPerWave, orderQuantityGenerator)
             .Select(symbolAndSideMixedOrder => Task.Run(() => appOrderDecisionServices.DecideIncomingOrderAsync(symbolAndSideMixedOrder))).ToList();
         var orderDecisions = await Task.WhenAll(ordersBeforeTheDeletes.Concat(ordersAfterTheDeletes)).WaitAsync(TimeSpan.FromMinutes(2));
@@ -168,26 +160,22 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             $"{remainingStoredOrdersCount} orders remained; " +
             string.Join(", ", storedExposures.Select(storedExposure => $"{storedExposure.Symbol}={storedExposure.Exposure}")));
         Assert.All(orderDecisions, orderDecision => Assert.True(orderDecision.Accepted));
-        Assert.All(deleteResponses, deleteResponse => Assert.Equal(System.Net.HttpStatusCode.NoContent, deleteResponse.StatusCode));
         Assert.InRange(ordersInProgressCountWhenTheDeletesFired, 1, OrdersPerWave - StoredOrdersCountBeforeFiringTheDeletes);
         Assert.InRange(remainingStoredOrdersCount, OrdersPerWave, 2 * OrdersPerWave - StoredOrdersCountBeforeFiringTheDeletes);
         foreach (var storedExposure in storedExposures)
             Assert.Equal(await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync(storedExposure.Symbol), storedExposure.Exposure);
     }
 
-    private async Task<DataMessage<AllOrdersDeletedResponse>> DeleteAllOrdersThroughTheUseCaseAsync(
-        Func<IOrderRepository, IOrderRepository>? wrapOrderRepository = null)
+    private async Task DeleteAllOrdersAsTheGeneratorDoesAsync(Func<Task>? waitAfterZeroingTheExposures = null)
     {
-        await using var deleteUnitOfWork = new DatabaseUnitOfWork(orderAccumulatorDatabase.OrderDatabaseConnectionSource);
-        var deleteDatabase = new DapperDatabase(deleteUnitOfWork);
-        IOrderRepository orderRepository = new OrderRepository(deleteDatabase);
-        if (wrapOrderRepository is not null)
-            orderRepository = wrapOrderRepository(orderRepository);
-
-        return await new DeleteAllOrdersUseCase(
-                deleteUnitOfWork, orderRepository, new ExposureRepository(deleteDatabase),
-                TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DeleteAllOrdersUseCase>())
-            .DeleteAllOrdersAsync();
+        await using var generatorDeleteConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
+        await using var generatorDeleteTransaction = await generatorDeleteConnection.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        await generatorDeleteConnection.ExecuteAsync(
+            ZeroSymbolExposuresAsTheGeneratorDoesSql, new { Symbols = OrderFieldPolicy.AllowedOrderSymbols.ToArray() }, generatorDeleteTransaction);
+        if (waitAfterZeroingTheExposures is not null)
+            await waitAfterZeroingTheExposures();
+        await generatorDeleteConnection.ExecuteAsync(DeleteAllOrdersAsTheGeneratorDoesSql, transaction: generatorDeleteTransaction);
+        await generatorDeleteTransaction.CommitAsync();
     }
 
     private async Task<long> WaitForTransactionsWaitingOnExposureRowsAsync(int expectedWaitingTransactions)
@@ -241,14 +229,11 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
             await storageReleased.Task;
             return await storedOrderRepository.TryAddOrderAsync(answeredOrder, cancellationToken);
         }
-
-        public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
-            storedOrderRepository.DeleteAllOrdersAsync(cancellationToken);
     }
 
-    // Plays the order repository of the delete transaction: the three exposure rows were already zeroed, and the delete
-    // waits here, before deleting the orders, until the test lets it go.
-    private sealed class OrderDeletionHeldUntilReleased(IOrderRepository storedOrderRepository) : IOrderRepository
+    // Holds the delete of the Generator after it zeroed the three exposure rows and before it deletes the orders,
+    // until the test lets it go.
+    private sealed class OrderDeletionHeldUntilReleased
     {
         private readonly TaskCompletionSource deletionReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource deletionReleased = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -257,17 +242,10 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
 
         public void ReleaseTheDeletion() => deletionReleased.SetResult();
 
-        public Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default) =>
-            storedOrderRepository.FindOrderByClOrdIdAsync(clOrdId, cancellationToken);
-
-        public Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default) =>
-            storedOrderRepository.TryAddOrderAsync(answeredOrder, cancellationToken);
-
-        public async Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default)
+        public Task WaitForTheReleaseAsync()
         {
             deletionReached.SetResult();
-            await deletionReleased.Task;
-            await storedOrderRepository.DeleteAllOrdersAsync(cancellationToken);
+            return deletionReleased.Task;
         }
     }
 }

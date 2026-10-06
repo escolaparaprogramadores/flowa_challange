@@ -1,6 +1,3 @@
-using System.Net.Http.Json;
-using System.Text.Json;
-using Flowa.OrderAccumulator.Application.Exposures.Responses;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Domain.Orders.Enums;
 using QuickFix.Fields;
@@ -34,7 +31,7 @@ public sealed class FixConcurrentOrderExposureTests(OrderAccumulatorPostgresFixt
         // database transactions waiting together on the exposure row are proved by ConcurrentOrderExposureTests.
         // Quantities from 5,000 to 99,999 at 20.00: about 1 million per order, close to 2× the limit in total, so part of
         // them must be rejected.
-        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        await using var orderAccumulatorTestApp = await new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptorAsync();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
         var orderQuantityGenerator = new Random(orderSide);
         var simultaneousFixOrders = Enumerable.Range(0, SimultaneousFixOrders)
@@ -51,17 +48,14 @@ public sealed class FixConcurrentOrderExposureTests(OrderAccumulatorPostgresFixt
         var rejectedFixOrders = simultaneousFixOrders
             .Where(fixOrder => executionReportsByClOrdId[fixOrder.ClOrdID.Value].ExecType.Value == ExecType.REJECTED).ToList();
         var finalExposure = await orderAccumulatorDatabase.ReadExposureOfSymbolAsync(ConcurrencySymbol);
-        var exposureShownByTheApp = await ReadExposureShownByTheAppAsync(orderAccumulatorTestApp, ConcurrencySymbol);
         concurrencyTestOutput.WriteLine(
             $"side {orderSide}: {SimultaneousFixOrders} orders sent at once by FIX, {executionReportsByClOrdId.Count} ExecutionReports, " +
-            $"{acceptedFixOrders.Count} accepted, {rejectedFixOrders.Count} rejected, final exposure {finalExposure}, " +
-            $"exposure in GET /api/exposures {exposureShownByTheApp}");
+            $"{acceptedFixOrders.Count} accepted, {rejectedFixOrders.Count} rejected, final exposure {finalExposure}");
 
         Assert.Equal(SimultaneousFixOrders, executionReportsByClOrdId.Count);
         Assert.Equal(SimultaneousFixOrders, acceptedFixOrders.Count + rejectedFixOrders.Count);
         Assert.Equal(acceptedFixOrders.Sum(CalculateExposureDeltaOfFixOrder), finalExposure);
         Assert.Equal(finalExposure, await orderAccumulatorDatabase.SumAcceptedOrdersExposureAsync(ConcurrencySymbol));
-        Assert.Equal(finalExposure, exposureShownByTheApp);
         // Each round goes in one direction only, so the exposure only grows in absolute value: the final one within the
         // limit means no accepted order along the way took it past the limit.
         Assert.True(Math.Abs(finalExposure) <= ExposureLimitPolicy.PerSymbol, $"exposure {finalExposure} went over the limit");
@@ -71,7 +65,7 @@ public sealed class FixConcurrentOrderExposureTests(OrderAccumulatorPostgresFixt
             ExposureLimitPolicy.BuildExposureLimitRejectionText(ConcurrencySymbol), executionReportsByClOrdId[rejectedFixOrder.ClOrdID.Value].Text.Value));
         // Every rejected order was larger than the room left at the end: the accepted ones reached the limit.
         Assert.All(rejectedFixOrders, rejectedFixOrder => Assert.True(
-            Math.Abs(CalculateExposureDeltaOfFixOrder(rejectedFixOrder)) > ExposureLimitPolicy.CalculateRemainingExposureCapacity(finalExposure)));
+            Math.Abs(CalculateExposureDeltaOfFixOrder(rejectedFixOrder)) > ExposureLimitPolicy.PerSymbol - Math.Abs(finalExposure)));
     }
 
     private static decimal CalculateExposureDeltaOfFixOrder(NewOrderSingle fixOrder) =>
@@ -79,11 +73,4 @@ public sealed class FixConcurrentOrderExposureTests(OrderAccumulatorPostgresFixt
             OrderSideCodes.ConvertFixCodeToOrderSide(fixOrder.Side.Value)
                 ?? throw new InvalidOperationException($"The FIX order {fixOrder.ClOrdID.Value} has the side {fixOrder.Side.Value}, which is neither buy nor sell."),
             (int)fixOrder.OrderQty.Value, fixOrder.Price.Value);
-
-    private static async Task<decimal> ReadExposureShownByTheAppAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp, string symbol)
-    {
-        var exposuresDataMessage = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/exposures");
-        var shownExposures = exposuresDataMessage.GetProperty("data").Deserialize<ExposuresResponse>(JsonSerializerOptions.Web)!;
-        return shownExposures.Exposures.Single(symbolExposure => symbolExposure.Symbol == symbol).Exposure;
-    }
 }
