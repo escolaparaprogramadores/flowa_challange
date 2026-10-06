@@ -16,12 +16,11 @@ export const EXPOSURE_UNAVAILABLE_MESSAGE = 'Não foi possível ler a exposiçã
 export const ORDER_LIST_UNAVAILABLE_MESSAGE = 'Não foi possível ler as ordens agora. Tente de novo em instantes.';
 export const ORDERS_NOT_DELETED_MESSAGE = 'Não foi possível apagar as ordens agora. Tente de novo em instantes.';
 
-export type OrderToSend = {
-  symbol: OrderTicketSymbol;
-  side: OrderSide;
-  quantity: number;
-  priceInCents: number;
-};
+// In the test mode the ticket hands over the fields as typed, so the server is the one that validates them.
+// "mode" is optional only on the normal order: the ticket that does not know the test mode yet keeps compiling.
+export type OrderToSend =
+  | { mode?: 'normal'; symbol: OrderTicketSymbol; side: OrderSide; quantity: number; priceInCents: number }
+  | { mode: 'test'; symbol: string; side: OrderSide; quantityText: string; priceText: string };
 
 export type OrderSendResult =
   | {
@@ -95,18 +94,36 @@ async function callOrderGeneratorApiWithDeadline<ResponseData>(apiRoute: string,
   }
 }
 
+// Test mode: only the decimal comma becomes a dot; everything else goes as typed, as text (decision 15).
+function replaceDecimalCommaWithDot(typedField: string) {
+  return typedField.replace(',', '.');
+}
+
+function buildOrderRequestBody(orderToSend: OrderToSend) {
+  if (orderToSend.mode === 'test') {
+    return {
+      symbol: orderToSend.symbol,
+      side: orderToSend.side,
+      quantity: replaceDecimalCommaWithDot(orderToSend.quantityText),
+      price: replaceDecimalCommaWithDot(orderToSend.priceText),
+    };
+  }
+  return {
+    symbol: orderToSend.symbol,
+    side: orderToSend.side,
+    quantity: orderToSend.quantity,
+    price: orderToSend.priceInCents / 100,
+  };
+}
+
 export async function sendOrder(orderToSend: OrderToSend): Promise<OrderSendResult> {
+  const orderRequestBody = buildOrderRequestBody(orderToSend);
   let orderCreationCall: Awaited<ReturnType<typeof callOrderGeneratorApiWithDeadline<OrderResponseData>>>;
   try {
     orderCreationCall = await callOrderGeneratorApiWithDeadline<OrderResponseData>(CREATE_ORDER_ROUTE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        symbol: orderToSend.symbol,
-        side: orderToSend.side,
-        quantity: orderToSend.quantity,
-        price: orderToSend.priceInCents / 100,
-      }),
+      body: JSON.stringify(orderRequestBody),
     });
   } catch {
     return { outcome: 'communication-failure', serverMessage: UNCONFIRMED_ORDER_MESSAGE };
@@ -122,8 +139,8 @@ export async function sendOrder(orderToSend: OrderToSend): Promise<OrderSendResu
       orderId: answeredOrder.orderId ?? '',
       symbol: answeredOrder.symbol ?? orderToSend.symbol,
       side: answeredOrder.side === 'sell' ? 'sell' : 'buy',
-      quantity: answeredOrder.quantity ?? orderToSend.quantity,
-      priceInReais: answeredOrder.price ?? orderToSend.priceInCents / 100,
+      quantity: answeredOrder.quantity ?? Number(orderRequestBody.quantity),
+      priceInReais: answeredOrder.price ?? Number(orderRequestBody.price),
     };
   }
   if (httpResponse.status === 400 && apiAnswer?.success === false) {
