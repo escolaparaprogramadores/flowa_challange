@@ -32,7 +32,7 @@ public sealed class LoggedOnOrderGenerator : IAsyncLifetime
     }
 }
 
-public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
+public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>, IAsyncLifetime
 {
     private const string SentinelOrderJson = """{"symbol":"PETR4","side":"sell","quantity":7,"price":7.77}""";
 
@@ -43,6 +43,12 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         _loggedOnOrderGenerator = loggedOnOrderGenerator;
         _loggedOnOrderGenerator.FixAcceptor.ResetToAcceptEveryOrder();
     }
+
+    // Every test starts with the shared FIX session logged on; a session lost by an earlier test fails here, by name,
+    // instead of turning the next tests into 503s.
+    public Task InitializeAsync() => _loggedOnOrderGenerator.FixAcceptor.WaitForFixSessionLogonAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     // Decision 24: what a NewOrderSingle cannot carry stops at the door with a 400.
     public static TheoryData<string, string> OrdersThatDoNotFitFix => new()
@@ -351,7 +357,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     // CA-4: every success of /api is a DataMessage with these exact envelope values; "data" is the route body.
     internal static async Task<JsonElement> ReadSuccessDataMessageAsync(HttpResponseMessage successHttpResponse)
     {
-        Assert.Equal(HttpStatusCode.OK, successHttpResponse.StatusCode);
+        Assert.True(successHttpResponse.StatusCode == HttpStatusCode.OK,
+            $"expected 200, got {(int)successHttpResponse.StatusCode}: {await successHttpResponse.Content.ReadAsStringAsync()}");
         Assert.Equal("application/json", successHttpResponse.Content.Headers.ContentType?.MediaType);
         var successDataMessage = await ReadOrderGeneratorResponseJson(successHttpResponse);
         Assert.Equal(
