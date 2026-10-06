@@ -6,7 +6,8 @@ import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/servic
 // so the exposures it sees come only from the orders it sent itself.
 
 const EVIDENCE_FOLDER = process.env.EXPOSURE_SIDE_EVIDENCE_FOLDER ?? path.resolve('test-results', 'exposure-side-evidence');
-const CARD_BACKGROUND_COLOR = 'rgb(14, 27, 30)';
+// The badge sits at the top of the card, where its gradient is lightest: the contrast is measured over that end.
+const CARD_TOP_BACKGROUND_COLOR = 'rgb(15, 31, 34)';
 const ACCENT_COLOR = 'rgb(79, 227, 176)';
 const SELL_COLOR = 'rgb(255, 164, 151)';
 const AMBER_BAR_GRADIENT = 'linear-gradient(90deg, rgb(233, 167, 60), rgb(244, 197, 106))';
@@ -16,7 +17,7 @@ const PAGE_SCALE = 0.9;
 const EXPECTED_SIDE_BADGES = {
   Comprado: { textColor: 'rgb(111, 235, 192)', backgroundColor: 'rgba(79, 227, 176, 0.13)', borderColor: 'rgba(111, 235, 192, 0.38)' },
   Vendido: { textColor: 'rgb(255, 164, 151)', backgroundColor: 'rgba(255, 138, 122, 0.12)', borderColor: 'rgba(255, 164, 151, 0.38)' },
-  Zerado: { textColor: 'rgb(157, 176, 174)', backgroundColor: 'rgba(157, 176, 174, 0.12)', borderColor: 'rgba(157, 176, 174, 0.38)' },
+  Zerado: { textColor: 'rgb(157, 176, 174)', backgroundColor: 'rgb(18, 36, 39)', borderColor: 'rgb(46, 75, 80)' },
 } as const;
 
 type SideBadgeLabel = keyof typeof EXPECTED_SIDE_BADGES;
@@ -43,7 +44,6 @@ async function readServerExposure(ticketPage: Page, exposureSymbol: string) {
   return symbolExposure;
 }
 
-// Sends through the order ticket on screen and returns the status of the order the server answered with.
 async function sendOrderThroughOrderTicket(ticketPage: Page, symbol: string, sideLabel: 'Compra' | 'Venda', quantity: string, price: string) {
   await ticketPage.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: symbol, exact: true }).click();
   await ticketPage.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: sideLabel }).click();
@@ -73,11 +73,10 @@ function measureRectangleOnScreen(elementOnScreen: Locator) {
   });
 }
 
-// WCAG contrast of the badge text over its translucent tint laid on the card background.
 function calculateBadgeContrast(textColor: string, tintColor: string) {
   const readChannels = (rgbColor: string) => (rgbColor.match(/[\d.]+/g) ?? []).map(Number);
-  const [cardRed, cardGreen, cardBlue] = readChannels(CARD_BACKGROUND_COLOR);
-  const [tintRed, tintGreen, tintBlue, tintAlpha] = readChannels(tintColor);
+  const [cardRed, cardGreen, cardBlue] = readChannels(CARD_TOP_BACKGROUND_COLOR);
+  const [tintRed, tintGreen, tintBlue, tintAlpha = 1] = readChannels(tintColor);
   const blendOverCard = (tintChannel: number, cardChannel: number) => tintAlpha * tintChannel + (1 - tintAlpha) * cardChannel;
   const badgeBackground = [blendOverCard(tintRed, cardRed), blendOverCard(tintGreen, cardGreen), blendOverCard(tintBlue, cardBlue)];
   const calculateChannelLuminance = (colorChannel: number) => {
@@ -94,6 +93,11 @@ async function checkSideBadge(assetCard: Locator, assetSymbol: string, expectedB
   await expect(sideBadge).toHaveCount(1);
   await expect(sideBadge).toBeVisible();
   await expect(sideBadge).toHaveText(expectedBadgeLabel);
+  // A screen reader hears the side right after the asset name.
+  await expect(assetCard.locator('.exposure-asset')).toMatchAriaSnapshot(`
+    - heading "${assetSymbol}" [level=3]
+    - text: ${expectedBadgeLabel}
+  `);
   const expectedBadgeColors = EXPECTED_SIDE_BADGES[expectedBadgeLabel];
   await expect(sideBadge).toHaveCSS('color', expectedBadgeColors.textColor);
   await expect(sideBadge).toHaveCSS('background-color', expectedBadgeColors.backgroundColor);
@@ -107,7 +111,6 @@ async function checkSideBadge(assetCard: Locator, assetSymbol: string, expectedB
   }
   expect(calculateBadgeContrast(expectedBadgeColors.textColor, expectedBadgeColors.backgroundColor), `${assetSymbol} badge contrast`).toBeGreaterThanOrEqual(4.5);
 
-  // Right after the symbol, on the same line, and inside the card.
   const symbolBox = await measureRectangleOnScreen(assetCard.getByRole('heading', { level: 3, name: assetSymbol }));
   const badgeBox = await measureRectangleOnScreen(sideBadge);
   const assetCardBox = await measureRectangleOnScreen(assetCard);
@@ -150,7 +153,7 @@ test.afterEach(async ({ page }) => {
   await deleteAllOrdersOnServer(page);
 });
 
-for (const windowWidth of [1440, 375]) {
+for (const windowWidth of [1920, 1440, 860, 375]) {
   test(`CA-5: at ${windowWidth} px each card shows Comprado, Vendido or Zerado, the down icon when sold and the two remaining figures`, async ({ page }) => {
     // PETR4 bought R$ 1.000,00; VALE3 sold exactly R$ 39.999.535,62 (the example checked in CA-5); VIIA4 untouched.
     await sendOrderThroughApi(page, 'PETR4', 'buy', 100, 10);
@@ -198,6 +201,74 @@ for (const windowWidth of [1440, 375]) {
       await page.evaluate(() => document.documentElement.clientWidth),
     );
     await page.locator('section.exposure').screenshot({ path: path.join(EVIDENCE_FOLDER, `04-exposure-sides-${windowWidth}.png`) });
+  });
+}
+
+// The widest values that fit the limit: PETR4 sold and VALE3 bought by 99,999 × 999.99, so one remaining figure reads
+// R$ 199.998.000,01. Between 861 and 1080 px the three cards are narrow; the split must come from the card width alone.
+const WIDEST_VALUE_CARDS = [
+  { assetSymbol: 'PETR4', currentExposure: '-R$ 99.998.000,01', remainingToBuy: 'R$ 199.998.000,01', remainingToSell: 'R$ 1.999,99' },
+  { assetSymbol: 'VALE3', currentExposure: 'R$ 99.998.000,01', remainingToBuy: 'R$ 1.999,99', remainingToSell: 'R$ 199.998.000,01' },
+  { assetSymbol: 'VIIA4', currentExposure: 'R$ 0,00', remainingToBuy: 'R$ 100.000.000,00', remainingToSell: 'R$ 100.000.000,00' },
+] as const;
+
+for (const { windowWidth, remainingFiguresLayout, areCardsInOneRow } of [
+  { windowWidth: 1920, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: true },
+  { windowWidth: 1440, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: true },
+  { windowWidth: 1080, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: true },
+  { windowWidth: 1024, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: true },
+  { windowWidth: 960, remainingFiguresLayout: 'stacked', areCardsInOneRow: true },
+  { windowWidth: 900, remainingFiguresLayout: 'stacked', areCardsInOneRow: true },
+  { windowWidth: 860, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: false },
+  { windowWidth: 375, remainingFiguresLayout: 'side-by-side', areCardsInOneRow: false },
+] as const) {
+  test(`RNF-02: at ${windowWidth} px, with the widest values, the remaining figures sit ${remainingFiguresLayout} in all three cards, each number on one line inside its card`, async ({ page }) => {
+    await sendOrderThroughApi(page, 'PETR4', 'sell', 99_999, 999.99);
+    await sendOrderThroughApi(page, 'VALE3', 'buy', 99_999, 999.99);
+    await page.setViewportSize({ width: windowWidth, height: 900 });
+    await page.goto('/');
+    await expect(locateAssetCard(page, 'VIIA4')).toBeVisible();
+
+    const limitUsageTrackTops: number[] = [];
+    for (const expectedCard of WIDEST_VALUE_CARDS) {
+      const assetCard = locateAssetCard(page, expectedCard.assetSymbol);
+      await expect(assetCard.getByTestId('exposicao-atual')).toHaveText(expectedCard.currentExposure);
+      await expect(assetCard.getByTestId('falta-para-comprar')).toHaveText(expectedCard.remainingToBuy);
+      await expect(assetCard.getByTestId('falta-para-vender')).toHaveText(expectedCard.remainingToSell);
+      const assetCardBox = await measureRectangleOnScreen(assetCard);
+      for (const cardFigureTestId of ['exposicao-atual', 'falta-para-comprar', 'falta-para-vender']) {
+        const cardFigure = assetCard.getByTestId(cardFigureTestId);
+        const isFigureOnOneLine = await cardFigure.evaluate(
+          (figureOnPage) => figureOnPage.getBoundingClientRect().height < parseFloat(getComputedStyle(figureOnPage).fontSize) * 2,
+        );
+        expect(isFigureOnOneLine, `${expectedCard.assetSymbol} / ${cardFigureTestId}`).toBe(true);
+        const figureTextRightEdge = await cardFigure.evaluate((figureOnPage) => {
+          const figureTextRange = document.createRange();
+          figureTextRange.selectNodeContents(figureOnPage);
+          return figureTextRange.getBoundingClientRect().right;
+        });
+        expect(figureTextRightEdge, `${expectedCard.assetSymbol} / ${cardFigureTestId} inside the card`).toBeLessThanOrEqual(assetCardBox.x + assetCardBox.width);
+      }
+      const remainingToBuyBox = await measureRectangleOnScreen(assetCard.getByTestId('falta-para-comprar'));
+      const remainingToSellBox = await measureRectangleOnScreen(assetCard.getByTestId('falta-para-vender'));
+      if (remainingFiguresLayout === 'side-by-side') {
+        expect(Math.abs(remainingToSellBox.y - remainingToBuyBox.y), `${expectedCard.assetSymbol} same line`).toBeLessThanOrEqual(1);
+        expect(remainingToSellBox.x).toBeGreaterThan(remainingToBuyBox.x + remainingToBuyBox.width);
+      } else {
+        expect(remainingToSellBox.y, `${expectedCard.assetSymbol} stacked`).toBeGreaterThan(remainingToBuyBox.y + remainingToBuyBox.height);
+        expect(Math.abs(remainingToSellBox.x - remainingToBuyBox.x)).toBeLessThanOrEqual(1);
+      }
+      limitUsageTrackTops.push((await measureRectangleOnScreen(assetCard.getByRole('meter'))).y);
+    }
+    // Cards in the same row keep the same shape, so the three "Uso do limite" bars line up.
+    if (areCardsInOneRow) {
+      expect(Math.abs(limitUsageTrackTops[1] - limitUsageTrackTops[0])).toBeLessThanOrEqual(1);
+      expect(Math.abs(limitUsageTrackTops[2] - limitUsageTrackTops[0])).toBeLessThanOrEqual(1);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      await page.evaluate(() => document.documentElement.clientWidth),
+    );
+    await page.locator('section.exposure').screenshot({ path: path.join(EVIDENCE_FOLDER, `04-exposure-widest-${windowWidth}.png`) });
   });
 }
 

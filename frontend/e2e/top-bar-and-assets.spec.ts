@@ -453,7 +453,7 @@ test('CA-6 and CA-39: the limit usage comes from the server, is truncated withou
     filledTrackFraction: 0.95,
   });
 
-  // Buy through the order ticket itself: the screen rereads the exposure and the card changes with it, with no client-side math.
+  // Buy through the order ticket itself: the screen rereads the exposure from the server and the card changes with it.
   // −95,000,000.00 + 99,999 × 950.00 = −950.00, which is more than zero and less than 0.01% of the limit.
   await expect(page.getByLabel('Quantidade de PETR4')).toBeVisible();
   await page.getByLabel('Quantidade de PETR4').fill('99999');
