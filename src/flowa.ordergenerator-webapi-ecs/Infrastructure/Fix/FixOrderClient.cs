@@ -18,8 +18,7 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
     public const string SessionRejectWithoutReasonText = "A sessão FIX recusou a ordem.";
     public const string LateExecutionReportLogMessage = "ExecutionReport arrived for an order that is no longer waiting for it.";
 
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<SentOrderResult>> _ordersAwaitingExecutionReport = new();
-    private readonly ConcurrentDictionary<string, ulong> _sentSeqNumsOfOrdersAwaitingExecutionReport = new();
+    private readonly ConcurrentDictionary<string, OrderAwaitingExecutionReport> _ordersAwaitingExecutionReport = new();
     private readonly SocketInitiator _fixSocketInitiator;
     private readonly TimeSpan _executionReportTimeout;
     private readonly IApplicationLogger<FixOrderClient> _fixOrderLogger;
@@ -53,8 +52,9 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
         if (initiatorSessionId is null || initiatorSession is null || !initiatorSession.IsLoggedOn)
             return new SentOrderResult(SentOrderStatus.NoLoggedOnSession, clOrdId);
 
-        var orderAnswerWaiter = new TaskCompletionSource<SentOrderResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _ordersAwaitingExecutionReport[clOrdId] = orderAnswerWaiter;
+        var orderAwaitingExecutionReport = new OrderAwaitingExecutionReport();
+        var orderAnswerWaiter = orderAwaitingExecutionReport.OrderAnswer;
+        _ordersAwaitingExecutionReport[clOrdId] = orderAwaitingExecutionReport;
         try
         {
             if (!Session.SendToTarget(BuildNewOrderSingle(clOrdId, orderToSend, orderSendingTraceParent), initiatorSessionId))
@@ -71,7 +71,6 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
         finally
         {
             _ordersAwaitingExecutionReport.TryRemove(clOrdId, out _);
-            _sentSeqNumsOfOrdersAwaitingExecutionReport.TryRemove(clOrdId, out _);
         }
     }
 
@@ -132,8 +131,8 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
             return;
 
         var clOrdId = executionReport.GetString(Tags.ClOrdID);
-        if (_ordersAwaitingExecutionReport.TryGetValue(clOrdId, out var orderAnswerWaiter))
-            orderAnswerWaiter.TrySetResult(ConvertToSentOrderResult(clOrdId, executionReport));
+        if (_ordersAwaitingExecutionReport.TryGetValue(clOrdId, out var answeredOrder))
+            answeredOrder.OrderAnswer.TrySetResult(ConvertToSentOrderResult(clOrdId, executionReport));
         else
             _fixOrderLogger.LogWarning(LateExecutionReportLogMessage, new { ClOrdId = clOrdId, TraceId = clOrdId });
     }
@@ -167,19 +166,19 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
             return null;
 
         var rejectedSeqNum = fixReject.GetULong(Tags.RefSeqNum);
-        return _sentSeqNumsOfOrdersAwaitingExecutionReport.FirstOrDefault(sentOrderSeqNum => sentOrderSeqNum.Value == rejectedSeqNum).Key;
+        return _ordersAwaitingExecutionReport.FirstOrDefault(awaitingOrder => awaitingOrder.Value.WasSentWithSeqNum(rejectedSeqNum)).Key;
     }
 
     private void AnswerOrderWithFixReject(string? rejectedClOrdId, string fixRejectText)
     {
-        if (rejectedClOrdId is not null && _ordersAwaitingExecutionReport.TryGetValue(rejectedClOrdId, out var orderAnswerWaiter))
-            orderAnswerWaiter.TrySetResult(new SentOrderResult(SentOrderStatus.RejectedByFixReject, rejectedClOrdId, rejectionText: fixRejectText));
+        if (rejectedClOrdId is not null && _ordersAwaitingExecutionReport.TryGetValue(rejectedClOrdId, out var rejectedOrder))
+            rejectedOrder.OrderAnswer.TrySetResult(new SentOrderResult(SentOrderStatus.RejectedByFixReject, rejectedClOrdId, rejectionText: fixRejectText));
     }
 
     private void EndEveryOrderAwaitingExecutionReportAsSessionLost()
     {
-        foreach (var (clOrdId, orderAnswerWaiter) in _ordersAwaitingExecutionReport)
-            orderAnswerWaiter.TrySetResult(new SentOrderResult(SentOrderStatus.FixSessionLost, clOrdId));
+        foreach (var (clOrdId, orderLeftWithoutSession) in _ordersAwaitingExecutionReport)
+            orderLeftWithoutSession.OrderAnswer.TrySetResult(new SentOrderResult(SentOrderStatus.FixSessionLost, clOrdId));
     }
 
     public void FromApp(Message incomingFixApplicationMessage, SessionID orderAccumulatorFixSessionId)
@@ -211,8 +210,8 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
             return;
 
         var sentClOrdId = outgoingFixApplicationMessage.GetString(Tags.ClOrdID);
-        if (_ordersAwaitingExecutionReport.ContainsKey(sentClOrdId))
-            _sentSeqNumsOfOrdersAwaitingExecutionReport[sentClOrdId] = outgoingFixApplicationMessage.Header.GetULong(Tags.MsgSeqNum);
+        if (_ordersAwaitingExecutionReport.TryGetValue(sentClOrdId, out var sentOrder))
+            sentOrder.RememberSentSeqNum(outgoingFixApplicationMessage.Header.GetULong(Tags.MsgSeqNum));
     }
 
     public Task StartAsync(CancellationToken hostStartCancellation)
@@ -228,4 +227,17 @@ internal sealed class FixOrderClient : IOrderAccumulatorPort, IApplication, IHos
     }
 
     public void Dispose() => _fixSocketInitiator.Dispose();
+
+    private sealed class OrderAwaitingExecutionReport
+    {
+        private const long NotSentYet = -1;
+
+        private long _sentSeqNum = NotSentYet;
+
+        public TaskCompletionSource<SentOrderResult> OrderAnswer { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void RememberSentSeqNum(ulong sentSeqNum) => Volatile.Write(ref _sentSeqNum, (long)sentSeqNum);
+
+        public bool WasSentWithSeqNum(ulong rejectedSeqNum) => Volatile.Read(ref _sentSeqNum) == (long)rejectedSeqNum;
+    }
 }
