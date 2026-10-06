@@ -151,6 +151,23 @@ public sealed class FixTestInitiator : IApplication, IDisposable
         return receivedExecutionReport;
     }
 
+    public async Task<IReadOnlyDictionary<string, ExecutionReport>> SendAllAtOnceExpectingExecutionReportsAsync(
+        IReadOnlyList<NewOrderSingle> simultaneousOrders, TimeSpan allAnswersTimeout)
+    {
+        var sentOrders = await Task.WhenAll(simultaneousOrders.Select(simultaneousOrder => Task.Run(() => Session.SendToTarget(simultaneousOrder, fixSessionId!))));
+        Assert.All(sentOrders, Assert.True);
+
+        using var allAnswersDeadline = new CancellationTokenSource(allAnswersTimeout);
+        var executionReportsByClOrdId = new Dictionary<string, ExecutionReport>();
+        while (executionReportsByClOrdId.Count < simultaneousOrders.Count)
+        {
+            var receivedExecutionReport = await executionReports.Reader.ReadAsync(allAnswersDeadline.Token);
+            Assert.True(executionReportsByClOrdId.TryAdd(receivedExecutionReport.ClOrdID.Value, receivedExecutionReport),
+                $"Two ExecutionReports came for the ClOrdID {receivedExecutionReport.ClOrdID.Value}.");
+        }
+        return executionReportsByClOrdId;
+    }
+
     // Sends the order and checks that nothing comes back within the deadline: neither ExecutionReport nor BusinessMessageReject.
     public async Task ExpectNoAnswerAsync(NewOrderSingle newOrderSingle, TimeSpan noAnswerWindow)
     {
