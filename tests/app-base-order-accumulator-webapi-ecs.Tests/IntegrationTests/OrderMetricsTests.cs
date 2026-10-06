@@ -255,7 +255,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     [Fact]
-    public async Task Without_an_agent_the_app_processes_every_order_and_writes_no_log_line()
+    public async Task Without_an_agent_the_app_processes_every_order_and_writes_only_the_accepted_order_lines()
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
         var capturedAppLogs = new OrderAccumulatorCapturedLogs();
@@ -274,7 +274,9 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         appOrderMetricsClient.Dispose();
 
         Assert.Equal(20, orderDecisionsWithoutAgent.Count(orderDecision => orderDecision.Accepted));
-        Assert.Empty(capturedAppLogs.CapturedLogLines.Skip(logLinesBeforeTheOrders));
+        Assert.Equal(
+            Enumerable.Repeat("Information Base.OrderAccumulator.Application.Orders.UseCases.DecideIncomingOrderUseCase: Order accepted.", 20),
+            capturedAppLogs.CapturedLogLines.Skip(logLinesBeforeTheOrders));
         await using var startupDatabase = NpgsqlDataSource.Create(startupDatabaseConnectionString);
         await using var startupDatabaseConnection = await startupDatabase.OpenConnectionAsync();
         Assert.Equal(20m, await startupDatabaseConnection.ExecuteScalarAsync<decimal>("SELECT exposure FROM exposures WHERE symbol = 'PETR4'"));

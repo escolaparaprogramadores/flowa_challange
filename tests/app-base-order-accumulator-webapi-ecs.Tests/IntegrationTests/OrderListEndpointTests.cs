@@ -161,7 +161,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
     }
 
     [Fact]
-    public async Task Listing_orders_writes_no_information_log_per_call()
+    public async Task Listing_orders_writes_only_the_request_and_use_case_lines_of_each_call()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         await DecideOrdersOneAfterAnotherAsync(orderAccumulatorTestApp, 2);
@@ -176,9 +176,17 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
             .Where(capturedLogLine => !capturedLogLine.StartsWith("Trace ") && !capturedLogLine.StartsWith("Debug "))
             .Where(capturedLogLine => !capturedLogLine.Contains(" QuickFix") && !capturedLogLine.Contains(" Base.OrderAccumulator.Entrypoint.Fix."))
             .ToList();
-        // The two good pages write nothing; the invalid page is an HTTP error and has its one Warning (CA-6).
+        // Each good page writes the request line and the end of the use case (CA-21, CA-28, G-10); the invalid page writes the
+        // request line and its one Warning as an HTTP error (CA-6), and never reaches the use case.
         Assert.Equal(
-            ["Warning Base.OrderAccumulator.Entrypoint.ErrorHandling.GlobalErrorHandler: Expected error in request."],
+            [
+                "Information Base.OrderAccumulator.Entrypoint.Logging.RequestReceivedLoggingMiddleware: Request received.",
+                "Information Base.OrderAccumulator.Application.Orders.UseCases.ListOrdersUseCase: Stored orders page read.",
+                "Information Base.OrderAccumulator.Entrypoint.Logging.RequestReceivedLoggingMiddleware: Request received.",
+                "Information Base.OrderAccumulator.Application.Orders.UseCases.ListOrdersUseCase: Stored orders page read.",
+                "Information Base.OrderAccumulator.Entrypoint.Logging.RequestReceivedLoggingMiddleware: Request received.",
+                "Warning Base.OrderAccumulator.Entrypoint.ErrorHandling.GlobalErrorHandler: Expected error in request."
+            ],
             logLinesOfTheListing);
     }
 

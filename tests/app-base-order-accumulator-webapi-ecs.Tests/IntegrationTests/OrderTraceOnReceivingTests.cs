@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Base.OrderAccumulator.Commons.Observability;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Fields;
 using QuickFix.FIX44;
@@ -37,8 +38,15 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         Assert.Equal(orderSending.TraceId, orderReceiving.TraceId);
         Assert.Equal(orderSending.SpanId, orderReceiving.ParentSpanId);
         Assert.Equal(ActivityKind.Consumer, orderReceiving.Kind);
-        // No tag on the span: span names and shape stay as they were (CA-34).
-        Assert.Empty(orderReceiving.TagObjects);
+        // Span names and shape stay as they were (CA-34); the only tags are the closed measurement of the order use case
+        // written on this span already open (CA-22, decision 16, G-10).
+        Assert.Equal(
+            [ActiveSpanOperationMonitoring.OperationDurationTag, ActiveSpanOperationMonitoring.OperationResultTag, ActiveSpanOperationMonitoring.OperationNameTag],
+            orderReceiving.TagObjects.Select(spanTag => spanTag.Key).Order(StringComparer.Ordinal));
+        Assert.Equal("orders.decide-incoming-order", orderReceiving.GetTagItem(ActiveSpanOperationMonitoring.OperationNameTag));
+        Assert.Equal("accepted", orderReceiving.GetTagItem(ActiveSpanOperationMonitoring.OperationResultTag));
+        Assert.IsType<double>(orderReceiving.GetTagItem(ActiveSpanOperationMonitoring.OperationDurationTag));
+        Assert.Equal(ActivityStatusCode.Unset, orderReceiving.Status);
     }
 
     [Fact]
