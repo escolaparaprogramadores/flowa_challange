@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
-using Flowa.OrderAccumulator.Infrastructure.Orders.Adapters;
 
 namespace Flowa.OrderAccumulator.Tests;
 
@@ -9,10 +8,14 @@ namespace Flowa.OrderAccumulator.Tests;
 // painel apagável, chave ou endereço da org no repositório público.
 public sealed class PainelDatadogStaticTests
 {
+    private const string ExposureMetric = "flowa.exposicao";
+    private const string AcceptedOrdersMetric = "flowa.ordens.aceitas";
+    private const string RejectedOrdersMetric = "flowa.ordens.rejeitadas";
+
     private static readonly string RepoRoot = FindRepoRoot();
     private static readonly string PainelWorkflow = ReadText(Path.Combine(RepoRoot, ".github", "workflows", "2-develop-painel-datadog.yml"));
     private static readonly string DeployWorkflow = ReadText(Path.Combine(RepoRoot, ".github", "workflows", "2-develop.yml"));
-    private static readonly string PainelDirectory = Path.Combine(RepoRoot, "observabilidade", "datadog");
+    private static readonly string PainelDirectory = Path.Combine(RepoRoot, "observability", "datadog");
     private static readonly string MainTf = ReadText(Path.Combine(PainelDirectory, "main.tf"));
     private static readonly string PainelTf = ReadText(Path.Combine(PainelDirectory, "painel.tf"));
     private static readonly string LockFile = ReadText(Path.Combine(PainelDirectory, ".terraform.lock.hcl"));
@@ -26,7 +29,7 @@ public sealed class PainelDatadogStaticTests
         Assert.Equal(["push", "workflow_dispatch"], triggerKeys);
         Assert.Contains("    branches: [develop]\n", onBlock);
         var pathFilters = Regex.Matches(onBlock, @"^      - ""(?<caminho>[^""]+)""", RegexOptions.Multiline).Select(caminho => caminho.Groups["caminho"].Value);
-        Assert.Equal(["observabilidade/datadog/**", ".github/workflows/2-develop-painel-datadog.yml"], pathFilters);
+        Assert.Equal(["observability/datadog/**", ".github/workflows/2-develop-painel-datadog.yml"], pathFilters);
     }
 
     [Fact]
@@ -60,7 +63,7 @@ public sealed class PainelDatadogStaticTests
     [Fact]
     public void Workflow_keeps_the_painel_state_in_its_own_key_with_lock()
     {
-        Assert.Contains("working-directory: observabilidade/datadog", PainelWorkflow);
+        Assert.Contains("working-directory: observability/datadog", PainelWorkflow);
         Assert.Contains(@"-backend-config=""bucket=$TF_STATE_BUCKET""", PainelWorkflow);
         Assert.Contains(@"-backend-config=""key=flowa/datadog-dev.tfstate""", PainelWorkflow);
         Assert.Contains(@"-backend-config=""use_lockfile=true""", PainelWorkflow);
@@ -101,44 +104,64 @@ public sealed class PainelDatadogStaticTests
     }
 
     [Fact]
-    public void Dashboard_reads_the_three_contract_metrics_of_the_order_accumulator_in_dev()
+    public void Dashboard_reads_the_three_contract_metrics_only_from_the_datadog_metrics_worker()
     {
-        Assert.Contains(@"filtro_do_order_accumulator = ""env:dev,service:order-accumulator""", PainelTf);
-        Assert.Contains($@"""sum:{OrderMetricNames.AcceptedOrders}{{${{local.filtro_do_order_accumulator}}}}.as_count()""", PainelTf);
-        Assert.Contains($@"""sum:{OrderMetricNames.RejectedOrders}{{${{local.filtro_do_order_accumulator}}}}.as_count()""", PainelTf);
-        Assert.Contains($@"""max:{OrderMetricNames.SymbolExposure}{{${{local.filtro_do_order_accumulator}}}} by {{symbol}}""", PainelTf);
+        var businessMetricQueries = Regex.Matches(PainelTf, @"query\s+= ""(?<consulta>[a-z0-9]+:flowa\.[a-z.]+\{[^""]*)""")
+            .Select(consulta => consulta.Groups["consulta"].Value)
+            .ToList();
+
+        Assert.Contains("  filtro_do_worker_de_metricas = \"service:datadog-metrics\"\n", PainelTf);
+        Assert.Equal(10, businessMetricQueries.Count(consulta => consulta.Contains($"{ExposureMetric}{{", StringComparison.Ordinal)));
+        Assert.Equal(13, businessMetricQueries.Count(consulta => consulta.Contains($"{AcceptedOrdersMetric}{{", StringComparison.Ordinal)));
+        Assert.Equal(11, businessMetricQueries.Count(consulta => consulta.Contains($"{RejectedOrdersMetric}{{", StringComparison.Ordinal)));
+        Assert.All(businessMetricQueries, consulta => Assert.Contains("{$env,${local.filtro_do_worker_de_metricas}", consulta));
+        Assert.DoesNotContain("service:order-accumulator", PainelTf);
     }
 
     [Fact]
-    public void Each_widget_reads_its_own_query_and_the_exposure_chart_marks_both_limits()
+    public void Dashboard_reads_traces_and_runtime_through_the_service_variable_that_defaults_to_the_order_accumulator()
     {
-        var dashboardWidgets = PainelTf.Split("\n  widget {\n").Skip(1).ToList();
-        const string acceptedOrdersQuery = "            name        = \"aceitas\"\n            data_source = \"metrics\"\n            query       = local.ordens_aceitas\n";
-        const string rejectedOrdersQuery = "            name        = \"rejeitadas\"\n            data_source = \"metrics\"\n            query       = local.ordens_rejeitadas\n";
+        var serviceVariableDefault = Regex.Match(PainelTf, @"  template_variable \{\n    default = ""(?<padrao>[^""]+)""\n    name    = ""service""\n").Groups["padrao"].Value;
+        var traceAndRuntimeQueries = Regex.Matches(PainelTf, @"query\s+= ""(?<consulta>[a-z0-9]+:(trace|runtime)\.[a-z._]+\{[^""]*)""")
+            .Select(consulta => consulta.Groups["consulta"].Value)
+            .ToList();
+
+        Assert.Equal("order-accumulator", serviceVariableDefault);
+        Assert.Equal(8, traceAndRuntimeQueries.Count);
+        Assert.All(traceAndRuntimeQueries, consulta => Assert.Contains("{$env,$service}", consulta));
+    }
+
+    [Fact]
+    public void Dashboard_keeps_every_titled_widget_of_the_live_panel_in_order()
+    {
+        var widgetTitles = Regex.Matches(PainelTf, @"^\s{6,}title\s+= ""(?<titulo>[^""]+)""", RegexOptions.Multiline)
+            .Select(titulo => titulo.Groups["titulo"].Value);
+
+        Assert.Equal(
+            [
+                "Visão geral", "Total de ordens", "Aceitas", "Rejeitadas", "Taxa de aceite", "Ritmo de ordens",
+                "Latência de registro p95", "Maior exposição comprada", "Maior exposição vendida", "Exposição líquida total",
+                "Pico de uso do limite", "Painel de risco por símbolo", "Mix de ordens · símbolo › lado",
+                "Exposição e limites", "Exposição por símbolo", "Exposição agora", "Uso do limite por símbolo (%)",
+                "Folga até o limite (menor = mais risco)",
+                "Fluxo de ordens", "Ordens aceitas x rejeitadas", "Taxa de aceite (%)", "Ordens por símbolo",
+                "Ordens por lado (compra x venda)", "Rejeições por símbolo e lado", "Volume por símbolo vs. 1 hora antes",
+                "Resumo por símbolo e lado",
+                "Saúde do processamento", "Recebimento FIX · p50 / p95 / p99 (ms)", "Postgres · p95 por query (ms)",
+                "Erros no processamento",
+            ],
+            widgetTitles);
+        Assert.Contains("  layout_type = \"ordered\"\n", PainelTf);
+    }
+
+    [Fact]
+    public void Exposure_chart_marks_both_limits_of_the_exposure_rule()
+    {
+        var exposureChart = Regex.Match(PainelTf, @"title\s+= ""Exposição por símbolo""\n(?<grafico>.*?)\n      widget \{\n", RegexOptions.Singleline).Groups["grafico"].Value;
         var exposureLimit = ExposureLimitPolicy.PerSymbol.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 
-        Assert.Equal(4, dashboardWidgets.Count);
-
-        var acceptanceRateWidget = dashboardWidgets[0];
-        Assert.StartsWith("    query_value_definition {\n      title       = \"Taxa de aceite no período\"\n", acceptanceRateWidget);
-        Assert.Contains("          formula_expression = \"100 * aceitas / (aceitas + rejeitadas)\"\n", acceptanceRateWidget);
-        Assert.Contains(acceptedOrdersQuery, acceptanceRateWidget);
-        Assert.Contains(rejectedOrdersQuery, acceptanceRateWidget);
-
-        var ordersOverTimeWidget = dashboardWidgets[1];
-        Assert.StartsWith("    timeseries_definition {\n      title       = \"Ordens aceitas e rejeitadas\"\n", ordersOverTimeWidget);
-        Assert.Contains(acceptedOrdersQuery, ordersOverTimeWidget);
-        Assert.Contains(rejectedOrdersQuery, ordersOverTimeWidget);
-
-        var exposureOverTimeWidget = dashboardWidgets[2];
-        Assert.StartsWith("    timeseries_definition {\n      title       = \"Exposição por símbolo\"\n", exposureOverTimeWidget);
-        Assert.Contains("        q            = local.exposicao_por_simbolo\n", exposureOverTimeWidget);
-        Assert.Contains($"        value        = \"y = {exposureLimit}\"\n", exposureOverTimeWidget);
-        Assert.Contains($"        value        = \"y = -{exposureLimit}\"\n", exposureOverTimeWidget);
-
-        var exposureNowWidget = dashboardWidgets[3];
-        Assert.StartsWith("    toplist_definition {\n      title = \"Exposição agora\"\n", exposureNowWidget);
-        Assert.Contains("        q = local.exposicao_por_simbolo\n", exposureNowWidget);
+        Assert.Contains($"value        = \"y = {exposureLimit}\"\n", exposureChart);
+        Assert.Contains($"value        = \"y = -{exposureLimit}\"\n", exposureChart);
     }
 
     [Fact]
