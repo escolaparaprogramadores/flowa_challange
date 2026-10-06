@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { CREATE_ORDER_ROUTE, ORDERS_ROUTE } from '../src/services/ordersService';
+import { expect, test, type Page, type Route } from '@playwright/test';
+import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/services/ordersService';
 
 // CA-3 against the real OrderGenerator and OrderAccumulator: the box above the "Compra/Venda" table shows the answer of
 // every send. The test starts from "Deletar tudo" so the PETR4 exposure is zero and the second big buy breaks the limit.
@@ -106,4 +106,39 @@ test('RF-04: the box of the previous answer goes away as soon as a new send star
   const answerOfTheSmallBuy = locateOrderListCard(page).getByTestId('caixa-de-resposta');
   await expect(answerOfTheSmallBuy.getByTestId('status-da-ordem')).toHaveText('Aceita');
   await expect(answerOfTheSmallBuy.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 1 × R$ 10,00');
+});
+
+test('P02-10: the box shows the answer of the POST without waiting for the list and exposure reads after it', async ({ page }) => {
+  await page.goto('/');
+  await deleteAllOrdersOnServer(page);
+  await page.reload();
+  // The real reads of list and exposure after the send are held for 4 s, as a slow database would hold them.
+  let heldReadsStillPending = 0;
+  const holdReadAfterSend = async (heldReadRoute: Route) => {
+    heldReadsStillPending += 1;
+    await new Promise((releaseHeldRead) => setTimeout(releaseHeldRead, 4_000));
+    heldReadsStillPending -= 1;
+    await heldReadRoute.continue();
+  };
+  await page.route(`**${ORDERS_ROUTE}?page=*`, holdReadAfterSend);
+  await page.route(`**${EXPOSURES_ROUTE}`, holdReadAfterSend);
+
+  const createOrderResponse = page.waitForResponse(
+    (httpResponse) => httpResponse.request().method() === 'POST' && new URL(httpResponse.url()).pathname === CREATE_ORDER_ROUTE,
+  );
+  await page.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'VALE3', exact: true }).click();
+  await page.getByLabel(/^Quantidade de/).fill('3');
+  await page.getByLabel('Preço por ação (R$)').fill('3,33');
+  await page.getByRole('button', { name: /^Enviar ordem/ }).click();
+  expect((await createOrderResponse).status()).toBe(200);
+
+  const answerBox = locateOrderListCard(page).getByTestId('caixa-de-resposta');
+  await expect(answerBox.getByTestId('status-da-ordem')).toHaveText('Aceita', { timeout: 2_000 });
+  await expect(answerBox.getByTestId('ordem-da-resposta')).toHaveText('VALE3 · Compra · 3 × R$ 3,33');
+  await expect(page.getByRole('button', { name: /^Enviar ordem/ })).toBeEnabled({ timeout: 2_000 });
+  expect(heldReadsStillPending).toBe(2);
+  await expect(page.getByTestId('linha-da-ordem')).toHaveCount(0);
+
+  // When the reads are released, the row arrives at the list as before.
+  await expect(page.getByTestId('linha-da-ordem')).toHaveCount(1, { timeout: 10_000 });
 });
