@@ -89,7 +89,7 @@ resource "aws_iam_role_policy" "permissoes_de_execucao_dos_servicos_flowa" {
           Resource = "${aws_cloudwatch_log_group.logs_dos_servicos_flowa[each.key].arn}:*"
         },
       ],
-      each.key == "accumulator" ? [{
+      contains(["generator", "accumulator"], each.key) ? [{
         Effect   = "Allow"
         Action   = "secretsmanager:GetSecretValue"
         Resource = local.db_secret_arn
@@ -162,8 +162,13 @@ resource "aws_ecs_task_definition" "tarefa_do_order_generator" {
       { name = "ASPNETCORE_HTTP_PORTS", value = tostring(local.porta_http_do_generator) },
       { name = "Fix__AcceptorHost", value = local.nome_dns_do_accumulator },
       { name = "Fix__AcceptorPort", value = tostring(local.porta_fix) },
-      { name = "OrderAccumulator__BaseUrl", value = "http://${local.nome_dns_do_accumulator}:${local.porta_http_do_accumulator}" },
+      { name = "Database__MaximumPoolSize", value = tostring(local.limite_do_pool_do_generator) },
     ], local.variaveis_datadog_do_app_por_servico_flowa.generator)
+
+    # O Generator lê e apaga no banco com o mesmo segredo do accumulator; a senha não fica na task definition.
+    secrets = [
+      { name = "ConnectionStrings__Flowa", valueFrom = "${local.db_secret_arn}:connection_string::" },
+    ]
 
     healthCheck = {
       command     = ["CMD", "bash", "-c", local.comando_health_check_por_servico_flowa.generator]
