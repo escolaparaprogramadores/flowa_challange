@@ -11,6 +11,9 @@ public static class UseCaseFailureDataMessageMapper
     public const string OrderAccumulatorUnavailableMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
     public const string OrderAccumulatorUnavailableErrorCode = "order-accumulator-unavailable";
 
+    public static bool WasCancelledByTheCaller(Exception useCaseFailure, CancellationToken callerCancellation) =>
+        useCaseFailure is OperationCanceledException && callerCancellation.IsCancellationRequested;
+
     public static DataMessage<TData> MapFailureToDataMessage<TData>(Exception useCaseFailure)
     {
         ArgumentNullException.ThrowIfNull(useCaseFailure);

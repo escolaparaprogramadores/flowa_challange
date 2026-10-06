@@ -258,14 +258,28 @@ public sealed class OrdersProxyTests : IDisposable
         Assert.DoesNotContain(crossSiteResponseHeaderNames, headerName => headerName.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase));
     }
 
-    // CA-34: the list is called on every page change; it must not write an Information log per call.
-    // That holds for the good answer, the invalid page, the delete and the accumulator being down.
+    private const string RequestReceivedInformationLine =
+        "Information Base.OrderGenerator.Entrypoint.Logging.RequestReceivedLoggingMiddleware: Request received.";
+    private const string HttpCallCompletedInformationLine = "Information Base.OrderGenerator.Commons.Http.HttpRequestClient: HTTP call completed.";
+    private const string StoredOrdersPageReadInformationLine =
+        "Information Base.OrderGenerator.Application.Orders.UseCases.ListOrdersUseCase: Stored orders page read.";
+    private const string AllStoredOrdersDeletedInformationLine =
+        "Information Base.OrderGenerator.Application.Orders.UseCases.DeleteAllOrdersUseCase: All stored orders deleted.";
+
+    // CA-34 with G-9: the list is called on every page change, so each call writes exactly the CA-21 lines
+    // (request received, HTTP call completed, use case fact) and no other Information line, in the good answer,
+    // the invalid page, the delete and the accumulator being down.
     [Theory]
-    [InlineData("GET", "/api/orders?page=1", true, HttpStatusCode.OK)]
-    [InlineData("GET", "/api/orders?page=abc", true, HttpStatusCode.BadRequest)]
-    [InlineData("DELETE", "/api/orders", true, HttpStatusCode.NoContent)]
-    [InlineData("GET", "/api/orders?page=1", false, HttpStatusCode.ServiceUnavailable)]
-    public async Task Orders_routes_do_not_write_information_logs(string ordersHttpMethod, string ordersPath, bool isAccumulatorRunning, HttpStatusCode expectedOrdersResponseStatus)
+    [InlineData("GET", "/api/orders?page=1", true, HttpStatusCode.OK,
+        new[] { RequestReceivedInformationLine, HttpCallCompletedInformationLine, StoredOrdersPageReadInformationLine })]
+    [InlineData("GET", "/api/orders?page=abc", true, HttpStatusCode.BadRequest,
+        new[] { RequestReceivedInformationLine, HttpCallCompletedInformationLine })]
+    [InlineData("DELETE", "/api/orders", true, HttpStatusCode.NoContent,
+        new[] { RequestReceivedInformationLine, HttpCallCompletedInformationLine, AllStoredOrdersDeletedInformationLine })]
+    [InlineData("GET", "/api/orders?page=1", false, HttpStatusCode.ServiceUnavailable,
+        new[] { RequestReceivedInformationLine })]
+    public async Task Orders_routes_write_only_the_request_call_and_use_case_information_lines(
+        string ordersHttpMethod, string ordersPath, bool isAccumulatorRunning, HttpStatusCode expectedOrdersResponseStatus, string[] expectedInformationLines)
     {
         await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
         {
@@ -294,8 +308,33 @@ public sealed class OrdersProxyTests : IDisposable
 
         Assert.Equal(expectedOrdersResponseStatus, ordersResponse.StatusCode);
         // No FIX acceptor runs in this test: the FIX session logs its reconnection attempts, which do not come from the call.
+        Assert.Equal(expectedInformationLines, orderGeneratorLogCaptureProvider.CapturedLogLines
+            .Where(capturedLogLine => capturedLogLine.StartsWith($"{LogLevel.Information} ")
+                && !capturedLogLine.StartsWith($"{LogLevel.Information} Base.OrderGenerator.Infrastructure.Fix.FixSessionLog: "))
+            .ToArray());
+    }
+
+    // Regression of the F4 self-review: a caller that gives up while the OrderAccumulator is still answering is not an
+    // error of the app; it must not turn into a 500 with an Error line (the framework handles it, as in c41ed4b).
+    [Fact]
+    public async Task Caller_that_gives_up_on_the_orders_list_leaves_no_warning_or_error_line()
+    {
+        await using var fakeAccumulator = await StartFakeOrdersAccumulator(async ordersHttpContext =>
+            await Task.Delay(TimeSpan.FromSeconds(4), ordersHttpContext.RequestAborted));
+        var orderGeneratorLogCaptureProvider = new OrderGeneratorLogCaptureProvider();
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(OrderGeneratorTestHost.FindFreeTcpPort(), fakeAccumulator.FakeAccumulatorUrl)
+            .WithWebHostBuilder(orderGeneratorWebHostBuilder =>
+                orderGeneratorWebHostBuilder.ConfigureLogging(orderGeneratorLogging => orderGeneratorLogging.AddProvider(orderGeneratorLogCaptureProvider)));
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+        using var callerGivingUp = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orderGeneratorClient.GetAsync("/api/orders?page=1", callerGivingUp.Token));
+        await Task.Delay(TimeSpan.FromSeconds(1));
+
+        Assert.Contains(RequestReceivedInformationLine, orderGeneratorLogCaptureProvider.CapturedLogLines);
         Assert.DoesNotContain(orderGeneratorLogCaptureProvider.CapturedLogLines, capturedLogLine =>
-            capturedLogLine.StartsWith($"{LogLevel.Information} ") && !capturedLogLine.StartsWith($"{LogLevel.Information} Base.OrderGenerator.Infrastructure.Fix.FixSessionLog: "));
+            (capturedLogLine.StartsWith($"{LogLevel.Warning} ") || capturedLogLine.StartsWith($"{LogLevel.Error} "))
+            && !capturedLogLine.StartsWith($"{LogLevel.Warning} Microsoft.AspNetCore.StaticFiles."));
     }
 
     private static async Task AnswerOrdersPageOrDeletion(HttpContext ordersHttpContext)

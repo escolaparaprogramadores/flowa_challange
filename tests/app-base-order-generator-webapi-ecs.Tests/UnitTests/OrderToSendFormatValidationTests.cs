@@ -5,7 +5,7 @@ namespace Base.OrderGenerator.Tests;
 
 // Decision 24: the OrderGenerator checks only what a NewOrderSingle cannot carry. Limits, symbols,
 // whole quantity and the 0.01 step are left to the OrderAccumulator (decision 12).
-public class OrderRequestFormatValidatorTests
+public class OrderToSendFormatValidationTests
 {
     private const string ValidOrderSymbol = "PETR4";
     private const string ValidOrderSideText = "buy";

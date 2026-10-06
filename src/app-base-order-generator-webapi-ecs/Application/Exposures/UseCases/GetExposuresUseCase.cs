@@ -35,6 +35,12 @@ public sealed class GetExposuresUseCase
         }
         catch (Exception exposuresReadingFailure)
         {
+            if (UseCaseFailureDataMessageMapper.WasCancelledByTheCaller(exposuresReadingFailure, cancellationToken))
+            {
+                exposuresReading.RecordOperationResult(OperationResults.CancelledByTheCaller);
+                throw;
+            }
+
             exposuresReading.RecordOperationResult(OperationResults.Failed);
             return UseCaseFailureDataMessageMapper.MapFailureToDataMessage<JsonElement>(exposuresReadingFailure);
         }

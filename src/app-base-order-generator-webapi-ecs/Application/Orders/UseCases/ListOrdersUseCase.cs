@@ -40,6 +40,12 @@ public sealed class ListOrdersUseCase
         }
         catch (Exception ordersListingFailure)
         {
+            if (UseCaseFailureDataMessageMapper.WasCancelledByTheCaller(ordersListingFailure, cancellationToken))
+            {
+                ordersListing.RecordOperationResult(OperationResults.CancelledByTheCaller);
+                throw;
+            }
+
             ordersListing.RecordOperationResult(OperationResults.Failed);
             return UseCaseFailureDataMessageMapper.MapFailureToDataMessage<JsonElement>(ordersListingFailure);
         }

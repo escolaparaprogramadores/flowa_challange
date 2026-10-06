@@ -35,6 +35,12 @@ public sealed class DeleteAllOrdersUseCase
         }
         catch (Exception ordersDeletionFailure)
         {
+            if (UseCaseFailureDataMessageMapper.WasCancelledByTheCaller(ordersDeletionFailure, cancellationToken))
+            {
+                ordersDeletion.RecordOperationResult(OperationResults.CancelledByTheCaller);
+                throw;
+            }
+
             ordersDeletion.RecordOperationResult(OperationResults.Failed);
             return UseCaseFailureDataMessageMapper.MapFailureToDataMessage<bool>(ordersDeletionFailure);
         }
