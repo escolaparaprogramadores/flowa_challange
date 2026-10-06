@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttemptedOrder, ListedOrder, OrderListPage } from './ordersService';
 import {
-  MAX_RECHECKS_AFTER_UNCONFIRMED_SEND,
+  MAX_READS_AFTER_UNCONFIRMED_SEND,
   RECHECK_INTERVAL_IN_MS,
   isSentOrderOnListPage,
   startSentOrderRecheckCycle,
@@ -44,12 +44,12 @@ describe('isSentOrderOnListPage', () => {
 });
 
 describe('startSentOrderRecheckCycle', () => {
-  it('RNF-01: the ceiling is 3 reads, one every 2 s', () => {
-    expect(MAX_RECHECKS_AFTER_UNCONFIRMED_SEND).toBe(3);
+  it('RNF-01: the ceiling is 3 reads after the warning, one every 2 s', () => {
+    expect(MAX_READS_AFTER_UNCONFIRMED_SEND).toBe(3);
     expect(RECHECK_INTERVAL_IN_MS).toBe(2_000);
   });
 
-  it('CA-27: reads once every 2 s, at most 3 times, and leaves no timer behind', async () => {
+  it('CA-27: after the read of the send itself, reads once every 2 s, 2 more times (3 in all), and leaves no timer behind', async () => {
     vi.useFakeTimers();
     const recheckWhetherSentOrderAppeared = vi.fn(async () => false);
     startSentOrderRecheckCycle(recheckWhetherSentOrderAppeared);
@@ -57,24 +57,24 @@ describe('startSentOrderRecheckCycle', () => {
     expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(0);
     await vi.advanceTimersByTimeAsync(1);
     expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(3);
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(3);
+    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(MAX_READS_AFTER_UNCONFIRMED_SEND - 1);
   });
 
   it('CA-27: stops as soon as the order appears', async () => {
     vi.useFakeTimers();
-    const recheckWhetherSentOrderAppeared = vi.fn(async () => recheckWhetherSentOrderAppeared.mock.calls.length >= 2);
+    const recheckWhetherSentOrderAppeared = vi.fn(async () => true);
     startSentOrderRecheckCycle(recheckWhetherSentOrderAppeared);
-    await vi.advanceTimersByTimeAsync(4_000);
-    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(2);
+    expect(recheckWhetherSentOrderAppeared).toHaveBeenCalledTimes(1);
   });
 
   it('RF-12: cancelling (new send or leaving the screen) stops the cycle before the next read', async () => {
