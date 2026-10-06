@@ -25,6 +25,7 @@ public sealed class LayerDependencyTests
     // The Domain may also use the shared core of the Commons; the Commons may use the technical libraries
     // (Microsoft.Extensions: HTTP client and logging; Dapper and Npgsql: database; StatsdClient: Datadog agent).
     private static readonly string[] CommonsTechnicalLibraryNamespaces = ["Microsoft.Extensions", "Dapper", "Npgsql", "StatsdClient"];
+    private static readonly string[] TechnicalLibraryNamespacesOnlyForTheCommons = ["Dapper", "Npgsql", "StatsdClient", "Polly", "Amazon"];
     private static readonly string[] DomainAllowedNamespaces =
     [
         BaseClassLibraryNamespace, LayerNamespace("Domain"),
@@ -63,6 +64,31 @@ public sealed class LayerDependencyTests
 
         Assert.NotEmpty(infrastructureTypes.GetTypes());
         Assert.True(infrastructureDependencyResult.IsSuccessful, DescribeFailingTypes(infrastructureDependencyResult));
+    }
+
+    // Rule 39 of the owner: the shared Commons brings Dapper, Npgsql and StatsdClient to the OrderGenerator by
+    // ProjectReference, so the compiler no longer stops them; the Infrastructure and the Entrypoint reach them only
+    // through the Commons. QuickFIX/n stays as the written exception of decision 13 and is not on this list.
+    [Fact]
+    public void Infrastructure_does_not_use_a_technical_library_directly()
+    {
+        var infrastructureTypes = TypesOfLayer("Infrastructure");
+        var infrastructureTechnicalLibraryResult = infrastructureTypes.ShouldNot()
+            .HaveDependencyOnAny(TechnicalLibraryNamespacesOnlyForTheCommons).GetResult();
+
+        Assert.NotEmpty(infrastructureTypes.GetTypes());
+        Assert.True(infrastructureTechnicalLibraryResult.IsSuccessful, DescribeFailingTypes(infrastructureTechnicalLibraryResult));
+    }
+
+    [Fact]
+    public void Entrypoint_does_not_use_a_technical_library_directly()
+    {
+        var entrypointTypes = TypesOfLayer("Entrypoint");
+        var entrypointTechnicalLibraryResult = entrypointTypes.ShouldNot()
+            .HaveDependencyOnAny(TechnicalLibraryNamespacesOnlyForTheCommons).GetResult();
+
+        Assert.NotEmpty(entrypointTypes.GetTypes());
+        Assert.True(entrypointTechnicalLibraryResult.IsSuccessful, DescribeFailingTypes(entrypointTechnicalLibraryResult));
     }
 
     [Fact]

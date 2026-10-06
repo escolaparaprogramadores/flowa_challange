@@ -41,6 +41,9 @@ public sealed class LayerDependencyTests
         AssertCommonsFolderOnlyDependsOn(CommonsNamespace("Observability"), BaseClassLibraryNamespace, "StatsdClient", CommonsNamespace("Observability"));
         AssertCommonsFolderOnlyDependsOn(CommonsNamespace("Logging"), BaseClassLibraryNamespace, "Microsoft.Extensions", CommonsNamespace("Logging"));
         AssertCommonsFolderOnlyDependsOn(
+            CommonsNamespace("Http"), BaseClassLibraryNamespace, "Microsoft.Extensions", CommonsNamespace("Http"), CommonsNamespace("Logging"),
+            CommonsNamespace("Responses"));
+        AssertCommonsFolderOnlyDependsOn(
             CommonsNamespace("DependencyInjection"), BaseClassLibraryNamespace, "Microsoft.Extensions", CommonsNamespace("Database"), CommonsNamespace("Logging"),
             CommonsNamespace("Observability"),
             CommonsNamespace("DependencyInjection"));
