@@ -17,12 +17,11 @@
     <InternalsVisibleTo Include="OrderGenerator.Tests" />
   </ItemGroup>
 
-  <!-- The FIX session and the FIX 4.4 dictionary with tag 5100 sit next to the executable. -->
+  <!-- The FIX session sits next to the executable; the FIX 4.4 dictionary with tag 5100 comes from the Commons. -->
   <ItemGroup>
     <!-- The Vite build (F5) also goes to the output, so dotnet run and the plain build serve the page. -->
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
     <None Include="initiator.cfg" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Infrastructure\Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
