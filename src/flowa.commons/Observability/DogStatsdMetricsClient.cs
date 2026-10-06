@@ -22,6 +22,9 @@ public sealed class DogStatsdMetricsClient : IMetricsClient, IDisposable
 
     public void IncrementCounter(string metricName, string[] metricTags) => dogStatsdService.Increment(metricName, tags: metricTags);
 
+    public void IncrementCounter(string metricName, long counterIncrement, string[] metricTags) =>
+        dogStatsdService.Counter(metricName, counterIncrement, tags: metricTags);
+
     public void RecordGauge(string metricName, double gaugeValue, string[] metricTags) => dogStatsdService.Gauge(metricName, gaugeValue, tags: metricTags);
 
     public void FlushPendingMetrics() => dogStatsdService.Flush();

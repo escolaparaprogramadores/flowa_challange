@@ -18,7 +18,7 @@ internal static class DatadogMetricsInfrastructureExtensions
     {
         public IServiceCollection AddDatadogMetricsInfrastructure(string flowaConnectionString, IConfiguration datadogMetricsConfiguration)
         {
-            datadogMetricsServices.AddPostgresDatabase(flowaConnectionString);
+            datadogMetricsServices.AddPostgresDatabase(flowaConnectionString, datadogMetricsConfiguration);
             datadogMetricsServices.AddScoped<ISymbolExposureReadRepository, SymbolExposureReadRepository>();
             datadogMetricsServices.AddScoped<IAnsweredOrderCountReadRepository, AnsweredOrderCountReadRepository>();
             datadogMetricsServices.AddSingleton<IMetricsClient>(_ =>

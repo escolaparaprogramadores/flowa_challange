@@ -21,11 +21,9 @@ internal sealed class DatadogOrderMetricsAdapter : IOrderMetricsPort
                 TagKey: OrderMetricTagMapper.BuildOrderDecisionTagKey(answeredOrderCount.Symbol, answeredOrderCount.Side)));
 
         foreach (var orderCountOfMetricAndTags in orderCountsByMetricAndTags)
-        {
-            var orderDecisionTags = orderCountOfMetricAndTags.Key.TagKey.Split(',');
-            var answeredOrdersOfMetricAndTags = orderCountOfMetricAndTags.Sum(answeredOrderCount => answeredOrderCount.OrderCount);
-            for (var countedOrder = 0L; countedOrder < answeredOrdersOfMetricAndTags; countedOrder++)
-                datadogMetricsClient.IncrementCounter(orderCountOfMetricAndTags.Key.MetricName, orderDecisionTags);
-        }
+            datadogMetricsClient.IncrementCounter(
+                orderCountOfMetricAndTags.Key.MetricName,
+                orderCountOfMetricAndTags.Sum(answeredOrderCount => answeredOrderCount.OrderCount),
+                orderCountOfMetricAndTags.Key.TagKey.Split(','));
     }
 }
