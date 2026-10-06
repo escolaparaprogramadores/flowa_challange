@@ -320,7 +320,7 @@ plano contratado, os três painéis param de receber dado novo depois disso.
 
 ### Teste de carga
 
-O k6 (`performance testing/carga-ordens.js`) manda cerca de 15 ordens por segundo durante 5 minutos, abaixo do limite
+O k6 (`performance test/carga-ordens.js`) manda cerca de 15 ordens por segundo durante 5 minutos, abaixo do limite
 de 20 por segundo do API Gateway. Em PETR4, VALE3 e VIIA4 ele provoca três resultados:
 
 - **Aceitas:** pares de compra e venda do mesmo ativo, quantidade e preço, que se compensam.
@@ -345,6 +345,6 @@ Medição na máquina, contra o `docker compose` do commit 62979f4 (5 minutos, 4
 
 Para rodar no ambiente dev: em Actions, escolha o workflow `k6-carga.yml` e clique em "Run workflow".
 Só rode quando ninguém mais estiver mandando ordens para dev, senão a exposição não fecha. O resumo
-aparece na página do run e fica como anexo. Na máquina: `k6 run -e FLOWA_URL=http://localhost:8080 "performance testing/carga-ordens.js"`.
+aparece na página do run e fica como anexo. Na máquina: `k6 run -e FLOWA_URL=http://localhost:8080 "performance test/carga-ordens.js"`.
 
 This is a challenge by [Coodesh](https://coodesh.com/)

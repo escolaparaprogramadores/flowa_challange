@@ -1,4 +1,4 @@
-// Flowa load test with k6 OSS: k6 run -e FLOWA_URL=https://<api> "performance testing/carga-ordens.js"
+// Flowa load test with k6 OSS: k6 run -e FLOWA_URL=https://<api> "performance test/carga-ordens.js"
 // It sends accepted orders, orders rejected for an invalid field and orders rejected for crossing the
 // exposure limit on every symbol, and leaves each symbol's exposure where it was before the run.
 import http from 'k6/http';
