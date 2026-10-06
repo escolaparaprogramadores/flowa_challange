@@ -317,3 +317,43 @@ public sealed class FixOptionsTests
         Assert.Equal(5, executionReportTimeoutSeconds);
     }
 }
+
+public sealed class FixTestAcceptorDiagnosticsTests
+{
+    [Fact]
+    public void Session_state_names_the_missing_initiator_when_only_the_acceptor_is_up()
+    {
+        // Arrange
+        using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        fixTestAcceptor.StartFixTestAcceptor();
+
+        // Act
+        var fixSessionState = fixTestAcceptor.DescribeFixSessionState();
+
+        // Assert
+        Assert.StartsWith(
+            "Registry: initiator session missing, acceptor session present (logged on False, responder False). Acceptor events: ",
+            fixSessionState);
+    }
+
+    [Fact]
+    public async Task Acceptor_events_keep_the_logon_the_order_generator_sent()
+    {
+        // Arrange
+        using var fixTestAcceptor = new FixTestAcceptor(OrderGeneratorTestHost.FindFreeTcpPort());
+        fixTestAcceptor.StartFixTestAcceptor();
+        await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(fixTestAcceptor.AcceptorPort);
+        using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
+
+        // Act
+        await fixTestAcceptor.WaitForFixSessionLogonAsync();
+        var fixSessionState = fixTestAcceptor.DescribeFixSessionState();
+
+        // Assert
+        Assert.Single(fixTestAcceptor.AcceptorEvents, acceptorEvent =>
+            acceptorEvent.Contains("FIX.4.4:ORDERACCUMULATOR->ORDERGENERATOR: in 8=FIX.4.4|") && acceptorEvent.Contains("|35=A|"));
+        Assert.StartsWith(
+            "Registry: initiator session present (logged on True, responder True), acceptor session present (logged on True, responder True).",
+            fixSessionState);
+    }
+}

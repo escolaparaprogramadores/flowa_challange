@@ -22,6 +22,9 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
 {
     private ThreadedSocketAcceptor? _threadedFixAcceptor;
     private TaskCompletionSource _acceptorLogon = NewFixLogonSignal();
+    private static readonly SessionID InitiatorSessionId = new("FIX.4.4", "ORDERGENERATOR", "ORDERACCUMULATOR");
+    private static readonly SessionID AcceptorSessionId = new("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR");
+
     private int _executionReportNumber;
 
     public FixTestAcceptor(int fixAcceptorPort) => AcceptorPort = fixAcceptorPort;
@@ -29,6 +32,9 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
     public int AcceptorPort { get; }
 
     public ConcurrentQueue<Message> ReceivedOrders { get; } = new();
+
+    // What QuickFIX logged on the acceptor side (session events, admin messages, unknown or repeated sessions).
+    public ConcurrentQueue<string> AcceptorEvents { get; } = new();
 
     // Each ExecutionReport sent back, by the ClOrdID it carries.
     public ConcurrentDictionary<string, Message> SentExecutionReports { get; } = new();
@@ -72,7 +78,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
             SenderCompID=ORDERACCUMULATOR
             TargetCompID=ORDERGENERATOR
             """));
-        _threadedFixAcceptor = new ThreadedSocketAcceptor(this, new MemoryStoreFactory(), acceptorSettings, new NullLogFactory(), new DefaultMessageFactory());
+        _threadedFixAcceptor = new ThreadedSocketAcceptor(this, new MemoryStoreFactory(), acceptorSettings, new FixTestAcceptorLogFactory(AcceptorEvents), new DefaultMessageFactory());
         _threadedFixAcceptor.Start();
     }
 
@@ -84,17 +90,34 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
     }
 
     // Waits for both ends: the acceptor received the Logon and the initiator already received its answer.
+    // On a timeout the message says how QuickFIX's static session registry and the acceptor events looked.
     public async Task WaitForFixSessionLogonAsync()
     {
-        await _acceptorLogon.Task.WaitAsync(TimeSpan.FromSeconds(15));
-        var initiatorSessionId = new SessionID("FIX.4.4", "ORDERGENERATOR", "ORDERACCUMULATOR");
+        try
+        {
+            await _acceptorLogon.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        }
+        catch (TimeoutException acceptorLogonTimeout)
+        {
+            throw new TimeoutException("The acceptor received no Logon in 15 s. " + DescribeFixSessionState(), acceptorLogonTimeout);
+        }
+
         var fixLogonClock = Stopwatch.StartNew();
-        while (Session.LookupSession(initiatorSessionId)?.IsLoggedOn != true)
+        while (Session.LookupSession(InitiatorSessionId)?.IsLoggedOn != true)
         {
             if (fixLogonClock.Elapsed > TimeSpan.FromSeconds(15))
-                throw new TimeoutException("The initiator did not log on.");
+                throw new TimeoutException("The initiator did not log on. " + DescribeFixSessionState());
             await Task.Delay(50);
         }
+    }
+
+    public string DescribeFixSessionState()
+    {
+        var initiatorSession = Session.LookupSession(InitiatorSessionId);
+        var acceptorSession = Session.LookupSession(AcceptorSessionId);
+        return $"Registry: initiator session {(initiatorSession is null ? "missing" : $"present (logged on {initiatorSession.IsLoggedOn}, responder {initiatorSession.HasResponder})")}, " +
+            $"acceptor session {(acceptorSession is null ? "missing" : $"present (logged on {acceptorSession.IsLoggedOn}, responder {acceptorSession.HasResponder})")}. " +
+            $"Acceptor events: {string.Join(" | ", AcceptorEvents.TakeLast(20))}";
     }
 
     public Message BuildAcceptedExecutionReport(Message receivedOrder) =>
@@ -167,7 +190,7 @@ public sealed class FixTestAcceptor : IApplication, IDisposable
 
     // Logout (35=5) sent right away; Session.Logout would only send it on the next session tick.
     public bool SendLogoutToOrderGenerator() =>
-        Session.SendToTarget(new QuickFix.FIX44.Logout(), new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR"));
+        Session.SendToTarget(new QuickFix.FIX44.Logout(), AcceptorSessionId);
 
     private void SendAnswerToOrder(Message orderAnswer, SessionID orderGeneratorFixSessionId)
     {
@@ -229,5 +252,34 @@ public static class OrderGeneratorTestHost
             Assert.True(testConditionClock.Elapsed < TimeSpan.FromSeconds(10), "the expected condition did not happen in 10 s");
             await Task.Delay(50);
         }
+    }
+}
+
+public sealed class FixTestAcceptorLogFactory(ConcurrentQueue<string> acceptorEvents) : ILogFactory
+{
+    public ILog Create(SessionID acceptorSessionId) => new FixTestAcceptorLog(acceptorEvents, acceptorSessionId.ToString());
+
+    public ILog CreateNonSessionLog() => new FixTestAcceptorLog(acceptorEvents, "no session");
+}
+
+public sealed class FixTestAcceptorLog(ConcurrentQueue<string> acceptorEvents, string fixSessionName) : ILog
+{
+    private const int KeptAcceptorEvents = 200;
+
+    public void OnIncoming(string incomingFixMessage) => KeepAcceptorEvent("in " + incomingFixMessage.Replace('\u0001', '|'));
+
+    public void OnOutgoing(string outgoingFixMessage) => KeepAcceptorEvent("out " + outgoingFixMessage.Replace('\u0001', '|'));
+
+    public void OnEvent(string fixSessionEvent) => KeepAcceptorEvent(fixSessionEvent);
+
+    public void Clear() { }
+
+    public void Dispose() { }
+
+    private void KeepAcceptorEvent(string acceptorEvent)
+    {
+        acceptorEvents.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff} {fixSessionName}: {acceptorEvent}");
+        while (acceptorEvents.Count > KeptAcceptorEvents)
+            acceptorEvents.TryDequeue(out _);
     }
 }
