@@ -316,7 +316,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     }
 
     [Fact]
-    public async Task Commit_confirmed_by_the_database_after_the_deadline_keeps_the_mirror_equal_to_the_database_and_logs_one_error()
+    public async Task Commit_confirmed_by_the_database_after_the_deadline_keeps_the_stored_exposure_and_logs_one_error()
     {
         // Arrange
         using var stdoutJsonLogCapture = new StdoutJsonLogCapture();

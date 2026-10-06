@@ -52,7 +52,8 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
 
     // CA-9: the OrderAccumulator is a worker; inside its own container the only socket the app user listens on is the
     // FIX 9876 and a connection to the old HTTP port 8081 is refused. Docker's own DNS also listens in the container
-    // network (127.0.0.11, as root), so the sockets are filtered by the app user.
+    // network (127.0.0.11, as root), so the sockets are filtered by the app user. The aspnet base image sets
+    // ASPNETCORE_HTTP_PORTS=8080; the container must carry it empty, read from the running process environment.
     [Fact]
     public async Task Orderaccumulator_listens_only_on_the_fix_port_and_refuses_the_old_http_port()
     {
@@ -62,10 +63,16 @@ public sealed class ComposeTests(ComposeFixture composeUnderTest)
         var oldHttpPortAnswer = await composeUnderTest.RunComposeCommandAsync(
             TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "bash", "-c",
             "(exec 3<>/dev/tcp/127.0.0.1/8081) 2>/dev/null && echo open || echo refused");
+        var accumulatorProcessEnvironment = await composeUnderTest.RunComposeCommandAsync(
+            TimeSpan.FromSeconds(30), "exec", "-T", "orderaccumulator", "bash", "-c", "tr '\\0' '\\n' < /proc/1/environ");
 
         Assert.Equal("1654", accumulatorAppUserId);
         Assert.Equal(new[] { 9876 }, ReadListeningTcpPortsOfUser(listeningSocketTables, accumulatorAppUserId));
         Assert.Equal("refused", oldHttpPortAnswer.Trim());
+        Assert.Equal(
+            new[] { "ASPNETCORE_HTTP_PORTS=" },
+            accumulatorProcessEnvironment.Split('\n').Select(environmentLine => environmentLine.Trim())
+                .Where(environmentLine => environmentLine.StartsWith("ASPNETCORE_", StringComparison.Ordinal)).ToArray());
     }
 
     [Fact]

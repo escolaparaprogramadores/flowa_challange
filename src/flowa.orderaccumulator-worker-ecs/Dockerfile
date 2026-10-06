@@ -47,6 +47,8 @@ ENV CORECLR_ENABLE_PROFILING=1 \
     DD_DOTNET_TRACER_HOME=/opt/datadog \
     DD_TRACE_OTEL_ENABLED=true \
     DD_TRACE_SAMPLE_RATE=1.0
+# The aspnet base sets ASPNETCORE_HTTP_PORTS=8080; the worker has no HTTP, so the inherited value is cleared.
+ENV ASPNETCORE_HTTP_PORTS=
 USER $APP_UID
 EXPOSE 9876
 ENTRYPOINT ["dotnet", "OrderAccumulator.dll"]

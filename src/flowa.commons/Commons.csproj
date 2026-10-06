@@ -4,7 +4,7 @@
     <RootNamespace>Flowa.Commons</RootNamespace>
   </PropertyGroup>
 
-  <!-- Log em JSON, injeção de dependência e fábrica de HttpClient vêm do framework compartilhado do ASP.NET Core, como nas apps. -->
+  <!-- Log em JSON e injeção de dependência vêm do framework compartilhado do ASP.NET Core, como nas apps. -->
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
