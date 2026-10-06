@@ -8,4 +8,5 @@ public sealed record StoredOrderResponse(
     decimal Quantity,
     decimal Price,
     string OrderId,
-    string ClOrdId);
+    string ClOrdId,
+    string? RejectReason);

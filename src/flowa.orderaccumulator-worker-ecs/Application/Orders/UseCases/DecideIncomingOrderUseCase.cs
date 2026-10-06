@@ -7,6 +7,7 @@ using Flowa.Commons.Logging;
 using Flowa.Commons.Observability;
 using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.DomainServices;
+using Flowa.OrderAccumulator.Domain.Orders.Entities;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
 
@@ -19,6 +20,8 @@ public sealed class DecideIncomingOrderUseCase
     public const string AcceptedOrderResult = "accepted";
     public const string RejectedOrderResult = "rejected";
     public const string RepeatedOrderResult = "repeated";
+    public const string DuplicateClOrdIdResult = "duplicate";
+    public const string DuplicateClOrdIdErrorCode = "duplicate-cl-ord-id";
 
     private readonly IUnitOfWork unitOfWork;
     private readonly IOrderRepository orderRepository;
@@ -62,6 +65,13 @@ public sealed class DecideIncomingOrderUseCase
             }, cancellationToken);
 
             var answeredOrder = orderAnswer.AnsweredOrder;
+            if (orderAnswer.IsRepeat && !answeredOrder.HasTheSameOrderFieldsAs(incomingOrder))
+            {
+                orderDecisionMonitoring.RecordOperationResult(DuplicateClOrdIdResult);
+                return DataMessage<DecideIncomingOrderResponse>.CreateErrorMessage(
+                    Order.BuildDuplicateClOrdIdRejectionText(incomingOrder.ClOrdId), ResultStatus.Conflict, errorCode: DuplicateClOrdIdErrorCode);
+            }
+
             if (orderAnswer.ShouldCountInOrderMetrics())
                 orderMetrics.CountAnsweredOrder(answeredOrder.Symbol, answeredOrder.Side, answeredOrder.Accepted);
 

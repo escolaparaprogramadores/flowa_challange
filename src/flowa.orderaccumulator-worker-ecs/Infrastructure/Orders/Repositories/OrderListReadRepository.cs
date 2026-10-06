@@ -12,7 +12,7 @@ public sealed class OrderListReadRepository : IOrderListReadRepository
 
     private const string SelectStoredOrderPageSql = """
         SELECT received_at AS ReceivedAt, accepted AS Accepted, symbol AS Symbol, side AS Side,
-               quantity AS Quantity, price AS Price, order_id AS OrderId, cl_ord_id AS ClOrdId
+               quantity AS Quantity, price AS Price, order_id AS OrderId, cl_ord_id AS ClOrdId, reject_reason AS RejectReason
         FROM orders
         ORDER BY received_at DESC, id DESC
         LIMIT @OrdersPerPage OFFSET @SkippedOrders

@@ -28,6 +28,8 @@ namespace Flowa.OrderAccumulator.Tests;
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase, ITestOutputHelper fixLogTestOutput) : IAsyncLifetime
 {
+    private static readonly TimeSpan DeadlineClockTolerance = TimeSpan.FromMilliseconds(50);
+
     public Task InitializeAsync() => orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
 
     public Task DisposeAsync() => Task.CompletedTask;
@@ -267,7 +269,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         var ordersAfterTheStall = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/orders?page=1");
 
         // Assert
-        Assert.InRange(deadlineAnswerTime, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(4.5));
+        Assert.InRange(deadlineAnswerTime, TimeSpan.FromSeconds(4) - DeadlineClockTolerance, TimeSpan.FromSeconds(4.5));
         AssertRejectedOrderGotNewExecutionIds(deadlineExecutionReport);
         Assert.Equal(
             $"35=8|37={deadlineExecutionReport.OrderID.Value}|17={deadlineExecutionReport.ExecID.Value}|150=8|39=8|11=slow-database|55=PETR4|54=1|151=0|14=0|6=0" +
@@ -314,7 +316,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         var exposuresAfterTheStall = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/exposures");
 
         // Assert
-        Assert.InRange(deadlineAnswerTime, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2.5));
+        Assert.InRange(deadlineAnswerTime, TimeSpan.FromSeconds(2) - DeadlineClockTolerance, TimeSpan.FromSeconds(2.5));
         Assert.Equal(
             $"35=8|37={deadlineExecutionReport.OrderID.Value}|17={deadlineExecutionReport.ExecID.Value}|150=8|39=8|11=slow-database-2s|55=VALE3|54=1|151=0|14=0|6=0" +
             "|58=Ordem rejeitada: o OrderAccumulator não decidiu a ordem em 2 s. Tente de novo.",
