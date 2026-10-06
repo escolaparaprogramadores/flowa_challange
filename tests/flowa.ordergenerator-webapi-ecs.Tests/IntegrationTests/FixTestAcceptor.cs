@@ -176,7 +176,13 @@ public static class OrderGeneratorTestHost
         return freeTcpPort;
     }
 
-    public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(int fixAcceptorPort, string accumulatorBaseUrl = "http://127.0.0.1:1", string? orderGeneratorWebRoot = null) =>
+    // A database nobody listens to: the routes that do not touch the database work, the ones that do answer 500.
+    public const string UnreachableOrderDatabasePassword = "unreachable-database-password";
+    public const string UnreachableOrderDatabaseConnectionString =
+        $"Host=127.0.0.1;Port=1;Database=flowa;Username=flowa;Password={UnreachableOrderDatabasePassword};Timeout=3";
+
+    public static WebApplicationFactory<Program> CreateOrderGeneratorFactory(
+        int fixAcceptorPort, string orderDatabaseConnectionString = UnreachableOrderDatabaseConnectionString, string? orderGeneratorWebRoot = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(orderGeneratorWebHostBuilder =>
         {
             // In Development ASP.NET puts the project wwwroot (static web assets) in front of the test root;
@@ -184,7 +190,7 @@ public static class OrderGeneratorTestHost
             orderGeneratorWebHostBuilder.UseEnvironment(Environments.Production);
             orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorHost", "127.0.0.1");
             orderGeneratorWebHostBuilder.UseSetting("Fix:AcceptorPort", fixAcceptorPort.ToString());
-            orderGeneratorWebHostBuilder.UseSetting("OrderAccumulator:BaseUrl", accumulatorBaseUrl);
+            orderGeneratorWebHostBuilder.UseSetting("ConnectionStrings:Flowa", orderDatabaseConnectionString);
             if (orderGeneratorWebRoot is not null)
                 orderGeneratorWebHostBuilder.UseSetting(WebHostDefaults.WebRootKey, orderGeneratorWebRoot);
         });
