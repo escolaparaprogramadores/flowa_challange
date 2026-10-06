@@ -20,7 +20,7 @@ public sealed class ActiveSpanOperationMonitoringTests
         var meterFactory = meterServices.GetRequiredService<IMeterFactory>();
         var durationMeasurements = new List<(double DurationInSeconds, KeyValuePair<string, object?>[] Tags)>();
         using var durationListener = ListenToOperationDurations(meterFactory, durationMeasurements);
-        using var openSpanSource = new ActivitySource("Base.OrderGenerator.Tests.OpenSpan");
+        using var openSpanSource = new ActivitySource("Flowa.OrderGenerator.Tests.OpenSpan");
         using var openSpanListener = ListenToEverySpanOf(openSpanSource.Name);
         using var openSpan = openSpanSource.StartActivity("request")!;
 

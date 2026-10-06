@@ -118,8 +118,7 @@ public sealed class LayerDependencyTests
         AssertSourceFileNamespacesMatchTheirFolders(CommonsProjectFolderName, CommonsRootNamespace);
     }
 
-    // The Datadog client (StatsdClient) is wrapped by the Infrastructure adapter behind IOrderMetricsPort;
-    // the Entrypoint never talks to it directly (reviewer r1, F-01).
+    // The Datadog client (StatsdClient) lives only in the Commons; the Entrypoint never talks to it directly (reviewer r1, F-01).
     [Fact]
     public void Entrypoint_does_not_use_the_datadog_client_directly()
     {

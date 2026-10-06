@@ -1,11 +1,9 @@
-using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.Commons.Database;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Domain.Orders.Enums;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Repositories;
 using Dapper;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -28,7 +26,7 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
     public NpgsqlDataSource OrderDatabaseDataSource { get; private set; } = null!;
     public PostgresConnectionSource OrderDatabaseConnectionSource { get; private set; } = null!;
     public DecideIncomingOrderTestRunner OrderDecisionRunner { get; private set; } = null!;
-    public ISymbolExposureReadRepository ExposureReader { get; private set; } = null!;
+    public StoredSymbolExposureReader ExposureReader { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
@@ -44,7 +42,7 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
         await OrderDatabaseConnectionSource.ApplyOrderAccumulatorSchemaAsync();
 
         OrderDecisionRunner = new DecideIncomingOrderTestRunner(OrderDatabaseConnectionSource);
-        ExposureReader = new SymbolExposureReaderWithOwnConnection(OrderDatabaseConnectionSource);
+        ExposureReader = new StoredSymbolExposureReader(OrderDatabaseDataSource);
     }
 
     public async Task DisposeAsync()
@@ -111,13 +109,17 @@ public static class TestOrders
             (int)orderDecision.Quantity, orderDecision.Price);
 }
 
-// Reads the exposure on a connection of its own per call, as the read repository did before it moved to the
-// connection of the operation scope: a test can read while other orders use their own connections.
-public sealed class SymbolExposureReaderWithOwnConnection(IDatabaseConnectionSource orderDatabaseConnectionSource) : ISymbolExposureReadRepository
+// Reads the stored exposure of the three symbols straight from the table, on a connection of its own per call,
+// in the order of the symbol rule: a test can read while other orders use their own connections.
+public sealed class StoredSymbolExposureReader(NpgsqlDataSource orderDatabaseDataSource)
 {
-    public async Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync()
     {
-        await using var exposureReadUnitOfWork = new DatabaseUnitOfWork(orderDatabaseConnectionSource);
-        return await new SymbolExposureReadRepository(new DapperDatabase(exposureReadUnitOfWork)).GetSymbolExposuresAsync(cancellationToken);
+        await using var orderDatabaseConnection = await orderDatabaseDataSource.OpenConnectionAsync();
+        var exposureBySymbol = (await orderDatabaseConnection.QueryAsync<(string Symbol, decimal Exposure)>("SELECT symbol, exposure FROM exposures"))
+            .ToDictionary(storedExposureRow => storedExposureRow.Symbol, storedExposureRow => storedExposureRow.Exposure);
+        return OrderFieldPolicy.AllowedOrderSymbols
+            .Select(allowedSymbol => new SymbolExposure(allowedSymbol, exposureBySymbol[allowedSymbol]))
+            .ToList();
     }
 }

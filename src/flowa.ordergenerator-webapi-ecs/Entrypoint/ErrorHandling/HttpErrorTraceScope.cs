@@ -4,7 +4,7 @@ namespace Flowa.OrderGenerator.Entrypoint.ErrorHandling;
 
 public static class HttpErrorTraceScope
 {
-    public const string HttpErrorTraceSourceName = "Base.OrderGenerator.HttpErrors";
+    public const string HttpErrorTraceSourceName = "Flowa.OrderGenerator.HttpErrors";
 
     private static readonly ActivitySource HttpErrorTraceSource = new(HttpErrorTraceSourceName);
 

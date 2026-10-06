@@ -42,7 +42,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         OrderStorageHeldUntilReleased heldOrderStorage = null!;
         var orderHoldingTheExposureRow = Task.Run(() => new DecideIncomingOrderTestRunner(
-                orderAccumulatorDatabase.OrderDatabaseConnectionSource, new UncountedOrderMetrics(),
+                orderAccumulatorDatabase.OrderDatabaseConnectionSource,
                 storedOrderRepository => heldOrderStorage = new OrderStorageHeldUntilReleased(storedOrderRepository))
             .DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m)));
         await WaitUntilAsync(() => heldOrderStorage is not null);

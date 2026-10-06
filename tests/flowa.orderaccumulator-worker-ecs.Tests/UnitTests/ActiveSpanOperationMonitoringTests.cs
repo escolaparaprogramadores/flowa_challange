@@ -11,7 +11,7 @@ namespace Flowa.OrderAccumulator.Tests;
 // in a histogram with only the closed tags usecase and result. A rejection is a tag, never an error status.
 public sealed class ActiveSpanOperationMonitoringTests : IDisposable
 {
-    private const string OpenSpanTestSourceName = "Base.OrderAccumulator.Tests.OpenSpan";
+    private const string OpenSpanTestSourceName = "Flowa.OrderAccumulator.Tests.OpenSpan";
 
     private static readonly ActivitySource OpenSpanTestSource = new(OpenSpanTestSourceName);
 
@@ -55,7 +55,7 @@ public sealed class ActiveSpanOperationMonitoringTests : IDisposable
         Assert.IsType<double>(openSpan.GetTagItem(ActiveSpanOperationMonitoring.OperationDurationTag));
         Assert.Equal(ActivityStatusCode.Unset, openSpan.Status);
         var recordedDuration = Assert.Single(recordedDurations);
-        Assert.Equal(("Base.OrderAccumulator", "s"), (recordedDuration.MeterName, recordedDuration.Unit));
+        Assert.Equal(("Flowa.OrderAccumulator", "s"), (recordedDuration.MeterName, recordedDuration.Unit));
         Assert.Equal(
             new Dictionary<string, string?> { ["usecase"] = "orders.decide-incoming-order", ["result"] = "rejected" },
             recordedDuration.DurationTags);

@@ -1,5 +1,3 @@
-using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
-using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
 using Flowa.Commons.Database;
 using Flowa.Commons.Responses;
@@ -172,31 +170,6 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }
 
-    [Fact]
-    public async Task Reading_exposures_without_a_symbol_row_is_an_error()
-    {
-        await using (var orderDatabaseConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync())
-            await orderDatabaseConnection.ExecuteAsync("DELETE FROM exposures WHERE symbol = 'VALE3'");
-
-        var missingRowError = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
-
-        Assert.Equal("The symbol VALE3 has no exposure row. The database migration was not applied.", missingRowError.Message);
-    }
-
-    [Fact]
-    public async Task Reader_returns_the_exposure_of_each_symbol()
-    {
-        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
-        await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VIIA4", 50, 4.00m));
-
-        var symbolExposures = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
-
-        Assert.Equal(
-            [("PETR4", 1_000.00m), ("VALE3", 0m), ("VIIA4", -200.00m)],
-            symbolExposures.Select(symbolExposure => (symbolExposure.Symbol, symbolExposure.Exposure)));
-    }
-
     [Theory]
     [InlineData("")]
     [InlineData(" ")]
@@ -222,21 +195,17 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var registeredUnitOfWork = orderOperationServices.GetRequiredService<IUnitOfWork>();
         var registeredOrderRepository = orderOperationServices.GetRequiredService<IOrderRepository>();
         var registeredSymbolExposureRepository = orderOperationServices.GetRequiredService<IExposureRepository>();
-        var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>();
         var registeredServicesOrderDecision = await new DecideIncomingOrderUseCase(
                 registeredUnitOfWork, registeredOrderRepository, new OrderDecisionDomainService(registeredSymbolExposureRepository),
-                new UncountedOrderMetrics(),
                 TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>())
             .DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
 
         Assert.IsType<OrderRepository>(registeredOrderRepository);
         Assert.IsType<ExposureRepository>(registeredSymbolExposureRepository);
-        Assert.IsType<SymbolExposureReadRepository>(registeredExposureReader);
         Assert.Same(orderOperationServices.GetRequiredService<DatabaseUnitOfWork>(), registeredUnitOfWork);
         Assert.NotSame(registeredUnitOfWork, otherOrderOperationScope.ServiceProvider.GetRequiredService<IUnitOfWork>());
         Assert.True(registeredServicesOrderDecision.Data!.Accepted);
-        Assert.Equal(50.00m, (await registeredExposureReader.GetSymbolExposuresAsync())
-            .Single(symbolExposure => symbolExposure.Symbol == "VALE3").Exposure);
+        Assert.Equal(50.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
     }
 
     private sealed record StoredOrderInDatabase(

@@ -8,7 +8,7 @@ namespace Flowa.OrderAccumulator.Tests;
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class OrderDecisionMeasurementTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
-    private const string OrderReceivingTestSourceName = "Base.OrderAccumulator.Tests.OrderReceiving";
+    private const string OrderReceivingTestSourceName = "Flowa.OrderAccumulator.Tests.OrderReceiving";
 
     private static readonly ActivitySource OrderReceivingTestSource = new(OrderReceivingTestSourceName);
 
@@ -25,7 +25,7 @@ public sealed class OrderDecisionMeasurementTests(OrderAccumulatorPostgresFixtur
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         ActivitySource.AddActivityListener(orderReceivingListener);
         orderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new UncountedOrderMetrics());
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource);
     }
 
     public Task DisposeAsync()

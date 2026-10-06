@@ -6,7 +6,4 @@ internal static class OrderAccumulatorConfigurationKeys
     public const string FixAcceptorPort = "Fix:AcceptorPort";
     public const string FixAcceptorBindHost = "Fix:AcceptorBindHost";
     public const string OrderDecisionTimeoutSeconds = "Orders:DecisionTimeoutSeconds";
-    public const string DatadogEnvironment = "DD_ENV";
-    public const string DatadogService = "DD_SERVICE";
-    public const string DatadogVersion = "DD_VERSION";
 }
