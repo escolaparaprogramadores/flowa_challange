@@ -14,7 +14,7 @@ export function OrderTicketPage() {
     exposuresState,
     orderListState,
     isSendingOrder,
-    lastSendFailure,
+    lastSendResult,
     orderListPageBeingLoaded,
     loadOrderListPage,
     sendOrderAndRefresh,
@@ -37,7 +37,7 @@ export function OrderTicketPage() {
         <OrderListCard
           orderListState={orderListState}
           isSendingOrder={isSendingOrder}
-          lastSendFailure={lastSendFailure}
+          lastSendResult={lastSendResult}
           headerAction={<DeleteAllConfirmation onConfirmDeleteAll={deleteAllOrdersAndRefresh} />}
           footer={
             orderListState.status === 'ready' && (
