@@ -79,8 +79,10 @@ public sealed class OrderTraceOnReceivingTests(OrderAccumulatorPostgresFixture o
         Assert.Equal(3, orderLogLines.Count);
         var acceptedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "Order accepted.");
         Assert.Equal(
-            ("Information", "Base.OrderAccumulator.Application.Orders.UseCases.DecideIncomingOrderUseCase", "PETR4"),
-            (acceptedOrderLine.LogLevel, acceptedOrderLine.Category, acceptedOrderLine.ReadLogField("Symbol")));
+            ("Information", "Base.OrderAccumulator.Application.Orders.UseCases.DecideIncomingOrderUseCase", "PETR4", "1", "100", "10.50"),
+            (acceptedOrderLine.LogLevel, acceptedOrderLine.Category, acceptedOrderLine.ReadLogField("Symbol"),
+                acceptedOrderLine.ReadLogField("Side"), acceptedOrderLine.ReadLogField("Quantity"), acceptedOrderLine.ReadLogField("Price")));
+        Assert.Matches("^[0-9a-f]{32}$", acceptedOrderLine.ReadLogField("OrderId"));
         var receivedOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message received.");
         Assert.Contains("|35=D|", receivedOrderLine.ReadLogField("FixMessage"));
         Assert.Contains($"|5100={orderTraceParent}|", receivedOrderLine.ReadLogField("FixMessage"));

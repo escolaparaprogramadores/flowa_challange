@@ -19,11 +19,17 @@ public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orde
     [Fact]
     public async Task Start_writes_one_application_started_line_and_one_gauge_loop_line()
     {
-        var appLogLines = await RunAppAndReadAppLogLinesAsync(_ => Task.CompletedTask);
+        string? versionCommit = null;
+        var appLogLines = await RunAppAndReadAppLogLinesAsync(async orderAccumulatorTestApp =>
+        {
+            using var versionDocument = System.Text.Json.JsonDocument.Parse(await orderAccumulatorTestApp.CreateClient().GetStringAsync("/version"));
+            versionCommit = versionDocument.RootElement.GetProperty("commit").GetString();
+        });
 
         var applicationStartedLine = Assert.Single(appLogLines, appLogLine => appLogLine.Category == ProgramCategory);
         Assert.Equal(("Information", "Application started."), (applicationStartedLine.LogLevel, applicationStartedLine.Message));
-        Assert.Matches("^[0-9a-f]{40}$", applicationStartedLine.ReadLogField("BuildCommitSha"));
+        Assert.Matches("^[0-9a-f]{40}$", versionCommit);
+        Assert.Equal((versionCommit, "Development"), (applicationStartedLine.ReadLogField("BuildCommitSha"), applicationStartedLine.ReadLogField("Environment")));
         var gaugeLoopLine = Assert.Single(appLogLines, appLogLine => appLogLine.Category == GaugeCategory);
         Assert.Equal(("Information", "Symbol exposure gauge loop started.", "30"), (gaugeLoopLine.LogLevel, gaugeLoopLine.Message, gaugeLoopLine.ReadLogField("IntervalSeconds")));
         Assert.Equal(2, appLogLines.Count);
@@ -70,6 +76,7 @@ public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orde
         Assert.Equal(
             ("Information", "Base.OrderAccumulator.Application.Exposures.UseCases.GetExposuresUseCase", "Symbol exposures read.", "3"),
             (requestLines[1].LogLevel, requestLines[1].Category, requestLines[1].Message, requestLines[1].ReadLogField("SymbolCount")));
+        AssertSameRequestTrace(requestLines);
     }
 
     [Fact]
@@ -84,6 +91,14 @@ public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orde
         Assert.Equal(
             ("Information", "Base.OrderAccumulator.Application.Orders.UseCases.DeleteAllOrdersUseCase", "All orders deleted and symbol exposures zeroed."),
             (requestLines[1].LogLevel, requestLines[1].Category, requestLines[1].Message));
+        AssertSameRequestTrace(requestLines);
+    }
+
+    private static void AssertSameRequestTrace(List<JsonLogLine> requestLines)
+    {
+        Assert.Matches("^[0-9a-f]{32}$", requestLines[0].TraceId);
+        Assert.Equal(requestLines[0].TraceId, requestLines[1].TraceId);
+        Assert.All(requestLines, requestLine => Assert.Matches("^[0-9a-f]{16}$", requestLine.ReadLogField("SpanId")));
     }
 
     private static void AssertRequestReceivedLine(JsonLogLine requestReceivedLine, string expectedMethod, string expectedPath) =>

@@ -59,6 +59,7 @@ public sealed class ActiveSpanOperationMonitoringTests : IDisposable
             new Dictionary<string, string?> { ["usecase"] = "orders.decide-incoming-order", ["result"] = "rejected" },
             recordedDuration.DurationTags);
         Assert.InRange(recordedDuration.DurationSeconds, 0d, 5d);
+        Assert.Equal(recordedDuration.DurationSeconds * 1000d, (double)openSpan.GetTagItem(ActiveSpanOperationMonitoring.OperationDurationTag)!, 6);
     }
 
     [Fact]

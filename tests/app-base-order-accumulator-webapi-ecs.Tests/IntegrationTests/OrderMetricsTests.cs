@@ -397,19 +397,6 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     // A clock that only moves when the test says so: the gauge PeriodicTimer asks for its timer here.
-    private sealed class RecordingApplicationLogger<T> : IApplicationLogger<T>
-    {
-        private readonly System.Collections.Concurrent.ConcurrentQueue<string> recordedLogLines = new();
-
-        public IReadOnlyList<string> RecordedLogLines => recordedLogLines.ToList();
-
-        public void LogInformation(string message, object? context = null) => recordedLogLines.Enqueue($"Information {message}");
-
-        public void LogWarning(string message, object? context = null) => recordedLogLines.Enqueue($"Warning {message}");
-
-        public void LogError(Exception exception, string message, object? context = null) => recordedLogLines.Enqueue($"Error {message}");
-    }
-
     private sealed class ManualGaugeClock : TimeProvider
     {
         private ManualGaugeTimer? gaugeTimer;
