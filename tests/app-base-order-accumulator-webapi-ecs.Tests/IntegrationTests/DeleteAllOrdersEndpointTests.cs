@@ -1,11 +1,15 @@
 using System.Net;
 using System.Text.Json;
 using System.Text;
-using Base.OrderAccumulator.Application.Exposures;
-using Base.OrderAccumulator.Application.Orders.DeleteAllOrders;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Infrastructure.Metrics;
-using Base.OrderAccumulator.Infrastructure.Persistence;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.UseCases;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Responses;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Infrastructure.DependencyInjection;
+using Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
+using Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
+using Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -44,7 +48,7 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
     public async Task Delete_zeroes_the_exposure_memory_and_a_new_order_adds_up_from_zero_in_the_database_and_in_memory()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
-        var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<SymbolExposureMemoryService>();
+        var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<ISymbolExposureMemoryPort>();
         await ProcessOneOrderOnEachSymbolAsync(orderAccumulatorTestApp);
 
         await orderAccumulatorTestApp.CreateClient().DeleteAsync("/api/orders");
@@ -135,16 +139,21 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
     {
         var deleteFailureDatabaseConnectionString = await CreateDatabaseWhereDeletingOrdersFailsAsync();
         await using var deleteFailureDataSource = NpgsqlDataSource.Create(deleteFailureDatabaseConnectionString);
-        var deleteFailureExposureReader = new SymbolExposureReadRepository(deleteFailureDataSource);
-        await new DecideIncomingOrderTestRunner(deleteFailureDataSource).DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
-        var symbolExposureMemory = new SymbolExposureMemoryService();
+        await using var deleteFailureConnectionSource = new PostgresConnectionSource(deleteFailureDatabaseConnectionString);
+        var deleteFailureExposureReader = new SymbolExposureReaderWithOwnConnection(deleteFailureConnectionSource);
+        await new DecideIncomingOrderTestRunner(deleteFailureConnectionSource).DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
+        var symbolExposureMemory = new InMemorySymbolExposureAdapter();
         symbolExposureMemory.LoadStoredExposures(await deleteFailureExposureReader.GetSymbolExposuresAsync());
-        await using var deleteFailureUnitOfWork = new PostgresUnitOfWork(deleteFailureDataSource);
+        await using var deleteFailureUnitOfWork = new DatabaseUnitOfWork(deleteFailureConnectionSource);
+        var deleteFailureDatabase = new DapperDatabase(deleteFailureUnitOfWork);
         var deleteAllOrdersUseCase = new DeleteAllOrdersUseCase(
-            deleteFailureUnitOfWork, new OrderRepository(deleteFailureUnitOfWork), new ExposureRepository(deleteFailureUnitOfWork), symbolExposureMemory);
+            deleteFailureUnitOfWork, new OrderRepository(deleteFailureDatabase), new ExposureRepository(deleteFailureDatabase), symbolExposureMemory,
+            TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DeleteAllOrdersUseCase>());
 
-        var refusedDeleteException = await Assert.ThrowsAsync<PostgresException>(() => deleteAllOrdersUseCase.DeleteAllOrdersAsync(CancellationToken.None));
+        var refusedDeleteMessage = await deleteAllOrdersUseCase.DeleteAllOrdersAsync(CancellationToken.None);
 
+        Assert.Equal((false, ResultStatus.InternalError, "internal-error"), (refusedDeleteMessage.Success, refusedDeleteMessage.Status, refusedDeleteMessage.ErrorCode));
+        var refusedDeleteException = Assert.IsType<PostgresException>(refusedDeleteMessage.UnexpectedFailure);
         Assert.Equal("P0001", refusedDeleteException.SqlState);
         SymbolExposure[] exposuresBeforeTheFailedDelete = [new("PETR4", 1_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
         Assert.Equal(exposuresBeforeTheFailedDelete, await deleteFailureExposureReader.GetSymbolExposuresAsync());
@@ -186,8 +195,9 @@ public sealed class DeleteAllOrdersEndpointTests(OrderAccumulatorPostgresFixture
             Database = deleteFailureDatabaseName
         }.ConnectionString;
 
+        await using (var deleteFailureSchemaSource = new PostgresConnectionSource(deleteFailureDatabaseConnectionString))
+            await deleteFailureSchemaSource.ApplyOrderAccumulatorSchemaAsync();
         await using var deleteFailureDataSource = NpgsqlDataSource.Create(deleteFailureDatabaseConnectionString);
-        await deleteFailureDataSource.ApplyOrderAccumulatorSchemaAsync();
         await using var deleteFailureConnection = await deleteFailureDataSource.OpenConnectionAsync();
         await deleteFailureConnection.ExecuteAsync(
             """

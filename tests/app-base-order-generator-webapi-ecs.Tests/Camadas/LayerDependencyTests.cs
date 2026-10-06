@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using Base.OrderGenerator.Domain.Orders;
+using Base.OrderGenerator.Domain.Orders.ValueObjects;
 using NetArchTest.Rules;
 
 namespace Base.OrderGenerator.Tests;
@@ -17,16 +17,25 @@ public sealed class LayerDependencyTests
     private static readonly Assembly OrderGeneratorAssembly = typeof(SentOrderResult).Assembly;
     private static readonly string[] LayerNames = ["Entrypoint", "Application", "Domain", "Infrastructure", "Commons"];
 
+    // The Domain may also use the shared core of the Commons; the Commons may use the technical libraries
+    // (Microsoft.Extensions here: HTTP client and logging).
+    private const string MicrosoftExtensionsNamespace = "Microsoft.Extensions";
+    private static readonly string[] DomainAllowedNamespaces =
+    [
+        BaseClassLibraryNamespace, LayerNamespace("Domain"),
+        LayerNamespace("Commons.Entities"), LayerNamespace("Commons.Exceptions"), LayerNamespace("Commons.ValueObjects")
+    ];
+
     [Fact]
-    public void Domain_depends_only_on_the_base_class_library_and_itself()
+    public void Domain_depends_only_on_the_base_class_library_the_commons_shared_core_and_itself()
     {
-        AssertLayerOnlyDependsOn("Domain", BaseClassLibraryNamespace, LayerNamespace("Domain"));
+        AssertLayerOnlyDependsOn("Domain", DomainAllowedNamespaces);
     }
 
     [Fact]
-    public void Commons_depends_only_on_the_base_class_library_and_itself()
+    public void Commons_depends_only_on_the_base_class_library_microsoft_extensions_and_itself()
     {
-        AssertLayerOnlyDependsOn("Commons", BaseClassLibraryNamespace, LayerNamespace("Commons"));
+        AssertLayerOnlyDependsOn("Commons", BaseClassLibraryNamespace, MicrosoftExtensionsNamespace, LayerNamespace("Commons"));
     }
 
     [Fact]
@@ -92,24 +101,24 @@ public sealed class LayerDependencyTests
     public void Domain_allow_list_rejects_the_infrastructure_that_uses_an_external_library()
     {
         var infrastructureCheckedAgainstTheDomainList = TypesOfLayer("Infrastructure").Should()
-            .OnlyHaveDependenciesOn(BaseClassLibraryNamespace, LayerNamespace("Domain")).GetResult();
+            .OnlyHaveDependenciesOn(DomainAllowedNamespaces).GetResult();
 
         Assert.False(infrastructureCheckedAgainstTheDomainList.IsSuccessful);
-        Assert.Contains("Base.OrderGenerator.Infrastructure.FixOrderClient", infrastructureCheckedAgainstTheDomainList.FailingTypeNames ?? []);
+        Assert.Contains("Base.OrderGenerator.Infrastructure.Fix.FixOrderClient", infrastructureCheckedAgainstTheDomainList.FailingTypeNames ?? []);
     }
 
     // CA-7: the application logs only through IApplicationLogger<T> (Commons); the logging SDK of the framework
-    // is used only by the Infrastructure implementation, never by the other layers.
+    // is used only by the Commons.Logging implementation, never by the other layers.
     [Fact]
-    public void Only_the_infrastructure_uses_the_logging_sdk()
+    public void Only_the_commons_logging_uses_the_logging_sdk()
     {
         var typesUsingTheLoggingSdk = Types.InAssembly(OrderGeneratorAssembly).That().HaveDependencyOn("Microsoft.Extensions.Logging").GetTypes()
-            // The generated Program (and its closures) is the composition root: it only calls AddApplicationLogging.
+            // The generated Program (and its closures) is the composition root: it only calls AddJsonLogsWithTraceId.
             .Where(declaredType => declaredType.Namespace is not null)
             .ToList();
 
-        Assert.Contains(typesUsingTheLoggingSdk, declaredType => declaredType.Namespace == LayerNamespace("Infrastructure.Logging"));
-        Assert.All(typesUsingTheLoggingSdk, declaredType => Assert.StartsWith(LayerNamespace("Infrastructure") + ".", declaredType.Namespace));
+        Assert.Contains(typesUsingTheLoggingSdk, declaredType => declaredType.Namespace == LayerNamespace("Commons.Logging"));
+        Assert.All(typesUsingTheLoggingSdk, declaredType => Assert.Equal(LayerNamespace("Commons.Logging"), declaredType.Namespace));
     }
 
     private static void AssertLayerOnlyDependsOn(string layerName, params string[] allowedNamespaces)

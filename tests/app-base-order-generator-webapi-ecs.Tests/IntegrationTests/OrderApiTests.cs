@@ -1,4 +1,4 @@
-using Base.OrderGenerator.Infrastructure;
+using Base.OrderGenerator.Infrastructure.Fix;
 using System.Diagnostics;
 using System.Net;
 using System.Text;

@@ -13,8 +13,10 @@ namespace Base.OrderGenerator.Tests;
 // Each test builds its own host inside the capture, because the console logger keeps the stdout it found.
 public sealed class OrderLogTests
 {
-    private const string GlobalErrorHandlerCategory = "Base.OrderGenerator.Entrypoint.Errors.GlobalErrorHandler";
+    private const string ExceptionHandlerCategory = "Base.OrderGenerator.Entrypoint.ErrorHandling.OrderGeneratorExceptionHandler";
     private const string FixSessionLogCategory = "Base.OrderGenerator.Infrastructure.Fix.FixSessionLog";
+    private const string RequestReceivedCategory = "Base.OrderGenerator.Entrypoint.Logging.RequestReceivedLoggingMiddleware";
+    private const string SendOrderUseCaseCategory = "Base.OrderGenerator.Application.Orders.UseCases.SendOrderUseCase";
     private const string ValidOrderJson = """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.50}""";
 
     [Fact]
@@ -42,8 +44,11 @@ public sealed class OrderLogTests
         var orderSending = Assert.Single(orderSendingSpans);
         Assert.Equal(orderSending.TraceId.ToHexString(), orderClOrdId);
         var orderLogLines = stdoutJsonLogCapture.JsonLogLines.Where(jsonLogLine => jsonLogLine.TraceId == orderClOrdId).ToList();
-        Assert.Equal(2, orderLogLines.Count);
-        Assert.All(orderLogLines, orderLogLine => Assert.Equal((FixSessionLogCategory, "Information"), (orderLogLine.Category, orderLogLine.LogLevel)));
+        Assert.Equal(4, orderLogLines.Count);
+        Assert.All(orderLogLines, orderLogLine => Assert.Equal("Information", orderLogLine.LogLevel));
+        Assert.Equal(2, orderLogLines.Count(orderLogLine => orderLogLine.Category == FixSessionLogCategory));
+        Assert.Single(orderLogLines, orderLogLine => (orderLogLine.Category, orderLogLine.Message) == (RequestReceivedCategory, "Request received."));
+        Assert.Single(orderLogLines, orderLogLine => (orderLogLine.Category, orderLogLine.Message) == (SendOrderUseCaseCategory, "Order accepted by the OrderAccumulator."));
         var sentOrderLine = Assert.Single(orderLogLines, orderLogLine => orderLogLine.Message == "FIX message sent.");
         Assert.Contains("|35=D|", sentOrderLine.ReadLogField("FixMessage"));
         Assert.Contains($"|11={orderClOrdId}|", sentOrderLine.ReadLogField("FixMessage"));
@@ -55,7 +60,7 @@ public sealed class OrderLogTests
         Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Debug" or "Trace");
     }
 
-    // CA-6, CA-11 and CA-13: the 503 of an order that has a ClOrdID leaves one Warning, written by the GlobalErrorHandler
+    // CA-6, CA-11 and CA-13: the 503 of an order that has a ClOrdID leaves one Warning, written by the OrderGeneratorExceptionHandler
     // under the ClOrdID (HttpErrorTraceScope), and both the log and the answer carry the ClOrdID as trace id.
     [Fact]
     public async Task Order_without_a_logged_on_fix_session_logs_one_warning_and_answers_the_clordid_as_trace_id()
@@ -123,7 +128,7 @@ public sealed class OrderLogTests
         Assert.Empty(unexpectedErrorProblem.GetProperty("errors").EnumerateArray());
         var unexpectedAnswerError = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Error", "Unexpected application error.",
             "urn:base-investimentos:problem:internal-error", "POST", "/api/orders", answeredClOrdId);
-        Assert.StartsWith("Base.OrderGenerator.Commons.UnexpectedExecutionReportException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
+        Assert.StartsWith("Base.OrderGenerator.Domain.Orders.Exceptions.UnexpectedExecutionReportException: The OrderAccumulator answered with an ExecutionReport that is neither New nor Rejected.", unexpectedAnswerError.Exception);
     }
 
     // Route is the route template, not the path the caller typed: the path can vary (case), the template cannot.
@@ -198,13 +203,13 @@ public sealed class OrderLogTests
             expectedErrorCode, httpMethod, expectedRouteTemplate, clientErrorProblem.GetProperty("traceId").GetString());
     }
 
-    // Exactly one Warning or Error line for the failed call, from the GlobalErrorHandler, with the problem type as
+    // Exactly one Warning or Error line for the failed call, from the OrderGeneratorExceptionHandler, with the problem type as
     // ErrorCode, the method and the route template; an expected error carries no exception, an unexpected one does.
     internal static JsonLogLine AssertSingleHttpErrorLine(StdoutJsonLogCapture stdoutJsonLogCapture, string expectedLogLevel, string expectedMessage,
         string expectedErrorCode, string expectedHttpMethod, string expectedRouteTemplate, string? expectedTraceId)
     {
         var httpErrorLine = AssertSingleWarningOrErrorLine(stdoutJsonLogCapture);
-        Assert.Equal((GlobalErrorHandlerCategory, expectedLogLevel, expectedMessage), (httpErrorLine.Category, httpErrorLine.LogLevel, httpErrorLine.Message));
+        Assert.Equal((ExceptionHandlerCategory, expectedLogLevel, expectedMessage), (httpErrorLine.Category, httpErrorLine.LogLevel, httpErrorLine.Message));
         Assert.Equal(expectedErrorCode, httpErrorLine.ReadLogField("ErrorCode"));
         Assert.Equal(expectedHttpMethod, httpErrorLine.ReadLogField("Method"));
         Assert.Equal(expectedRouteTemplate, httpErrorLine.ReadLogField("Route"));

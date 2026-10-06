@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Base.OrderGenerator.Commons;
+using Base.OrderGenerator.Commons.Logging;
 using Base.OrderGenerator.Infrastructure.Fix;
 
 namespace Base.OrderGenerator.Tests;

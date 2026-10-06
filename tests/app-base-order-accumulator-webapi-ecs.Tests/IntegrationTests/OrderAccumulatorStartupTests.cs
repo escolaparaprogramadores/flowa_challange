@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
-using Base.OrderAccumulator.Infrastructure.Persistence;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Infrastructure.DependencyInjection;
 using Dapper;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Npgsql;
@@ -73,8 +74,9 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
     public async Task Many_instances_applying_the_schema_at_once_on_an_empty_database_all_succeed()
     {
         await using var emptyOrderAccumulatorDatabase = NpgsqlDataSource.Create(emptyOrderAccumulatorDatabaseConnectionString);
+        await using var emptyOrderAccumulatorConnectionSource = new PostgresConnectionSource(emptyOrderAccumulatorDatabaseConnectionString);
 
-        await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => Task.Run(() => emptyOrderAccumulatorDatabase.ApplyOrderAccumulatorSchemaAsync())));
+        await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => Task.Run(() => emptyOrderAccumulatorConnectionSource.ApplyOrderAccumulatorSchemaAsync())));
 
         await using var orderDatabaseConnection = await emptyOrderAccumulatorDatabase.OpenConnectionAsync();
         Assert.Equal(3, await orderDatabaseConnection.ExecuteScalarAsync<long>("SELECT count(*) FROM exposures"));

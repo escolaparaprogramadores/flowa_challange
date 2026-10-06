@@ -1,12 +1,18 @@
-using Base.OrderAccumulator.Commons;
-using QuickFix;
+using Base.OrderAccumulator.Commons.Logging;
 using QuickFix.Logger;
+using QuickFix;
 
 namespace Base.OrderAccumulator.Infrastructure.Fix;
 
-// Gives QuickFIX a session log that writes through the application logger, so FIX lines are JSON too.
-public sealed class FixSessionLogFactory(IApplicationLogger<FixSessionLog> fixSessionLogger) : ILogFactory
+public sealed class FixSessionLogFactory : ILogFactory
 {
+    private readonly IApplicationLogger<FixSessionLog> fixSessionLogger;
+
+    public FixSessionLogFactory(IApplicationLogger<FixSessionLog> fixSessionLogger)
+    {
+        this.fixSessionLogger = fixSessionLogger ?? throw new ArgumentNullException(nameof(fixSessionLogger));
+    }
+
     public ILog Create(SessionID fixSessionId) => new FixSessionLog(fixSessionLogger, fixSessionId.ToString());
 
     public ILog CreateNonSessionLog() => new FixSessionLog(fixSessionLogger, null);

@@ -1,9 +1,17 @@
-using Base.OrderAccumulator.Application.Exposures;
-using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
-using Base.OrderAccumulator.Infrastructure.Metrics;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Responses;
+using Base.OrderAccumulator.Application.Orders.UseCases;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.DomainServices;
+using Base.OrderAccumulator.Domain.Exposures.Interfaces;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.Enums;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
+using Base.OrderAccumulator.Infrastructure.DependencyInjection;
+using Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
+using Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit.Abstractions;
@@ -25,7 +33,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     [Fact]
     public async Task Delete_waits_for_the_order_in_progress_and_zeroes_the_memory_after_it()
     {
-        var symbolExposureMemory = new SymbolExposureMemoryService();
+        var symbolExposureMemory = new InMemorySymbolExposureAdapter();
         var orderInsideTheDoor = new TaskCompletionSource();
         var releaseTheOrder = new TaskCompletionSource();
         var orderInProgress = symbolExposureMemory.DecideOrderOutsideDeleteAllAsync(async () =>
@@ -57,7 +65,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     [Fact]
     public async Task Order_arriving_during_a_delete_waits_and_adds_up_from_zero_after_it()
     {
-        var symbolExposureMemory = new SymbolExposureMemoryService();
+        var symbolExposureMemory = new InMemorySymbolExposureAdapter();
         symbolExposureMemory.LoadStoredExposures([new SymbolExposure("PETR4", 5_000m)]);
         var deleteInsideTheDoor = new TaskCompletionSource();
         var releaseTheDelete = new TaskCompletionSource();
@@ -88,7 +96,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     [Fact]
     public async Task Orders_still_run_side_by_side_when_no_delete_is_waiting()
     {
-        var symbolExposureMemory = new SymbolExposureMemoryService();
+        var symbolExposureMemory = new InMemorySymbolExposureAdapter();
         var firstOrderInside = new TaskCompletionSource();
         var secondOrderInside = new TaskCompletionSource();
 
@@ -113,7 +121,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     [Fact]
     public async Task Order_arriving_after_a_waiting_delete_runs_only_after_the_delete()
     {
-        var symbolExposureMemory = new SymbolExposureMemoryService();
+        var symbolExposureMemory = new InMemorySymbolExposureAdapter();
         var firstOrderInside = new TaskCompletionSource();
         var releaseTheFirstOrder = new TaskCompletionSource();
         var firstOrderTask = symbolExposureMemory.DecideOrderOutsideDeleteAllAsync(async () =>
@@ -154,11 +162,12 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         using var orderMetricsClient = OrderMetricsExtensions.CreateOrderMetricsClient(FindDogStatsdPortWithoutListener(), new ConfigurationBuilder().Build());
         for (var attempt = 0; attempt < 50; attempt++)
         {
-            var symbolExposureMemory = new SymbolExposureMemoryService();
+            var symbolExposureMemory = new InMemorySymbolExposureAdapter();
             var storedOrderHeldUntilReleased = new StoredOrderHeldUntilReleased();
             var decideIncomingOrderUseCase = new DecideIncomingOrderUseCase(
                 new UnitOfWorkWithoutDatabase(), storedOrderHeldUntilReleased, new OrderDecisionDomainService(new SymbolExposureAlwaysWithinLimit()),
-                symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient));
+                symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
+                TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());
 
             var orderInProgress = decideIncomingOrderUseCase.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
             await storedOrderHeldUntilReleased.OrderStored.WaitAsync(ConcurrencyStepDeadline);
@@ -192,7 +201,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         var appOrderDecisionServices = orderAccumulatorTestApp.Services;
-        var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<SymbolExposureMemoryService>();
+        var appSymbolExposureMemory = orderAccumulatorTestApp.Services.GetRequiredService<ISymbolExposureMemoryPort>();
         var orderAccumulatorClient = orderAccumulatorTestApp.CreateClient();
         var orderQuantityGenerator = new Random(concurrencyRound);
         var storedOrdersCountBeforeTheDeletes = 0;
@@ -233,7 +242,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
     private static List<IncomingOrder> NewOrdersMixingSymbolsAndSides(int orderCount, Random orderQuantityGenerator) =>
         Enumerable.Range(0, orderCount)
             .Select(orderNumber => TestOrders.NewIncomingOrder(
-                OrderFieldRule.AllowedOrderSymbols[orderNumber % 3],
+                OrderFieldPolicy.AllowedOrderSymbols[orderNumber % 3],
                 orderNumber % 2 == 0 ? OrderSideCodes.BuyOrderSideFixCode : OrderSideCodes.SellOrderSideFixCode,
                 orderQuantityGenerator.Next(1, 1_000), 10.00m))
             .ToList();
@@ -279,7 +288,7 @@ public sealed class DeleteAllOrdersConcurrencyTests(OrderAccumulatorPostgresFixt
         public Task RollbackTransactionAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
-    private static DecideIncomingOrderOutput CreateAcceptedBuyOrderDecision(string symbol, decimal quantity, decimal price) =>
+    private static DecideIncomingOrderResponse CreateAcceptedBuyOrderDecision(string symbol, decimal quantity, decimal price) =>
         new(Guid.NewGuid().ToString("N"), "order", "execution", symbol, OrderSideCodes.BuyOrderSideFixCode, quantity, price,
             Accepted: true, RejectReason: null, RejectedForInvalidFields: false, IsRepeat: false);
 }

@@ -1,4 +1,4 @@
-using Base.OrderGenerator.Entrypoint;
+using Base.OrderGenerator.Entrypoint.DependencyInjection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 
@@ -20,7 +20,7 @@ public sealed class OrderGeneratorHttpPortTests
             Assert.Equal("18080", ReadHttpPortsChosenAtOrderGeneratorStartup());
 
             Environment.SetEnvironmentVariable("ASPNETCORE_HTTP_PORTS", null);
-            Assert.Equal(OrderGeneratorHttpPortConfiguration.DefaultOrderGeneratorHttpPort, ReadHttpPortsChosenAtOrderGeneratorStartup());
+            Assert.Equal(HttpPortExtensions.DefaultHttpPort, ReadHttpPortsChosenAtOrderGeneratorStartup());
 
             // With ASPNETCORE_URLS set, it decides: the default 8080 must not override it.
             Environment.SetEnvironmentVariable("ASPNETCORE_URLS", "http://127.0.0.1:18081");
@@ -37,7 +37,7 @@ public sealed class OrderGeneratorHttpPortTests
     private static string? ReadHttpPortsChosenAtOrderGeneratorStartup()
     {
         var orderGeneratorStartupBuilder = WebApplication.CreateBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory });
-        OrderGeneratorHttpPortConfiguration.UseDefaultOrderGeneratorHttpPortWhenMissing(orderGeneratorStartupBuilder);
+        HttpPortExtensions.UseDefaultHttpPortWhenMissing(orderGeneratorStartupBuilder);
         return orderGeneratorStartupBuilder.WebHost.GetSetting(WebHostDefaults.HttpPortsKey);
     }
 }

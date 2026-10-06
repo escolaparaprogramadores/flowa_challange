@@ -12,7 +12,7 @@ using QuickFix.FIX44;
 using QuickFix.Store;
 using QuickFix.Transport;
 using QuickFix;
-using OrderSideCodes = Base.OrderAccumulator.Domain.Orders.OrderSideCodes;
+using OrderSideCodes = Base.OrderAccumulator.Domain.Orders.Enums.OrderSideCodes;
 using Message = QuickFix.Message;
 
 namespace Base.OrderAccumulator.Tests;

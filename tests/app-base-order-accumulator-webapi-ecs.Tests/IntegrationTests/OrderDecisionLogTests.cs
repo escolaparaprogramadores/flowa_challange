@@ -1,8 +1,10 @@
 using System.Diagnostics;
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
 using Base.OrderAccumulator.Entrypoint.Fix;
 using Base.OrderAccumulator.Infrastructure.Fix;
-using Base.OrderAccumulator.Infrastructure.Persistence;
+using Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using QuickFix;
@@ -123,7 +125,7 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
         var orderThatHitsTheDatabaseFailure = NewTracedOrder("PETR4", '1', 10, 1.00m);
         await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
             orderAccumulatorTestServices.AddScoped<IOrderRepository>(orderOperationServices =>
-                new OrderRepositoryFailingForClOrdId(orderThatHitsTheDatabaseFailure.ClOrdID.Value, new OrderRepository(orderOperationServices.GetRequiredService<PostgresUnitOfWork>())))).StartWithFixAcceptor())
+                new OrderRepositoryFailingForClOrdId(orderThatHitsTheDatabaseFailure.ClOrdID.Value, new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())))).StartWithFixAcceptor())
         {
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
             await fixTestInitiator.ExpectNoAnswerAsync(orderThatHitsTheDatabaseFailure, TimeSpan.FromSeconds(2));

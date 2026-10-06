@@ -1,4 +1,4 @@
-using Base.OrderGenerator.Infrastructure.Logging;
+using Base.OrderGenerator.Commons.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Base.OrderGenerator.Tests;

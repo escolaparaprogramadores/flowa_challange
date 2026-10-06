@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Infrastructure.Metrics;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 
 namespace Base.OrderAccumulator.Tests;
 
