@@ -80,12 +80,12 @@ function calculateBadgeContrast(textColor: string, tintColor: string) {
   const [tintRed, tintGreen, tintBlue, tintAlpha] = readChannels(tintColor);
   const blendOverCard = (tintChannel: number, cardChannel: number) => tintAlpha * tintChannel + (1 - tintAlpha) * cardChannel;
   const badgeBackground = [blendOverCard(tintRed, cardRed), blendOverCard(tintGreen, cardGreen), blendOverCard(tintBlue, cardBlue)];
-  const channelLuminance = (colorChannel: number) => {
+  const calculateChannelLuminance = (colorChannel: number) => {
     const normalizedChannel = colorChannel / 255;
     return normalizedChannel <= 0.03928 ? normalizedChannel / 12.92 : ((normalizedChannel + 0.055) / 1.055) ** 2.4;
   };
-  const colorLuminance = ([red, green, blue]: number[]) => 0.2126 * channelLuminance(red) + 0.7152 * channelLuminance(green) + 0.0722 * channelLuminance(blue);
-  const [higherLuminance, lowerLuminance] = [colorLuminance(readChannels(textColor)), colorLuminance(badgeBackground)].sort((first, second) => second - first);
+  const calculateColorLuminance = ([red, green, blue]: number[]) => 0.2126 * calculateChannelLuminance(red) + 0.7152 * calculateChannelLuminance(green) + 0.0722 * calculateChannelLuminance(blue);
+  const [higherLuminance, lowerLuminance] = [calculateColorLuminance(readChannels(textColor)), calculateColorLuminance(badgeBackground)].sort((firstLuminance, secondLuminance) => secondLuminance - firstLuminance);
   return (higherLuminance + 0.05) / (lowerLuminance + 0.05);
 }
 
