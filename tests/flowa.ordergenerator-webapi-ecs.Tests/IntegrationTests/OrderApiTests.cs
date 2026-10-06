@@ -32,7 +32,7 @@ public sealed class LoggedOnOrderGenerator : IAsyncLifetime
     }
 }
 
-public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
+public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>, IAsyncLifetime
 {
     private const string SentinelOrderJson = """{"symbol":"PETR4","side":"sell","quantity":7,"price":7.77}""";
 
@@ -43,6 +43,12 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
         _loggedOnOrderGenerator = loggedOnOrderGenerator;
         _loggedOnOrderGenerator.FixAcceptor.ResetToAcceptEveryOrder();
     }
+
+    // Every test starts with the shared FIX session logged on; a session lost by an earlier test fails here, by name,
+    // instead of turning the next tests into 503s.
+    public Task InitializeAsync() => _loggedOnOrderGenerator.FixAcceptor.WaitForFixSessionLogonAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     // Decision 24: what a NewOrderSingle cannot carry stops at the door with a 400.
     public static TheoryData<string, string> OrdersThatDoNotFitFix => new()
@@ -351,7 +357,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
     // CA-4: every success of /api is a DataMessage with these exact envelope values; "data" is the route body.
     internal static async Task<JsonElement> ReadSuccessDataMessageAsync(HttpResponseMessage successHttpResponse)
     {
-        Assert.Equal(HttpStatusCode.OK, successHttpResponse.StatusCode);
+        Assert.True(successHttpResponse.StatusCode == HttpStatusCode.OK,
+            $"expected 200, got {(int)successHttpResponse.StatusCode}: {await successHttpResponse.Content.ReadAsStringAsync()}");
         Assert.Equal("application/json", successHttpResponse.Content.Headers.ContentType?.MediaType);
         var successDataMessage = await ReadOrderGeneratorResponseJson(successHttpResponse);
         Assert.Equal(
@@ -389,7 +396,8 @@ public sealed class OrderApiTests : IClassFixture<LoggedOnOrderGenerator>
 public sealed class OrderCommunicationTests
 {
     private const string ValidOrderJson = """{"symbol":"PETR4","side":"buy","quantity":100,"price":10.50}""";
-    private const string OrderCommunicationMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
+    internal const string NoFixSessionMessage = "Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.";
+    internal const string OrderMayHaveBeenAcceptedMessage = "A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.";
 
     [Fact]
     public async Task Without_a_fix_session_answers_503_right_away()
@@ -401,7 +409,7 @@ public sealed class OrderCommunicationTests
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
         apiResponseClock.Stop();
 
-        await AssertOrderCommunicationError(orderHttpResponse, "fix-session-not-logged-on");
+        await AssertOrderCommunicationError(orderHttpResponse, "fix-session-not-logged-on", NoFixSessionMessage);
         Assert.True(apiResponseClock.Elapsed < TimeSpan.FromSeconds(1), $"took {apiResponseClock.Elapsed}");
         Assert.Equal(0, orderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
     }
@@ -433,7 +441,7 @@ public sealed class OrderCommunicationTests
         var orderHttpResponse = await PostValidOrder(orderGeneratorClient);
         apiResponseClock.Stop();
 
-        await AssertOrderCommunicationError(orderHttpResponse, "execution-report-timeout");
+        await AssertOrderCommunicationError(orderHttpResponse, "execution-report-timeout", OrderMayHaveBeenAcceptedMessage);
         Assert.Single(fixTestAcceptor.ReceivedOrders);
         Assert.InRange(apiResponseClock.Elapsed, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6.5));
         Assert.Equal(0, orderGeneratorFactory.Services.GetRequiredService<FixOrderClient>().OrdersAwaitingExecutionReportCount);
@@ -446,7 +454,7 @@ public sealed class OrderCommunicationTests
         await using var orderGeneratorFactory = OrderGeneratorTestHost.CreateOrderGeneratorFactory(fixTestAcceptor.AcceptorPort);
         using var orderGeneratorClient = orderGeneratorFactory.CreateClient();
 
-        await AssertOrderCommunicationError(await PostValidOrder(orderGeneratorClient), "fix-session-not-logged-on");
+        await AssertOrderCommunicationError(await PostValidOrder(orderGeneratorClient), "fix-session-not-logged-on", NoFixSessionMessage);
 
         fixTestAcceptor.ExecutionReportResponder = fixTestAcceptor.BuildAcceptedExecutionReport;
         fixTestAcceptor.StartFixTestAcceptor();
@@ -462,13 +470,14 @@ public sealed class OrderCommunicationTests
     private static Task<HttpResponseMessage> PostValidOrder(HttpClient orderGeneratorClient) =>
         orderGeneratorClient.PostAsync("/api/orders", new StringContent(ValidOrderJson, Encoding.UTF8, "application/json"));
 
-    private static async Task AssertOrderCommunicationError(HttpResponseMessage orderHttpResponse, string expectedErrorCode)
+    internal static async Task<JsonElement> AssertOrderCommunicationError(HttpResponseMessage orderHttpResponse, string expectedErrorCode, string expectedDetail)
     {
         var communicationErrorProblem = await OrderApiTests.ReadProblemDetailsAsync(orderHttpResponse, HttpStatusCode.ServiceUnavailable);
         Assert.Equal("urn:base-investimentos:problem:" + expectedErrorCode, communicationErrorProblem.GetProperty("type").GetString());
         Assert.Equal("Serviço indisponível", communicationErrorProblem.GetProperty("title").GetString());
-        Assert.Equal(OrderCommunicationMessage, communicationErrorProblem.GetProperty("detail").GetString());
+        Assert.Equal(expectedDetail, communicationErrorProblem.GetProperty("detail").GetString());
         Assert.Equal("ServiceUnavailable", communicationErrorProblem.GetProperty("statusResultado").GetString());
         Assert.Empty(communicationErrorProblem.GetProperty("errors").EnumerateArray());
+        return communicationErrorProblem;
     }
 }
