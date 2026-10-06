@@ -48,7 +48,7 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
     }
 
     public static string BuildOrderDeadlineRejectReason(int orderDecisionTimeoutSeconds) =>
-        $"Ordem rejeitada: o banco de dados não respondeu em {orderDecisionTimeoutSeconds} s. Tente de novo.";
+        $"Ordem rejeitada: o OrderAccumulator não decidiu a ordem em {orderDecisionTimeoutSeconds} s. Tente de novo.";
 
     public void FromApp(Message fixMessage, SessionID fixSessionId) => Crack(fixMessage, fixSessionId);
 
@@ -85,7 +85,7 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
 
             if (orderDecisionMessage.Failure is { } orderDecisionFailure)
             {
-                if (orderDecisionDeadline.IsCancellationRequested)
+                if (orderDecisionFailure is OperationCanceledException && orderDecisionDeadline.IsCancellationRequested)
                     return AnswerOrderDecisionTimeout(receivedClOrdId, receivedOrderSymbol, receivedOrderSide);
 
                 LogOrderDecisionFailure(orderDecisionFailure);
@@ -98,7 +98,7 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
         }
         catch (OperationCanceledException) when (orderDecisionDeadline.IsCancellationRequested && orderDecisionTask is not null)
         {
-            _ = WarnIfOrderIsAcceptedAfterTheDeadlineAsync(orderDecisionTask);
+            _ = LogOrderDecisionFinishedAfterTheDeadlineAsync(orderDecisionTask);
             return AnswerOrderDecisionTimeout(receivedClOrdId, receivedOrderSymbol, receivedOrderSide);
         }
         catch (Exception orderDecisionException)
@@ -116,12 +116,23 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
             receivedClOrdId, receivedOrderSymbol, receivedOrderSide, BuildOrderDeadlineRejectReason(orderDecisionTimeoutSeconds));
     }
 
-    private async Task WarnIfOrderIsAcceptedAfterTheDeadlineAsync(Task<DataMessage<DecideIncomingOrderResponse>> lateOrderDecisionTask)
+    private async Task LogOrderDecisionFinishedAfterTheDeadlineAsync(Task<DataMessage<DecideIncomingOrderResponse>> lateOrderDecisionTask)
     {
+        await ((Task)lateOrderDecisionTask).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        if (lateOrderDecisionTask.Exception is { } lateOrderDecisionException)
+        {
+            orderFixLogger.LogError(lateOrderDecisionException.GetBaseException(), "Order decision failed after the deadline.", new { ErrorCode = UnexpectedErrorCode });
+            return;
+        }
+
         var lateOrderDecisionMessage = await lateOrderDecisionTask;
         if (lateOrderDecisionMessage.Data is { IsRepeat: false, Accepted: true } lateAcceptedOrder)
-            orderFixLogger.LogWarning("Order answered Rejected at the deadline was accepted later by the database.",
+            orderFixLogger.LogError(
+                new InvalidOperationException($"The order {lateAcceptedOrder.ClOrdId} was answered Rejected at the deadline and then accepted by the database."),
+                "Order answered Rejected at the deadline was accepted later by the database.",
                 new { ErrorCode = OrderAcceptedAfterTheDeadlineErrorCode, lateAcceptedOrder.ClOrdId });
+        else if (lateOrderDecisionMessage.Failure is { } lateOrderDecisionFailure and not OperationCanceledException)
+            orderFixLogger.LogError(lateOrderDecisionFailure, "Order decision failed after the deadline.", new { ErrorCode = UnexpectedErrorCode });
     }
 
     private void LogOrderDecisionFailure(Exception orderDecisionFailure) =>
@@ -157,17 +168,17 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
     public static ExecutionReport BuildRejectedExecutionReport(
         string receivedClOrdId, string receivedOrderSymbol, char receivedOrderSide, string orderRejectReason) =>
         BuildExecutionReport(
-            Guid.NewGuid().ToString(NewExecutionReportIdFormat), Guid.NewGuid().ToString(NewExecutionReportIdFormat), accepted: false,
+            Guid.NewGuid().ToString(NewExecutionReportIdFormat), Guid.NewGuid().ToString(NewExecutionReportIdFormat), isOrderAccepted: false,
             receivedClOrdId, receivedOrderSymbol, receivedOrderSide, leavesQuantity: 0m, orderRejectReason);
 
     private static ExecutionReport BuildExecutionReport(
-        string orderId, string execId, bool accepted, string clOrdId, string orderSymbol, char orderSide, decimal leavesQuantity, string? orderRejectReason)
+        string orderId, string execId, bool isOrderAccepted, string clOrdId, string orderSymbol, char orderSide, decimal leavesQuantity, string? orderRejectReason)
     {
         var executionReport = new ExecutionReport(
             new OrderID(orderId),
             new ExecID(execId),
-            new ExecType(accepted ? ExecType.NEW : ExecType.REJECTED),
-            new OrdStatus(accepted ? OrdStatus.NEW : OrdStatus.REJECTED),
+            new ExecType(isOrderAccepted ? ExecType.NEW : ExecType.REJECTED),
+            new OrdStatus(isOrderAccepted ? OrdStatus.NEW : OrdStatus.REJECTED),
             new Symbol(orderSymbol),
             new Side(orderSide),
             new LeavesQty(leavesQuantity),
