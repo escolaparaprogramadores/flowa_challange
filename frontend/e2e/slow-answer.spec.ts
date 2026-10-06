@@ -18,7 +18,7 @@ const DATABASE_PAUSE_IN_MS = Number(process.env.E2E_DB_PAUSE_MS ?? 3_000);
 const SCREENSHOT_FOLDER = process.env.E2E_PROVAS_DIR;
 const MAYBE_ACCEPTED_MESSAGE = 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.';
 const brazilianReaisFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const WARNING_BOX_COLORS = { border: 'rgb(244, 197, 106)', background: 'rgba(242, 184, 75, 0.14)' };
+const WARNING_BOX_COLORS = { border: 'color(srgb 0.956863 0.772549 0.415686 / 0.38)', text: 'rgb(244, 197, 106)', background: 'rgba(242, 184, 75, 0.14)' };
 
 function isDatabasePaused() {
   return execFileSync('docker', ['inspect', '-f', '{{.State.Paused}}', POSTGRES_CONTAINER]).toString().trim() === 'true';
@@ -77,7 +77,10 @@ test('CA-11 and CA-27: a late answer (503) shows the warning, rereads list and e
   await expect(warningBox.getByTestId('status-da-ordem')).toHaveText('Sem confirmação');
   await expect(warningBox.getByTestId('mensagem-da-ordem')).toHaveText(MAYBE_ACCEPTED_MESSAGE);
   await expect(warningBox).not.toContainText('Tente de novo');
-  await expect(warningBox).toHaveCSS('border-top-color', WARNING_BOX_COLORS.border);
+  await expect(warningBox.getByTestId('status-da-ordem')).toHaveCSS('color', WARNING_BOX_COLORS.text);
+  for (const boxSide of ['top', 'right', 'bottom', 'left']) {
+    await expect(warningBox).toHaveCSS(`border-${boxSide}-color`, WARNING_BOX_COLORS.border);
+  }
   await expect(warningBox).toHaveCSS('background-color', WARNING_BOX_COLORS.background);
   await expect(warningBox.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 100 × R$ 10,00');
   if (SCREENSHOT_FOLDER) await page.screenshot({ path: `${SCREENSHOT_FOLDER}/06-demora-antes-1440.png` });

@@ -118,6 +118,7 @@ describe('OrderListCard: response box of the last send (CA-3)', () => {
     });
     expect(cardHtml).toContain('class="order-response-box order-response-box-maybe-accepted" role="alert" data-testid="faixa-da-falha-no-envio"');
     expect(readResponseBoxText(cardHtml, 'status-da-ordem')).toBe('Sem confirmação');
+    expect(readResponseBoxText(cardHtml, 'ordem-da-resposta')).toBe('PETR4 · Compra · 100 × R$ 10,00');
     expect(readResponseBoxText(cardHtml, 'mensagem-da-ordem')).toBe('A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.');
   });
 

@@ -1,12 +1,26 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route } from '@playwright/test';
 import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/services/ordersService';
 
 // CA-3 against the real OrderGenerator and OrderAccumulator: the box above the "Compra/Venda" table shows the answer of
 // every send. The test starts from "Deletar tudo" so the PETR4 exposure is zero and the second big buy breaks the limit.
 
-const ACCEPTED_BOX_COLORS = { border: 'rgb(111, 235, 192)', background: 'rgba(79, 227, 176, 0.13)' };
-const REJECTED_BOX_COLORS = { border: 'rgb(255, 164, 151)', background: 'rgba(255, 138, 122, 0.12)' };
+// Light border of maquete-01 (theme tokens --color-side-long-border and --color-side-short-border), strong text in the pill.
+const ACCEPTED_BOX_COLORS = { border: 'rgba(111, 235, 192, 0.38)', text: 'rgb(111, 235, 192)', background: 'rgba(79, 227, 176, 0.13)' };
+const REJECTED_BOX_COLORS = { border: 'rgba(255, 164, 151, 0.38)', text: 'rgb(255, 164, 151)', background: 'rgba(255, 138, 122, 0.12)' };
 const SCREENSHOT_FOLDER = process.env.E2E_PROVAS_DIR;
+
+async function expectBorderOnEverySide(responseBox: Locator, expectedBorderColor: string) {
+  for (const boxSide of ['top', 'right', 'bottom', 'left']) {
+    await expect(responseBox).toHaveCSS(`border-${boxSide}-color`, expectedBorderColor);
+    await expect(responseBox).toHaveCSS(`border-${boxSide}-width`, '1px');
+  }
+}
+
+// RNF-02: nothing in the box or in the card is wider than its own frame (a hidden overflow would cut the text).
+async function expectNothingWiderThanItsFrame(frameElement: Locator) {
+  const hiddenWidth = await frameElement.evaluate((measuredElement) => measuredElement.scrollWidth - measuredElement.clientWidth);
+  expect(hiddenWidth).toBe(0);
+}
 
 function locateOrderListCard(orderTicketPage: Page) {
   return orderTicketPage.getByRole('region', { name: 'Compra/Venda' });
@@ -38,7 +52,7 @@ async function expectBoxAboveTable(orderTicketPage: Page, responseBoxTestId: str
   expect(boxBottom.y + boxBottom.height).toBeLessThanOrEqual(tableTop);
 }
 
-for (const viewportWidth of [1440, 375]) {
+for (const viewportWidth of [1920, 1440, 860, 375]) {
   test(`CA-3 at ${viewportWidth}px: the box shows "Aceita" and then "Rejeitada" with the order and the reason when PETR4 breaks the limit`, async ({ page }) => {
     await page.setViewportSize({ width: viewportWidth, height: 900 });
     await page.goto('/');
@@ -54,7 +68,8 @@ for (const viewportWidth of [1440, 375]) {
     await expect(acceptedBox.getByTestId('status-da-ordem')).toHaveText('Aceita');
     await expect(acceptedBox.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 99.999 × R$ 999,99');
     await expect(acceptedBox.getByTestId('mensagem-da-ordem')).toHaveText('Ordem aceita.');
-    await expect(acceptedBox).toHaveCSS('border-top-color', ACCEPTED_BOX_COLORS.border);
+    await expect(acceptedBox.getByTestId('status-da-ordem')).toHaveCSS('color', ACCEPTED_BOX_COLORS.text);
+    await expectBorderOnEverySide(acceptedBox, ACCEPTED_BOX_COLORS.border);
     await expect(acceptedBox).toHaveCSS('background-color', ACCEPTED_BOX_COLORS.background);
     await expectBoxAboveTable(page, 'caixa-de-resposta');
 
@@ -64,26 +79,29 @@ for (const viewportWidth of [1440, 375]) {
     await expect(rejectedBox).toHaveCount(1);
     await expect(rejectedBox).toBeVisible();
     await expect(rejectedBox.getByTestId('status-da-ordem')).toHaveText('Rejeitada');
-    await expect(rejectedBox.getByTestId('status-da-ordem')).toHaveCSS('color', REJECTED_BOX_COLORS.border);
+    await expect(rejectedBox.getByTestId('status-da-ordem')).toHaveCSS('color', REJECTED_BOX_COLORS.text);
     await expect(rejectedBox.getByTestId('ordem-da-resposta')).toHaveText('PETR4 · Compra · 99.999 × R$ 999,99');
     await expect(rejectedBox.getByTestId('ordem-da-resposta')).toHaveCSS('font-weight', '800');
     await expect(rejectedBox.getByTestId('mensagem-da-ordem')).toHaveText('Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.');
-    await expect(rejectedBox).toHaveCSS('border-top-color', REJECTED_BOX_COLORS.border);
+    await expectBorderOnEverySide(rejectedBox, REJECTED_BOX_COLORS.border);
     await expect(rejectedBox).toHaveCSS('background-color', REJECTED_BOX_COLORS.background);
     await expectBoxAboveTable(page, 'caixa-de-resposta');
 
-    // maquete-01: at 1440 the pill sits on the left of the order line; at 375 the text wraps below the pill.
+    // maquete-01: from 860 up the pill sits on the left of the order line; at 375 the text wraps below the pill.
     const pillBox = (await rejectedBox.getByTestId('status-da-ordem').boundingBox())!;
     const orderLineBox = (await rejectedBox.getByTestId('ordem-da-resposta').boundingBox())!;
-    if (viewportWidth === 1440) {
+    if (viewportWidth >= 860) {
       expect(pillBox.x + pillBox.width).toBeLessThan(orderLineBox.x);
       expect(Math.abs(pillBox.y - orderLineBox.y)).toBeLessThan(pillBox.height);
     } else {
       expect(pillBox.y + pillBox.height).toBeLessThanOrEqual(orderLineBox.y);
     }
 
-    // RNF-02: no horizontal scroll of the page.
+    // RNF-02: no horizontal scroll of the page, of the card or of the box.
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0);
+    await expectNothingWiderThanItsFrame(locateOrderListCard(page));
+    await expectNothingWiderThanItsFrame(rejectedBox);
+    await expectNothingWiderThanItsFrame(rejectedBox.getByTestId('ordem-da-resposta'));
 
     if (SCREENSHOT_FOLDER) {
       await locateOrderListCard(page).screenshot({ path: `${SCREENSHOT_FOLDER}/06-caixa-rejeitada-${viewportWidth}.png` });

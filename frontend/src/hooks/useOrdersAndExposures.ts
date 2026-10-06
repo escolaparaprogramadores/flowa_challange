@@ -10,7 +10,7 @@ import {
   type OrderToSend,
   type SymbolExposure,
 } from '../services/ordersService';
-import { isSentOrderOnFirstPage, startSentOrderRecheckCycle } from '../services/sentOrderRecheckCycle';
+import { isSentOrderOnFirstPage, readTrustedTotalOrdersBeforeSend, startSentOrderRecheckCycle } from '../services/sentOrderRecheckCycle';
 
 export type ExposuresState =
   | { status: 'loading' }
@@ -47,6 +47,8 @@ export function useOrdersAndExposures() {
   const latestOrderListReadNumber = useRef(0);
   const latestOrderSendNumber = useRef(0);
   const cancelRunningRecheckCycle = useRef<() => void>(undefined);
+  const orderListReadsRunning = useRef(0);
+  const hasUnconfirmedEarlierSend = useRef(false);
 
   // Two reads may be open at the same time; only the latest requested one may change the panel,
   // otherwise an old and slow answer would erase the exposure already refreshed after a send.
@@ -64,7 +66,10 @@ export function useOrdersAndExposures() {
   const loadOrderListPage = useCallback(async (requestedPage: number) => {
     const thisReadNumber = ++latestOrderListReadNumber.current;
     setOrderListPageBeingLoaded(requestedPage);
-    const readOrderListState = await readOrderListPage(requestedPage);
+    orderListReadsRunning.current += 1;
+    const readOrderListState = await readOrderListPage(requestedPage).finally(() => {
+      orderListReadsRunning.current -= 1;
+    });
     if (thisReadNumber !== latestOrderListReadNumber.current) return undefined;
     setOrderListState(readOrderListState);
     setOrderListPageBeingLoaded(undefined);
@@ -97,7 +102,11 @@ export function useOrdersAndExposures() {
     const thisOrderSendNumber = ++latestOrderSendNumber.current;
     cancelRunningRecheckCycle.current?.();
     cancelRunningRecheckCycle.current = undefined;
-    const totalOrdersBeforeSend = orderListState.status === 'ready' ? orderListState.orderListPage.totalOrders : undefined;
+    const totalOrdersBeforeSend = readTrustedTotalOrdersBeforeSend(
+      orderListState.status === 'ready' ? orderListState.orderListPage.totalOrders : undefined,
+      orderListReadsRunning.current > 0,
+      hasUnconfirmedEarlierSend.current,
+    );
     setIsSendingOrder(true);
     setLastSendResult(undefined);
     let orderSendResult: OrderSendResult;
@@ -112,10 +121,13 @@ export function useOrdersAndExposures() {
     // Without an answer in time the order may have entered: the screen rereads by itself, with a ceiling, until it shows up.
     if (orderSendResult.outcome !== 'maybe-accepted' || thisOrderSendNumber !== latestOrderSendNumber.current) return;
     const { attemptedOrder } = orderSendResult;
-    if (isSentOrderOnFirstPage(firstOrderListPage, attemptedOrder, totalOrdersBeforeSend)) return;
-    cancelRunningRecheckCycle.current = startSentOrderRecheckCycle(async () =>
-      isSentOrderOnFirstPage(await refreshExposuresAndFirstOrderListPage(), attemptedOrder, totalOrdersBeforeSend),
-    );
+    hasUnconfirmedEarlierSend.current = !isSentOrderOnFirstPage(firstOrderListPage, attemptedOrder, totalOrdersBeforeSend);
+    if (!hasUnconfirmedEarlierSend.current) return;
+    cancelRunningRecheckCycle.current = startSentOrderRecheckCycle(async () => {
+      const hasSentOrderAppeared = isSentOrderOnFirstPage(await refreshExposuresAndFirstOrderListPage(), attemptedOrder, totalOrdersBeforeSend);
+      if (hasSentOrderAppeared) hasUnconfirmedEarlierSend.current = false;
+      return hasSentOrderAppeared;
+    });
   }
 
   async function deleteAllOrdersAndRefresh() {

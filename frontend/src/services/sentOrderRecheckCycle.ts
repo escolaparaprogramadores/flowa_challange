@@ -5,6 +5,16 @@ import type { AttemptedOrder, OrderListPage } from './ordersService';
 export const RECHECK_INTERVAL_IN_MS = 2_000;
 export const MAX_READS_AFTER_UNCONFIRMED_SEND = 3;
 
+// The count on screen only stands for "before the send" when the list is current: no list read still on its way (the
+// read of an earlier send may be late) and no earlier unconfirmed order that may still enter and look like this one.
+export function readTrustedTotalOrdersBeforeSend(
+  totalOrdersOnScreen: number | undefined,
+  isOrderListReadRunning: boolean,
+  hasUnconfirmedEarlierSend: boolean,
+) {
+  return isOrderListReadRunning || hasUnconfirmedEarlierSend ? undefined : totalOrdersOnScreen;
+}
+
 // The order "appeared" when the server counts more orders than before the send and the newest one, at the top of
 // page 1, has the same asset and side. Without the count from before the send (list loading or failed), nothing
 // proves it appeared, so the cycle keeps its reads up to the ceiling.

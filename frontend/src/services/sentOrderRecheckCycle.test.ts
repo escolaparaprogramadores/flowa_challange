@@ -4,6 +4,7 @@ import {
   MAX_READS_AFTER_UNCONFIRMED_SEND,
   RECHECK_INTERVAL_IN_MS,
   isSentOrderOnFirstPage,
+  readTrustedTotalOrdersBeforeSend,
   startSentOrderRecheckCycle,
 } from './sentOrderRecheckCycle';
 
@@ -42,7 +43,7 @@ describe('isSentOrderOnFirstPage', () => {
     expect(isSentOrderOnFirstPage(otherSideOnTop, sentPetr4Buy, ordersOnServerBeforeSend)).toBe(false);
   });
 
-  it('RF-11: the user on page 2 or with the list failed before the send gives no count, so nothing counts as found', () => {
+  it('RF-11: without a trusted count from before the send (list loading, failed or still being read), nothing counts as found', () => {
     const firstPage = buildFirstPageWithTotal(26, [buildListedOrder('new-1', 'PETR4', 'buy')]);
     expect(isSentOrderOnFirstPage(firstPage, sentPetr4Buy, undefined)).toBe(false);
   });
@@ -54,6 +55,24 @@ describe('isSentOrderOnFirstPage', () => {
 
   it('RF-12: a failed read (no page) does not count as found', () => {
     expect(isSentOrderOnFirstPage(undefined, sentPetr4Buy, ordersOnServerBeforeSend)).toBe(false);
+  });
+});
+
+describe('readTrustedTotalOrdersBeforeSend', () => {
+  it('RF-11: a settled list on screen gives its count, on any page', () => {
+    expect(readTrustedTotalOrdersBeforeSend(25, false, false)).toBe(25);
+  });
+
+  it('F-01 regression: a list read still running (the read of the previous send) makes the count untrusted', () => {
+    expect(readTrustedTotalOrdersBeforeSend(25, true, false)).toBeUndefined();
+  });
+
+  it('F-01 regression: an earlier unconfirmed order that may still enter makes the count untrusted', () => {
+    expect(readTrustedTotalOrdersBeforeSend(25, false, true)).toBeUndefined();
+  });
+
+  it('RF-11: no list on screen gives no count', () => {
+    expect(readTrustedTotalOrdersBeforeSend(undefined, false, false)).toBeUndefined();
   });
 });
 
