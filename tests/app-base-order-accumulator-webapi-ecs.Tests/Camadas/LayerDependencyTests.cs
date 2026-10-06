@@ -27,9 +27,17 @@ public sealed class LayerDependencyTests
     }
 
     [Fact]
-    public void Commons_depends_only_on_the_base_class_library_the_technical_libraries_and_itself()
+    public void Commons_and_each_commons_folder_depend_only_on_the_base_class_library_their_technical_library_and_themselves()
     {
         AssertLayerOnlyDependsOn("Commons", [BaseClassLibraryNamespace, .. CommonsTechnicalLibraryNamespaces, LayerNamespace("Commons")]);
+        AssertLayerOnlyDependsOn("Commons.Entities", BaseClassLibraryNamespace, LayerNamespace("Commons.Entities"));
+        AssertLayerOnlyDependsOn("Commons.Responses", BaseClassLibraryNamespace, LayerNamespace("Commons.Responses"));
+        AssertLayerOnlyDependsOn("Commons.Database", BaseClassLibraryNamespace, "Dapper", "Npgsql", LayerNamespace("Commons.Database"));
+        AssertLayerOnlyDependsOn("Commons.Observability", BaseClassLibraryNamespace, "StatsdClient", LayerNamespace("Commons.Observability"));
+        AssertLayerOnlyDependsOn("Commons.Logging", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Logging"));
+        AssertLayerOnlyDependsOn(
+            "Commons.DependencyInjection", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Database"), LayerNamespace("Commons.Logging"),
+            LayerNamespace("Commons.DependencyInjection"));
     }
 
     [Fact]

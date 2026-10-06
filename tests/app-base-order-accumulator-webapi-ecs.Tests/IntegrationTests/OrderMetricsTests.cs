@@ -212,9 +212,9 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         var appOrderMetricsClient = (DogStatsdMetricsClient)appServices.GetRequiredService<IMetricsClient>();
 
         await appServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
-        appOrderMetricsClient.Flush();
+        appOrderMetricsClient.FlushPendingMetrics();
         appOrderMetricsClient.IncrementCounter(SentinelMetricName, [$"version:{uniqueVersionTag}"]);
-        appOrderMetricsClient.Flush();
+        appOrderMetricsClient.FlushPendingMetrics();
         var receivedOnTheAgentPort = await agentOnTheDatadogPort.ReadFlowaMetricsUntilAsync(SentinelMetricName);
 
         var acceptedOrderMetric = Assert.Single(receivedOnTheAgentPort, receivedMetric =>
@@ -240,7 +240,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         for (var orderNumber = 0; orderNumber < 20; orderNumber++)
         {
             orderDecisionsWithoutAgent.Add(await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m)));
-            appOrderMetricsClient.Flush();
+            appOrderMetricsClient.FlushPendingMetrics();
         }
         appOrderMetricsClient.Dispose();
 
@@ -334,9 +334,9 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     // The absence of a metric can only be proven with a send afterwards: everything that arrived before the sentinel is what was sent.
     private async Task<List<DogStatsdMetricLine>> SendSentinelAndReadOrderMetricsAsync()
     {
-        orderMetricsClient.Flush();
+        orderMetricsClient.FlushPendingMetrics();
         orderMetricsClient.IncrementCounter(SentinelMetricName, []);
-        orderMetricsClient.Flush();
+        orderMetricsClient.FlushPendingMetrics();
         var receivedFlowaMetrics = await dogStatsdUdpListener.ReadFlowaMetricsUntilAsync(SentinelMetricName);
         return receivedFlowaMetrics.Where(receivedFlowaMetric => receivedFlowaMetric.MetricName != SentinelMetricName).ToList();
     }

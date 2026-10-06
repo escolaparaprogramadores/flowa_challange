@@ -24,7 +24,7 @@ public sealed class DogStatsdMetricsClient : IMetricsClient, IDisposable
 
     public void RecordGauge(string metricName, double gaugeValue, string[] metricTags) => dogStatsdService.Gauge(metricName, gaugeValue, tags: metricTags);
 
-    public void Flush() => dogStatsdService.Flush();
+    public void FlushPendingMetrics() => dogStatsdService.Flush();
 
     public void Dispose() => dogStatsdService.Dispose();
 
