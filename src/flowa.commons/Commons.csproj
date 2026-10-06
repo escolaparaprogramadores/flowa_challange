@@ -15,4 +15,9 @@
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
 
+  <!-- Um só dicionário FIX 4.4 com a tag 5100 para as duas apps: a referência de projeto o leva para o lado do executável de cada uma. -->
+  <ItemGroup>
+    <None Update="Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
