@@ -128,11 +128,12 @@ public sealed class OrderDecisionLogTests(OrderAccumulatorPostgresFixture orderA
                 new OrderRepositoryFailingForClOrdId(orderThatHitsTheDatabaseFailure.ClOrdID.Value, new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())))).StartWithFixAcceptor())
         {
             using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-            await fixTestInitiator.ExpectNoAnswerAsync(orderThatHitsTheDatabaseFailure, TimeSpan.FromSeconds(2));
+            var databaseFailureExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(orderThatHitsTheDatabaseFailure);
+            Assert.Equal(ExecType.REJECTED, databaseFailureExecutionReport.ExecType.Value);
         }
 
         var failureLogLine = AssertSingleWarningOrErrorLineOfTheOrder(stdoutJsonLogCapture, orderThatHitsTheDatabaseFailure.ClOrdID.Value);
-        Assert.Equal(("Error", "Order decision failed; no ExecutionReport sent."), (failureLogLine.LogLevel, failureLogLine.Message));
+        Assert.Equal(("Error", "Order decision failed; ExecutionReport Rejected sent."), (failureLogLine.LogLevel, failureLogLine.Message));
         Assert.Equal("error", failureLogLine.ReadLogField("ErrorCode"));
         Assert.StartsWith("Npgsql.NpgsqlException", failureLogLine.Exception);
         Assert.Contains(OrderRepositoryFailingForClOrdId.SimulatedDatabaseFailure, failureLogLine.Exception);
