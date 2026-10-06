@@ -4,8 +4,8 @@ Este arquivo é o acordo entre o OrderGenerator, o OrderAccumulator, a tela e o 
 Quem implementa segue o que está aqui. Mudou alguma coisa? Sobe a versão e avisa quem usa.
 A v2 trocou o formato das respostas HTTP: sucesso em `DataMessage` e erro em `application/problem+json`.
 A v3 traz o motivo da rejeição na lista, a resposta `Rejected` para toda ordem que o OrderAccumulator
-não consegue decidir, o `422` e o `503` de sessão perdida no envio, os dois prazos configuráveis e o
-OrderGenerator lendo a lista e a exposição direto no banco.
+não consegue decidir, o `422` e o `503` de sessão perdida no envio, os dois prazos configuráveis, o
+OrderGenerator lendo a lista e a exposição direto no banco e o OrderAccumulator sem HTTP, só com o FIX.
 
 A regra de campo da ordem (símbolos `PETR4`/`VALE3`/`VIIA4`, lado, quantidade inteira maior que zero e
 menor que 100.000, preço maior que zero, menor que 1.000 e múltiplo de 0,01) e as mensagens dela moram
@@ -68,7 +68,7 @@ Códigos de `type` usados hoje:
 | `invalid-input` | 400 | pedido que o servidor não consegue ler; `detail` = `"Dados inválidos"` |
 | `invalid-page` | 400 | `GET /api/orders` com página inválida |
 | `not-found` | 404 | caminho `/api/...` que não existe |
-| `method-not-allowed` | 405 | verbo que a rota do OrderAccumulator não tem |
+| `method-not-allowed` | 405 | verbo que a rota `/api/...` não aceita |
 | `fix-order-rejected` | 422 | `POST /api/orders` recusado pela sessão FIX (`35=3`) ou pelo OrderAccumulator (`35=j`): a ordem não entrou |
 | `fix-session-not-logged-on` | 503 | `POST /api/orders` sem sessão FIX logada |
 | `execution-report-timeout` | 503 | `POST /api/orders` sem `ExecutionReport` no prazo (`Fix:ExecutionReportTimeoutSeconds`, padrão 5 s) |
@@ -128,9 +128,10 @@ Respostas:
   `ExecutionReport` que chega depois do prazo é
   descartado com um log Warning `"ExecutionReport arrived for an order that is no longer waiting for it."`.
 
-### OrderAccumulator — `GET /api/exposures`
+### OrderGenerator — `GET /api/exposures`
 
-Devolve a exposição atual dos três símbolos, sempre nesta ordem: `PETR4`, `VALE3`, `VIIA4`.
+Lê a exposição direto no PostgreSQL, na tabela que o OrderAccumulator grava, e devolve a exposição atual
+dos três símbolos, sempre nesta ordem: `PETR4`, `VALE3`, `VIIA4`.
 `message` é `"Exposição dos símbolos lida."` e `data` é:
 
 ```json
@@ -146,15 +147,13 @@ Devolve a exposição atual dos três símbolos, sempre nesta ordem: `PETR4`, `V
 
 - `exposure` = soma de `preço × quantidade` das compras aceitas menos a das vendas aceitas.
 - `remaining` = `limit - |exposure|`: quanto ainda cabe antes de estourar, para qualquer lado.
-- `limit` é a constante do OrderAccumulator. Não vem de configuração nem de variável de ambiente.
+- `limit` é uma constante no código (`ExposureLimitPolicy`). Não vem de configuração nem de variável de ambiente.
+- Sem a tabela (banco recém-criado), cada símbolo vem com exposição `0`.
+- Banco fora do ar → `500` com o problem `internal-error`.
 
-### OrderGenerator — `GET /api/exposures`
+### OrderGenerator — `GET /api/orders?page=<n>` e `DELETE /api/orders`
 
-Lê a exposição direto no PostgreSQL, na mesma tabela que o OrderAccumulator grava, e responde o mesmo
-`data` e a mesma `message` do OrderAccumulator. Sem a tabela (banco recém-criado), cada símbolo vem com
-exposição `0`. Banco fora do ar → `500` com o problem `internal-error`.
-
-### OrderAccumulator — `GET /api/orders?page=<n>` e `DELETE /api/orders`
+As duas rotas leem e apagam direto no PostgreSQL, sem passar pelo OrderAccumulator.
 
 `GET` lista as ordens gravadas no banco, 10 por página, da mais nova para a mais velha.
 `message` é `"Página de ordens lida."` e `data` é:
@@ -178,26 +177,23 @@ exposição `0`. Banco fora do ar → `500` com o problem `internal-error`.
 - Página `0`, negativa, texto, repetida ou acima de `1000` → `400` com o problem `invalid-page`,
   `detail: "Página inválida."` e `errors: ["A página deve ser um número inteiro de 1 a 1000."]`.
 - Página além da última → `200` com `orders: []` e o `total` real.
+- Sem a tabela de ordens (banco recém-criado) → a página vazia, com `total: 0`.
 
 `DELETE` apaga todas as ordens e zera a exposição de `PETR4`, `VALE3` e `VIIA4` numa transação só
-(tudo ou nada) e responde `204` sem corpo (não há corpo para pôr no envelope). Não pede senha e não libera CORS.
+(tudo ou nada) e responde `204` sem corpo (não há corpo para pôr no envelope). Não pede senha. Outro verbo
+em `/api/orders` (fora `POST`, a ordem) não apaga nada.
 
-### OrderGenerator — `GET /api/orders?page=<n>` e `DELETE /api/orders`
-
-Respondem as duas rotas acima direto no PostgreSQL, sem chamar o OrderAccumulator, com as mesmas
-regras: o mesmo `data`, a mesma `message`, a mesma página de 10 e o mesmo `400` `invalid-page`.
-
-- `GET` sem a tabela de ordens (banco recém-criado) devolve a página vazia, com `total: 0`.
-- `DELETE` zera a exposição e apaga as ordens numa transação só e devolve o `204` sem corpo. Outro verbo
-  em `/api/orders` (fora `POST`, a ordem) não apaga nada.
 - Banco fora do ar → `500` com o problem `internal-error`.
 - Nenhuma das duas manda `Access-Control-Allow-Origin`: outra página não consegue chamá-las.
 
-### Os dois apps — `GET /health` e `GET /version`
+### OrderGenerator — `GET /health` e `GET /version`
 
 `/health` responde `200` com o texto `Healthy` quando o processo está de pé, sem depender da sessão
 FIX nem do banco. `/version` responde `200` com `{"commit":"<sha completo, 40 caracteres>"}`: o commit
 do código que está rodando, gravado no build, para conferir que a versão no ar é a que foi revisada.
+
+O OrderAccumulator não tem HTTP: só a sessão FIX na porta 9876. Ele também grava o commit no build, não
+sobe sem ele, e o escreve no log `Application started.` (campo `BuildCommitSha`).
 
 ## 2. Mensagens FIX 4.4
 
@@ -251,7 +247,8 @@ campos como obrigatórios. O motivo da rejeição em `58`:
 - `ClOrdID` repetido com outro símbolo, lado, quantidade ou preço:
   `Ordem rejeitada: o ClOrdID <id> já foi usado com outros dados.`, com `103=6`.
 
-Nessas três respostas, `37` e `17` são novos, e `11`, `55` e `54` repetem o que chegou. Na falha interna
+Na falha interna, no prazo e no `ClOrdID` repetido com outros dados, `37` e `17` são novos, e `11`, `55` e
+`54` repetem o que chegou. Na falha interna
 e no `ClOrdID` repetido com outros dados, nada é gravado e a ordem original (se houver) não muda.
 
 No prazo há uma exceção. Se o `COMMIT` já tinha sido enviado ao banco quando o prazo venceu, ele termina:
@@ -297,8 +294,7 @@ zero; senão o app não sobe).
 | Processo | Porta | Para quê |
 |---|---|---|
 | OrderGenerator | 8080 (HTTP); 8443 (HTTPS, só fora do compose) | página, `/api/*`, `/health`, `/version` |
-| OrderAccumulator | 8081 (HTTP); 8444 (HTTPS, só fora do compose) | `GET /api/exposures`, `GET /api/orders`, `DELETE /api/orders`, `/health`, `/version` |
-| OrderAccumulator | 9876 (TCP) | acceptor FIX |
+| OrderAccumulator | 9876 (TCP) | acceptor FIX (o único canal dele; não tem HTTP) |
 | PostgreSQL | 5432 | banco: o OrderAccumulator grava; o OrderGenerator lê a lista e a exposição e apaga |
 
 As variáveis seguem o padrão do ASP.NET Core (`__` separa as seções). O valor da coluna "fora do
@@ -307,14 +303,13 @@ compose" é o padrão para rodar na máquina, sem Docker.
 | Variável | App | Fora do compose | No compose |
 |---|---|---|---|
 | `ASPNETCORE_HTTP_PORTS` | OrderGenerator | `8080` | `8080` |
-| `ASPNETCORE_HTTP_PORTS` | OrderAccumulator | `8081` | `8081` |
-| `ASPNETCORE_HTTPS_PORTS` | OrderGenerator / OrderAccumulator | `8443` / `8444`, certificado de desenvolvimento do .NET (`dotnet dev-certs https`) | não usa |
+| `ASPNETCORE_HTTPS_PORTS` | OrderGenerator | `8443`, certificado de desenvolvimento do .NET (`dotnet dev-certs https`) | não usa |
 | `Fix__AcceptorHost` | OrderGenerator | `localhost` | `orderaccumulator` |
 | `Fix__AcceptorPort` | os dois | `9876` | `9876` |
 | `Fix__ExecutionReportTimeoutSeconds` | OrderGenerator | `5` (de 1 a 5) | `5` (padrão) |
 | `Orders__DecisionTimeoutSeconds` | OrderAccumulator | `4` (maior que zero) | `4` (padrão) |
 | `ConnectionStrings__Flowa` | os dois | host `localhost` | host `postgres` |
-| `Database__MaximumPoolSize` | os dois, opcional | padrão do Npgsql | `10` no OrderGenerator |
+| `Database__MaximumPoolSize` | os dois, opcional | padrão do Npgsql | `10` |
 
 A string do banco tem o formato do Npgsql: `Host=<host>;Port=5432;Database=flowa;Username=flowa;`
 seguido da senha. A senha nunca fica escrita no código nem neste contrato: o compose lê de

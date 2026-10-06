@@ -62,7 +62,7 @@ ocupada, use `FLOWA_HTTP_PORT=9080 docker compose up`.
 
 Precisa do .NET 10 SDK, do Node.js 22 e de um PostgreSQL 17 com um banco `flowa` e um usuário `flowa`.
 As tabelas são criadas pelo OrderAccumulator quando ele sobe. Os comandos abaixo são para bash (no
-Windows, o Git Bash serve) e usam as portas do contrato: 8080, 8081 e 9876.
+Windows, o Git Bash serve) e usam as portas do contrato: 8080 (a página e a API) e 9876 (o FIX).
 
 Primeiro a tela, que é gravada dentro do OrderGenerator:
 
@@ -77,9 +77,9 @@ Depois o OrderAccumulator, num terminal (troque pela senha que você deu ao usu�
 
 ```bash
 export POSTGRES_PASSWORD=<senha do usuário flowa>
-ASPNETCORE_HTTP_PORTS=8081 Fix__AcceptorPort=9876 \
+Fix__AcceptorPort=9876 \
 ConnectionStrings__Flowa="Host=localhost;Port=5432;Database=flowa;Username=flowa;Password=$POSTGRES_PASSWORD" \
-dotnet run --no-launch-profile --project src/flowa.orderaccumulator-worker-ecs
+dotnet run --project src/flowa.orderaccumulator-worker-ecs
 ```
 
 E o OrderGenerator, em outro terminal. Ele lê a lista e a exposição no mesmo banco, com a mesma senha:
@@ -88,12 +88,12 @@ E o OrderGenerator, em outro terminal. Ele lê a lista e a exposição no mesmo 
 export POSTGRES_PASSWORD=<senha do usuário flowa>
 ASPNETCORE_HTTP_PORTS=8080 Fix__AcceptorHost=localhost Fix__AcceptorPort=9876 \
 ConnectionStrings__Flowa="Host=localhost;Port=5432;Database=flowa;Username=flowa;Password=$POSTGRES_PASSWORD" \
-dotnet run --no-launch-profile --project src/flowa.ordergenerator-webapi-ecs
+dotnet run --project src/flowa.ordergenerator-webapi-ecs
 ```
 
-A página abre em http://localhost:8080. O `--no-launch-profile` faz o app usar as portas das
-variáveis em vez das do `launchSettings.json`. Os dois apps gravam o commit do build e mostram em
-`/version`, então precisam ser compilados dentro de um clone do git.
+A página abre em http://localhost:8080. O OrderAccumulator não tem HTTP: ele só escuta o FIX na 9876.
+Os dois apps gravam o commit do build e não sobem sem ele (o OrderGenerator mostra em `/version`), então
+precisam ser compilados dentro de um clone do git.
 
 ## Como testar
 
@@ -212,8 +212,9 @@ que os dois usam fica num terceiro projeto, a Commons (`src/flowa.commons/Common
 na solução `Flowa.slnx`. Dentro de cada app, as camadas são pastas, com o namespace igual à pasta
 (`Flowa.OrderAccumulator.Domain`, por exemplo):
 
-- **Entrypoint**: rotas HTTP, a sessão FIX do OrderAccumulator, o tratamento de erro, o log de cada
-  pedido e a montagem das dependências. Recebe o pedido, chama o caso de uso e responde.
+- **Entrypoint**: a montagem das dependências e a porta de entrada de cada app. No OrderGenerator, as
+  rotas HTTP, o tratamento de erro e o log de cada pedido; no OrderAccumulator, que não tem HTTP, a sessão
+  FIX. Recebe o pedido, chama o caso de uso e responde.
 - **Application**: os casos de uso. Cada um só organiza o passo a passo, sem regra de negócio.
 - **Domain**: as regras do negócio: a ordem, a regra de campo, o limite de exposição. Não usa nenhuma
   biblioteca de fora.
@@ -235,11 +236,10 @@ src/flowa.orderaccumulator-worker-ecs/
 ├─ Entrypoint/
 │  ├─ Fix/                  NewOrderSingleConsumer: recebe a ordem FIX e responde o ExecutionReport
 │  ├─ BackgroundService/    sessão FIX (acceptor) e a métrica da exposição
-│  ├─ Orders/, Exposures/   rotas HTTP
-│  └─ ErrorHandling/, Logging/, Observability/
+│  └─ Observability/
 ├─ Application/
-│  ├─ Orders/       DecideIncomingOrder, ListOrders e DeleteAllOrders (UseCases), Responses, Interfaces
-│  ├─ Exposures/    GetExposures (UseCases), Responses, Interfaces
+│  ├─ Orders/       DecideIncomingOrder (UseCases), Responses, Interfaces
+│  ├─ Exposures/    Interfaces (leitura da exposição para a métrica)
 │  └─ ErrorHandling/
 ├─ Domain/
 │  ├─ Orders/           Order, regra de campo (OrderFieldPolicy), IOrderRepository
@@ -277,9 +277,9 @@ A página não fica no OrderGenerator: o código dela está em `frontend/`, e o 
 `wwwroot` dele.
 
 No OrderAccumulator, cada agregado tem um repositório: `IOrderRepository` e `IExposureRepository`, com a
-interface no Domain e o SQL na Infrastructure. As leituras para a tela têm repositório próprio, com a
-interface na Application (`IOrderListReadRepository`, `ISymbolExposureReadRepository`; no OrderGenerator,
-`IStoredOrderRepository` e `ISymbolExposureRepository`).
+interface no Domain e o SQL na Infrastructure. As leituras têm repositório próprio, com a interface na
+Application: no OrderAccumulator, `ISymbolExposureReadRepository` (para a métrica da exposição); no
+OrderGenerator, `IStoredOrderRepository` e `ISymbolExposureRepository` (para a tela).
 
 ## Na nuvem (AWS)
 
