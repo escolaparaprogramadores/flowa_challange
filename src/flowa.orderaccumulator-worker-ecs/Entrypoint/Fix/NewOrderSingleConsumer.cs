@@ -23,7 +23,6 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
     private const string OrderDecisionTimeoutErrorCode = "order_decision_timeout";
     private const string OrderAcceptedAfterTheDeadlineErrorCode = "order_accepted_after_the_deadline";
     private const string NewExecutionReportIdFormat = "N";
-    private const char MissingOrderSide = '0';
     private const decimal ZeroForMissingQuantityOrPriceRejectedByTheFieldRule = 0m;
 
     private readonly IServiceScopeFactory orderOperationScopeFactory;
@@ -59,9 +58,9 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
             : null;
         using var orderReceiving = FixOrderTraceProvider.StartOrderReceiving(receivedTraceParent);
 
-        var receivedClOrdId = newOrderSingle.IsSetClOrdID() ? newOrderSingle.ClOrdID.Value : string.Empty;
-        var receivedOrderSymbol = newOrderSingle.IsSetSymbol() ? newOrderSingle.Symbol.Value : string.Empty;
-        var receivedOrderSide = newOrderSingle.IsSetSide() ? newOrderSingle.Side.Value : MissingOrderSide;
+        var receivedClOrdId = newOrderSingle.ClOrdID.Value;
+        var receivedOrderSymbol = newOrderSingle.Symbol.Value;
+        var receivedOrderSide = newOrderSingle.Side.Value;
         var receivedOrderQuantity = newOrderSingle.IsSetOrderQty() ? newOrderSingle.OrderQty.Value : ZeroForMissingQuantityOrPriceRejectedByTheFieldRule;
         var receivedOrderPrice = newOrderSingle.IsSetPrice() ? newOrderSingle.Price.Value : ZeroForMissingQuantityOrPriceRejectedByTheFieldRule;
 

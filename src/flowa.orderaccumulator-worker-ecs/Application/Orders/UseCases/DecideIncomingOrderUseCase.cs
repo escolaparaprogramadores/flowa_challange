@@ -105,7 +105,8 @@ public sealed class DecideIncomingOrderUseCase
         if (await orderRepository.TryAddOrderAsync(answeredOrder, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await unitOfWork.CommitTransactionAsync(cancellationToken);
+            // Once sent, the COMMIT waits for the database to the end, so the memory mirror always follows what was stored.
+            await unitOfWork.CommitTransactionAsync(CancellationToken.None);
             return OrderAnswer.AnswerNewOrder(answeredOrder);
         }
 
