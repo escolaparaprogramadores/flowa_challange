@@ -11,10 +11,4 @@ public static class OrderSideCodes
         SellOrderSideFixCode => OrderSide.Sell,
         _ => null
     };
-
-    public static OrderSide? ConvertStoredFixCodeToOrderSide(string storedOrderSideFixCode) => storedOrderSideFixCode switch
-    {
-        [var orderSideFixCode] => ConvertFixCodeToOrderSide(orderSideFixCode),
-        _ => null
-    };
 }
