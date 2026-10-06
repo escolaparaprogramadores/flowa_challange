@@ -154,8 +154,8 @@ public sealed class FixTestInitiator : IApplication, IDisposable
     public async Task<IReadOnlyDictionary<string, ExecutionReport>> SendAllAtOnceExpectingExecutionReportsAsync(
         IReadOnlyList<NewOrderSingle> simultaneousOrders, TimeSpan allAnswersTimeout)
     {
-        var sentOrders = await Task.WhenAll(simultaneousOrders.Select(simultaneousOrder => Task.Run(() => Session.SendToTarget(simultaneousOrder, fixSessionId!))));
-        Assert.All(sentOrders, Assert.True);
+        var wasEachOrderSent = await Task.WhenAll(simultaneousOrders.Select(simultaneousOrder => Task.Run(() => Session.SendToTarget(simultaneousOrder, fixSessionId!))));
+        Assert.All(wasEachOrderSent, Assert.True);
 
         using var allAnswersDeadline = new CancellationTokenSource(allAnswersTimeout);
         var executionReportsByClOrdId = new Dictionary<string, ExecutionReport>();

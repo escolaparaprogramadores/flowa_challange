@@ -30,6 +30,8 @@ public sealed class FixConcurrentOrderExposureTests(OrderAccumulatorPostgresFixt
     {
         // Arrange
         // CA-21: the orders go through a FIX session (test initiator → acceptor of the whole app), never straight to the use case.
+        // The 200 are sent at the same time, but the acceptor decides the orders of one session one at a time; the
+        // database transactions waiting together on the exposure row are proved by ConcurrentOrderExposureTests.
         // Quantities from 5,000 to 99,999 at 20.00: about 1 million per order, close to 2× the limit in total, so part of
         // them must be rejected.
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();

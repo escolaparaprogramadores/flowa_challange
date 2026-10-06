@@ -68,6 +68,31 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
     }
 
     [Fact]
+    public async Task Duplicate_cl_ord_id_writes_one_warning_with_its_error_code_and_no_error_line()
+    {
+        // Arrange
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor())
+        {
+            using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+            await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder(OriginalClOrdId, "PETR4", '1', 100, 10.50m));
+
+            // Act
+            await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder(OriginalClOrdId, "PETR4", '1', 200, 10.50m));
+        }
+
+        // Assert
+        var warningOrErrorLines = stdoutJsonLogCapture.JsonLogLines
+            .Where(jsonLogLine => jsonLogLine.LogLevel is "Warning" or "Error" or "Critical")
+            .ToList();
+        var duplicateLogLine = Assert.Single(warningOrErrorLines);
+        Assert.Equal(
+            ("Warning", "Flowa.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer", "Order rejected: ClOrdID already used with other fields.", DuplicateClOrdIdErrorCode),
+            (duplicateLogLine.LogLevel, duplicateLogLine.Category, duplicateLogLine.Message, duplicateLogLine.ReadLogField("ErrorCode")));
+        Assert.Null(duplicateLogLine.Exception);
+    }
+
+    [Fact]
     public async Task Duplicate_cl_ord_id_is_measured_as_duplicate_and_is_neither_counted_nor_logged_by_the_use_case()
     {
         // Arrange
