@@ -1,5 +1,6 @@
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Enums;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Tests;
 

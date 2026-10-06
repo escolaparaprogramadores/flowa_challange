@@ -1,8 +1,8 @@
-namespace Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Domain.Orders.Enums;
 
-// Field rule of the challenge. The backend keeps it only here (decision 12); an order that breaks it
-// is an expected business answer, rejected with the reasons in tag 58 (decision 13).
-public static class OrderFieldRule
+namespace Base.OrderAccumulator.Domain.Orders.ValueObjects;
+
+public static class OrderFieldPolicy
 {
     public static readonly IReadOnlyList<string> AllowedOrderSymbols = ["PETR4", "VALE3", "VIIA4"];
 
@@ -73,7 +73,6 @@ public static class OrderFieldRule
         if (orderPrice >= MaxOrderPriceExclusive)
             return AddInvalidOrderFieldMessage<decimal>(invalidOrderFieldMessages, OrderFieldMessages.OrderPriceTooLargeMessage);
 
-        // decimal is exact in base 10, so the remainder tells whether the price sits on the 0.01 step.
         if (orderPrice % OrderPriceTick != 0)
             return AddInvalidOrderFieldMessage<decimal>(invalidOrderFieldMessages, OrderFieldMessages.OrderPriceOffTickMessage);
 

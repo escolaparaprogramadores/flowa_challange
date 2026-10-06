@@ -1,12 +1,10 @@
-using Base.OrderAccumulator.Application.Exposures;
-using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Interfaces;
 
-namespace Base.OrderAccumulator.Entrypoint.Workers;
+namespace Base.OrderAccumulator.Entrypoint.BackgroundService;
 
-// The gauge disappears from the chart if nobody resends it; that is why the exposure goes out at startup and again
-// every 30 s, read from memory and not from the database. The clock comes from outside so the test can advance it.
-public sealed class SymbolExposureGaugeWorker(
-    IOrderMetricsPort orderMetrics, SymbolExposureMemoryService symbolExposureMemory, TimeProvider gaugeClock) : BackgroundService
+public sealed class SymbolExposureGaugeBackgroundService(
+    IOrderMetricsPort orderMetrics, ISymbolExposureMemoryPort symbolExposureMemory, TimeProvider gaugeClock) : Microsoft.Extensions.Hosting.BackgroundService
 {
     public static readonly TimeSpan SymbolExposureGaugeInterval = TimeSpan.FromSeconds(30);
 

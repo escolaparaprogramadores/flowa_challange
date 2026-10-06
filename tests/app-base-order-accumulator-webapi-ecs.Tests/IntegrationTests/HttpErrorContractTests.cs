@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
-using Base.OrderAccumulator.Application.Orders.ListOrders;
+using Base.OrderAccumulator.Application.Orders.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Responses;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Base.OrderAccumulator.Tests;
@@ -10,7 +11,7 @@ namespace Base.OrderAccumulator.Tests;
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase)
 {
-    private const string GlobalErrorHandlerCategory = "Base.OrderAccumulator.Entrypoint.Errors.GlobalErrorHandler";
+    private const string GlobalErrorHandlerCategory = "Base.OrderAccumulator.Entrypoint.ErrorHandling.GlobalErrorHandler";
     private const string DatabaseFailureDetail = "Timeout connecting to orders-db-internal-01:5432";
 
     [Theory]
@@ -120,7 +121,7 @@ public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture order
     // Only the list of the screen fails, so the app still starts (the exposure memory loads by its own repository).
     private sealed class FailingOrderListReadRepository : IOrderListReadRepository
     {
-        public Task<OrderListPage> ReadStoredOrderPageAsync(int pageNumber, CancellationToken cancellationToken = default) =>
+        public Task<StoredOrderPageResponse> ReadStoredOrderPageAsync(int pageNumber, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(DatabaseFailureDetail);
     }
 }

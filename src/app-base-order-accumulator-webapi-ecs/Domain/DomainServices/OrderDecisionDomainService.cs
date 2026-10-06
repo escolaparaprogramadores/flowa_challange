@@ -1,15 +1,15 @@
-using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Exposures.Interfaces;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
-namespace Base.OrderAccumulator.Domain.Orders;
+namespace Base.OrderAccumulator.Domain.DomainServices;
 
-// Decides between accepting and rejecting a new order. The exposure limit is not checked here
-// against a value read before: the atomic move in the database answers whether the order fits,
-// and this service turns that answer into the accepted or rejected order (CA-30).
 public sealed class OrderDecisionDomainService(IExposureRepository exposureRepository)
 {
     public async Task<Order> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
     {
-        var orderFieldValidation = OrderFieldRule.ValidateIncomingOrderFields(incomingOrder);
+        var orderFieldValidation = OrderFieldPolicy.ValidateIncomingOrderFields(incomingOrder);
         if (orderFieldValidation.ValidOrderFields is not { } validOrderFields)
             return Order.RejectOrderWithInvalidFields(incomingOrder, orderFieldValidation.InvalidOrderFieldMessages);
 

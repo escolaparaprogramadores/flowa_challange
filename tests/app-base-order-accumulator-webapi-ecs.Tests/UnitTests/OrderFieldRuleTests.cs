@@ -1,4 +1,5 @@
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Domain.Orders.Enums;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Tests;
 
@@ -11,7 +12,7 @@ public class OrderFieldRuleTests
     private const decimal ValidOrderPrice = 10.50m;
 
     private static OrderFieldValidation ValidateOrderFields(string? orderSymbol, char orderSide, decimal orderQuantity, decimal orderPrice) =>
-        OrderFieldRule.ValidateIncomingOrderFields(new IncomingOrder("ord-1", orderSymbol, orderSide, orderQuantity, orderPrice));
+        OrderFieldPolicy.ValidateIncomingOrderFields(new IncomingOrder("ord-1", orderSymbol, orderSide, orderQuantity, orderPrice));
 
     private static void AssertOrderRejectedWithSingleReason(OrderFieldValidation orderFieldValidation, string expectedRejectionReason)
     {
@@ -22,7 +23,7 @@ public class OrderFieldRuleTests
     [Fact]
     public void Allowed_symbols_are_only_the_three_of_the_challenge()
     {
-        Assert.Equal(["PETR4", "VALE3", "VIIA4"], OrderFieldRule.AllowedOrderSymbols);
+        Assert.Equal(["PETR4", "VALE3", "VIIA4"], OrderFieldPolicy.AllowedOrderSymbols);
     }
 
     [Theory]

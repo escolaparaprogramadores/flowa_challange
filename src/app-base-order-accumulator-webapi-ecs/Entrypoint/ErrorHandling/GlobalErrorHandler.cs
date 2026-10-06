@@ -1,9 +1,9 @@
-using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Commons.Logging;
+using Base.OrderAccumulator.Commons.Responses;
 using Microsoft.AspNetCore.Diagnostics;
 
-namespace Base.OrderAccumulator.Entrypoint.Errors;
+namespace Base.OrderAccumulator.Entrypoint.ErrorHandling;
 
-// The one place where an exception becomes an HTTP answer and its single log line (backend-tratamento-erro.md).
 public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsService, IApplicationLogger<GlobalErrorHandler> httpErrorLogger) : IExceptionHandler
 {
     public const string InvalidRequestMessage = "Dados inválidos";
@@ -31,7 +31,6 @@ public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsServ
             Exception = exception,
             ProblemDetails = errorProblemDetails
         });
-        // Returning false would make the ExceptionHandlerMiddleware log the same exception again.
         return true;
     }
 }

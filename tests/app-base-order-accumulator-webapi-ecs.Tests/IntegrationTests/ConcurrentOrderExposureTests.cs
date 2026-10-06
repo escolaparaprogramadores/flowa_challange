@@ -1,6 +1,6 @@
-using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Enums;
 using Dapper;
-using Base.OrderAccumulator.Domain.Orders;
 using Xunit.Abstractions;
 
 namespace Base.OrderAccumulator.Tests;

@@ -1,4 +1,4 @@
-namespace Base.OrderAccumulator.Commons;
+namespace Base.OrderAccumulator.Application.Orders.Interfaces;
 
 public interface IOrderMetricsPort
 {

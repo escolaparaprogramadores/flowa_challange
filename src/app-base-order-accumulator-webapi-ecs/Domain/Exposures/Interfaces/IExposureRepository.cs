@@ -1,9 +1,7 @@
-namespace Base.OrderAccumulator.Domain.Exposures;
+namespace Base.OrderAccumulator.Domain.Exposures.Interfaces;
 
 public interface IExposureRepository
 {
-    // Moves the exposure only if the new value stays within the limit, in one atomic step of the
-    // database, so two simultaneous orders never both pass. False means the limit would be exceeded.
     Task<bool> TryMoveSymbolExposureWithinLimitAsync(
         string orderSymbol, decimal exposureDelta, decimal exposureLimit, CancellationToken cancellationToken = default);
 

@@ -1,25 +1,25 @@
-using Base.OrderAccumulator.Commons;
-using StatsdClient;
+using Base.OrderAccumulator.Application.Orders.Interfaces;
+using Base.OrderAccumulator.Commons.Observability;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 
-namespace Base.OrderAccumulator.Infrastructure.Metrics;
+namespace Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 
-// Counts the order after the database decided, with the names and tags agreed with the dashboard.
-public sealed class DatadogOrderMetricsAdapter(IDogStatsd orderMetricsClient) : IOrderMetricsPort
+public sealed class DatadogOrderMetricsAdapter(IMetricsClient orderMetricsClient) : IOrderMetricsPort
 {
     public void CountAnsweredOrder(string? orderSymbol, char orderSide, bool orderAccepted)
     {
         var answeredOrderTags = OrderMetricTagMapper.BuildOrderDecisionTags(orderSymbol, orderSide);
         if (orderAccepted)
         {
-            orderMetricsClient.Increment(OrderMetricNames.AcceptedOrders, tags: answeredOrderTags);
+            orderMetricsClient.IncrementCounter(OrderMetricNames.AcceptedOrders, answeredOrderTags);
         }
         else
         {
-            orderMetricsClient.Increment(OrderMetricNames.RejectedOrders, tags: answeredOrderTags);
+            orderMetricsClient.IncrementCounter(OrderMetricNames.RejectedOrders, answeredOrderTags);
         }
     }
 
     public void SendSymbolExposureGauge(string orderSymbol, decimal symbolExposure) =>
-        orderMetricsClient.Gauge(
-            OrderMetricNames.SymbolExposure, (double)symbolExposure, tags: OrderMetricTagMapper.BuildSymbolExposureTags(orderSymbol));
+        orderMetricsClient.RecordGauge(
+            OrderMetricNames.SymbolExposure, (double)symbolExposure, OrderMetricTagMapper.BuildSymbolExposureTags(orderSymbol));
 }

@@ -1,9 +1,8 @@
-using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 
-namespace Base.OrderAccumulator.Application.Exposures.GetExposures;
+namespace Base.OrderAccumulator.Application.Exposures.Interfaces;
 
 public interface ISymbolExposureReadRepository
 {
-    // The three symbols, always in the order of OrderFieldRule.AllowedOrderSymbols.
     Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default);
 }

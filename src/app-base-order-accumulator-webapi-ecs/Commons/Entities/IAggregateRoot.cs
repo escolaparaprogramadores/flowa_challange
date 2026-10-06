@@ -1,4 +1,3 @@
-namespace Base.OrderAccumulator.Domain;
+namespace Base.OrderAccumulator.Commons.Entities;
 
-// Marks the classes that a repository loads and saves whole.
 public interface IAggregateRoot;

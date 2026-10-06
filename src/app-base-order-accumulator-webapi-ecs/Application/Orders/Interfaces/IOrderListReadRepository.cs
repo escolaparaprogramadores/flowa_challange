@@ -1,6 +1,8 @@
-namespace Base.OrderAccumulator.Application.Orders.ListOrders;
+using Base.OrderAccumulator.Application.Orders.Responses;
+
+namespace Base.OrderAccumulator.Application.Orders.Interfaces;
 
 public interface IOrderListReadRepository
 {
-    Task<OrderListPage> ReadStoredOrderPageAsync(int pageNumber, CancellationToken cancellationToken = default);
+    Task<StoredOrderPageResponse> ReadStoredOrderPageAsync(int pageNumber, CancellationToken cancellationToken = default);
 }

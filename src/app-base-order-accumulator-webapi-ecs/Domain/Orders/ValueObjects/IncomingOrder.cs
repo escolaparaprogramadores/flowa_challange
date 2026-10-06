@@ -1,4 +1,3 @@
-namespace Base.OrderAccumulator.Domain.Orders;
+namespace Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
-// The order as it arrived by FIX, before any validation.
 public sealed record IncomingOrder(string ClOrdId, string? Symbol, char Side, decimal Quantity, decimal Price);

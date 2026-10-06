@@ -1,14 +1,15 @@
-using Base.OrderAccumulator.Application.Exposures.GetExposures;
-using Base.OrderAccumulator.Application.Orders.ListOrders;
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
-using Dapper;
-using Npgsql;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Interfaces;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.DependencyInjection;
+using Base.OrderAccumulator.Domain.Exposures.Interfaces;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
+using Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
+using Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 
-namespace Base.OrderAccumulator.Infrastructure.Persistence;
+namespace Base.OrderAccumulator.Infrastructure.DependencyInjection;
 
-// Entry points for Program.cs: register the services and create the tables at startup.
 public static class OrderAccumulatorPersistenceExtensions
 {
     private const string SeedExposuresSql = """
@@ -20,30 +21,26 @@ public static class OrderAccumulatorPersistenceExtensions
     public static IServiceCollection AddOrderAccumulatorPersistence(
         this IServiceCollection orderAccumulatorServices, string orderDatabaseConnectionString)
     {
-        orderAccumulatorServices.AddSingleton(_ => NpgsqlDataSource.Create(orderDatabaseConnectionString));
-        orderAccumulatorServices.AddScoped<PostgresUnitOfWork>();
-        orderAccumulatorServices.AddScoped<IUnitOfWork>(orderOperationServices => orderOperationServices.GetRequiredService<PostgresUnitOfWork>());
+        orderAccumulatorServices.AddPostgresDatabase(orderDatabaseConnectionString);
         orderAccumulatorServices.AddScoped<IOrderRepository, OrderRepository>();
         orderAccumulatorServices.AddScoped<IExposureRepository, ExposureRepository>();
-        orderAccumulatorServices.AddSingleton<ISymbolExposureReadRepository, SymbolExposureReadRepository>();
-        orderAccumulatorServices.AddSingleton<IOrderListReadRepository, OrderListReadRepository>();
+        orderAccumulatorServices.AddScoped<ISymbolExposureReadRepository, SymbolExposureReadRepository>();
+        orderAccumulatorServices.AddScoped<IOrderListReadRepository, OrderListReadRepository>();
         return orderAccumulatorServices;
     }
 
-    // Two instances starting together would race on CREATE TABLE IF NOT EXISTS, which is not safe in parallel
-    // in PostgreSQL; the lock makes one wait for the other to finish.
     private const string LockSchemaSql = "SELECT pg_advisory_xact_lock(hashtext('flowa-orderaccumulator-schema'))";
 
-    // Creates what is missing and ensures one zeroed row per symbol. Does not touch exposure already stored.
-    public static async Task ApplyOrderAccumulatorSchemaAsync(this NpgsqlDataSource orderDatabaseDataSource, CancellationToken cancellationToken = default)
+    public static async Task ApplyOrderAccumulatorSchemaAsync(this IDatabaseConnectionSource orderDatabaseConnectionSource, CancellationToken cancellationToken = default)
     {
-        await using var orderDatabaseConnection = await orderDatabaseDataSource.OpenConnectionAsync(cancellationToken);
-        await using var orderDatabaseTransaction = await orderDatabaseConnection.BeginTransactionAsync(cancellationToken);
-        await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(LockSchemaSql, transaction: orderDatabaseTransaction, cancellationToken: cancellationToken));
-        await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(ReadOrderAccumulatorSchema(), transaction: orderDatabaseTransaction, cancellationToken: cancellationToken));
-        await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
-            SeedExposuresSql, new { Symbols = OrderFieldRule.AllowedOrderSymbols.ToArray() }, orderDatabaseTransaction, cancellationToken: cancellationToken));
-        await orderDatabaseTransaction.CommitAsync(cancellationToken);
+        await using var schemaUnitOfWork = new DatabaseUnitOfWork(orderDatabaseConnectionSource);
+        var schemaDatabase = new DapperDatabase(schemaUnitOfWork);
+        await schemaUnitOfWork.BeginTransactionAsync(cancellationToken);
+        await schemaDatabase.ExecuteSqlCommandAsync(LockSchemaSql, null, cancellationToken);
+        await schemaDatabase.ExecuteSqlCommandAsync(ReadOrderAccumulatorSchema(), null, cancellationToken);
+        await schemaDatabase.ExecuteSqlCommandAsync(
+            SeedExposuresSql, new { Symbols = OrderFieldPolicy.AllowedOrderSymbols.ToArray() }, cancellationToken);
+        await schemaUnitOfWork.CommitTransactionAsync(cancellationToken);
     }
 
     private static string ReadOrderAccumulatorSchema()

@@ -1,6 +1,6 @@
-using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Commons.Responses;
 
-namespace Base.OrderAccumulator.Entrypoint.Http;
+namespace Base.OrderAccumulator.Entrypoint.ErrorHandling;
 
 public static class ResultStatusHttpMapper
 {

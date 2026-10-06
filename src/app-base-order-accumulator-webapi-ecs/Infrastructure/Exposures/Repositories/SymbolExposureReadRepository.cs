@@ -1,12 +1,11 @@
-using Base.OrderAccumulator.Application.Exposures.GetExposures;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
-using Dapper;
-using Npgsql;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
-namespace Base.OrderAccumulator.Infrastructure.Persistence;
+namespace Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
 
-public sealed class SymbolExposureReadRepository(NpgsqlDataSource orderDatabaseDataSource) : ISymbolExposureReadRepository
+public sealed class SymbolExposureReadRepository(IDatabase orderDatabase) : ISymbolExposureReadRepository
 {
     private const string SelectExposuresSql = """
         SELECT symbol AS Symbol, exposure AS Exposure
@@ -16,12 +15,11 @@ public sealed class SymbolExposureReadRepository(NpgsqlDataSource orderDatabaseD
 
     public async Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default)
     {
-        await using var orderDatabaseConnection = await orderDatabaseDataSource.OpenConnectionAsync(cancellationToken);
-        var storedExposureRows = await orderDatabaseConnection.QueryAsync<StoredExposureRow>(new CommandDefinition(
-            SelectExposuresSql, new { Symbols = OrderFieldRule.AllowedOrderSymbols.ToArray() }, cancellationToken: cancellationToken));
+        var storedExposureRows = await orderDatabase.QueryRecordsAsync<StoredExposureRow>(
+            SelectExposuresSql, new { Symbols = OrderFieldPolicy.AllowedOrderSymbols.ToArray() }, cancellationToken);
 
         var exposureBySymbol = storedExposureRows.ToDictionary(exposureRow => exposureRow.Symbol, exposureRow => exposureRow.Exposure);
-        return OrderFieldRule.AllowedOrderSymbols
+        return OrderFieldPolicy.AllowedOrderSymbols
             .Select(allowedSymbol => new SymbolExposure(allowedSymbol, exposureBySymbol.TryGetValue(allowedSymbol, out var storedExposure)
                 ? storedExposure
                 : throw new InvalidOperationException(

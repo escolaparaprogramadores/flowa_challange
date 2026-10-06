@@ -1,6 +1,5 @@
-namespace Base.OrderAccumulator.Domain.Orders;
+namespace Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
-// Reasons sent back in tag 58 and shown on the screen; the texts are part of the contract.
 public static class OrderFieldMessages
 {
     public const string OrderSymbolRequiredMessage = "Informe o símbolo.";

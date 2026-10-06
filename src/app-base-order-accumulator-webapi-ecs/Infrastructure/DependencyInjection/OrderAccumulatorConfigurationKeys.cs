@@ -1,6 +1,5 @@
-namespace Base.OrderAccumulator.Commons;
+namespace Base.OrderAccumulator.Infrastructure.DependencyInjection;
 
-// Names of the keys the app reads from configuration; the infra (infra/servicos.tf) uses the same names.
 public static class OrderAccumulatorConfigurationKeys
 {
     public const string OrderDatabaseConnectionStringName = "Flowa";

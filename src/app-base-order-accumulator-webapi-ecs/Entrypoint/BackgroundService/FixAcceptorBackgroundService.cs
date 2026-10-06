@@ -1,12 +1,12 @@
-using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Entrypoint.Fix;
+using Base.OrderAccumulator.Infrastructure.DependencyInjection;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.Store;
 using QuickFix;
 
-namespace Base.OrderAccumulator.Entrypoint.Fix;
+namespace Base.OrderAccumulator.Entrypoint.BackgroundService;
 
-// Starts the FIX acceptor together with the app and shuts it down on stop.
-public sealed class FixAcceptorWorker(
+public sealed class FixAcceptorBackgroundService(
     NewOrderSingleConsumer newOrderSingleConsumer, IConfiguration appConfiguration, FixSessionLogFactory fixSessionLogFactory)
     : IHostedService, IDisposable
 {
@@ -17,7 +17,6 @@ public sealed class FixAcceptorWorker(
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        // The FIX log goes through the application logger to stdout, one JSON line per message (D-34).
         fixAcceptor = new ThreadedSocketAcceptor(
             newOrderSingleConsumer, new MemoryStoreFactory(), LoadFixAcceptorSessionSettings(appConfiguration),
             fixSessionLogFactory,
@@ -34,7 +33,6 @@ public sealed class FixAcceptorWorker(
 
     public void Dispose() => ShutDownFixAcceptor();
 
-    // Stop and dispose arrive in any order (even together); only the one that takes the acceptor out of the reference shuts it down.
     private void ShutDownFixAcceptor()
     {
         var runningFixAcceptor = Interlocked.Exchange(ref fixAcceptor, null);
@@ -45,10 +43,6 @@ public sealed class FixAcceptorWorker(
         runningFixAcceptor.Dispose();
     }
 
-    // The session comes from acceptor.cfg. The port comes from configuration (Fix__AcceptorPort) and the dictionary
-    // is looked up next to the executable, so it does not depend on the folder the app was started from.
-    // Fix__AcceptorBindHost is optional: without it the acceptor listens on all interfaces, as the
-    // compose needs; the tests use 127.0.0.1 so the port is not opened to the network.
     public static SessionSettings LoadFixAcceptorSessionSettings(IConfiguration appConfiguration)
     {
         var fixAcceptorPort = appConfiguration.GetValue<int?>(OrderAccumulatorConfigurationKeys.FixAcceptorPort)

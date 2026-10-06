@@ -1,14 +1,19 @@
 using System.Net.Sockets;
 using System.Net;
 using System.Text;
-using Base.OrderAccumulator.Application.Exposures;
-using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
-using Base.OrderAccumulator.Entrypoint.Workers;
-using Base.OrderAccumulator.Infrastructure.Metrics;
-using Base.OrderAccumulator.Infrastructure.Persistence;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Responses;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Observability;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
+using Base.OrderAccumulator.Entrypoint.BackgroundService;
+using Base.OrderAccumulator.Infrastructure.DependencyInjection;
+using Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
+using Base.OrderAccumulator.Infrastructure.Orders.Adapters;
+using Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -17,7 +22,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Npgsql;
-using StatsdClient;
 
 namespace Base.OrderAccumulator.Tests;
 
@@ -30,18 +34,18 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     private static readonly string[] UnifiedServiceTags = ["env:dev", "service:order-accumulator", "version:test-sha"];
 
     private readonly DogStatsdUdpListener dogStatsdUdpListener = new();
-    private DogStatsdService orderMetricsClient = null!;
-    private SymbolExposureMemoryService symbolExposureMemory = null!;
+    private DogStatsdMetricsClient orderMetricsClient = null!;
+    private ISymbolExposureMemoryPort symbolExposureMemory = null!;
     private DecideIncomingOrderTestRunner meteredOrderDecisionRunner = null!;
 
     public async Task InitializeAsync()
     {
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         orderMetricsClient = OrderMetricsExtensions.CreateOrderMetricsClient(dogStatsdUdpListener.ListenerPort, UnifiedServiceConfiguration());
-        symbolExposureMemory = new SymbolExposureMemoryService();
+        symbolExposureMemory = new InMemorySymbolExposureAdapter();
         symbolExposureMemory.LoadStoredExposures(await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
         meteredOrderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseDataSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient));
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient));
     }
 
     public Task DisposeAsync()
@@ -137,7 +141,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     {
         var databaseFailure = new NpgsqlException("database down");
         var meteredRunnerWithFailingDatabase = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseDataSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
             wrapOrderRepository: _ => new OrderRepositoryFailingWith(databaseFailure));
 
         var thrownFailure = await Assert.ThrowsAsync<NpgsqlException>(() =>
@@ -156,7 +160,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 300, 50.10m));
         await SendSentinelAndReadOrderMetricsAsync();
 
-        new SymbolExposureGaugeWorker(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System).SendSymbolExposureGauges();
+        new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System).SendSymbolExposureGauges();
         var sentExposureGauges = await SendSentinelAndReadOrderMetricsAsync();
 
         Assert.Equal(
@@ -174,7 +178,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 2m));
         await SendSentinelAndReadOrderMetricsAsync();
         var manualGaugeClock = new ManualGaugeClock();
-        using var symbolExposureGaugeService = new SymbolExposureGaugeWorker(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock);
+        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock);
         IReadOnlyList<DogStatsdMetricLine> expectedExposureGauges =
         [
             new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "20", "g", ExpectedTags("symbol:PETR4")),
@@ -205,11 +209,11 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync();
         await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, uniqueVersionTag, new OrderAccumulatorCapturedLogs());
         var appServices = orderAccumulatorApp.Services;
-        var appOrderMetricsClient = (DogStatsdService)appServices.GetRequiredService<IDogStatsd>();
+        var appOrderMetricsClient = (DogStatsdMetricsClient)appServices.GetRequiredService<IMetricsClient>();
 
         await appServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.50m));
         appOrderMetricsClient.Flush();
-        appOrderMetricsClient.Increment(SentinelMetricName, tags: [$"version:{uniqueVersionTag}"]);
+        appOrderMetricsClient.IncrementCounter(SentinelMetricName, [$"version:{uniqueVersionTag}"]);
         appOrderMetricsClient.Flush();
         var receivedOnTheAgentPort = await agentOnTheDatadogPort.ReadFlowaMetricsUntilAsync(SentinelMetricName);
 
@@ -228,11 +232,11 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         var capturedAppLogs = new OrderAccumulatorCapturedLogs();
         await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "sha-without-agent", capturedAppLogs);
         var appServices = orderAccumulatorApp.Services;
-        var appOrderMetricsClient = (DogStatsdService)appServices.GetRequiredService<IDogStatsd>();
+        var appOrderMetricsClient = (DogStatsdMetricsClient)appServices.GetRequiredService<IMetricsClient>();
         var appOrderDecisionServices = appServices;
         var logLinesBeforeTheOrders = capturedAppLogs.CapturedLogLines.Count;
 
-        var orderDecisionsWithoutAgent = new List<DecideIncomingOrderOutput>();
+        var orderDecisionsWithoutAgent = new List<DecideIncomingOrderResponse>();
         for (var orderNumber = 0; orderNumber < 20; orderNumber++)
         {
             orderDecisionsWithoutAgent.Add(await appOrderDecisionServices.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m)));
@@ -257,10 +261,10 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.IsType<DatadogOrderMetricsAdapter>(appServices.GetRequiredService<IOrderMetricsPort>());
         await using (var orderOperationScope = appServices.CreateAsyncScope())
             Assert.IsType<OrderRepository>(orderOperationScope.ServiceProvider.GetRequiredService<IOrderRepository>());
-        Assert.Contains(appServices.GetServices<IHostedService>(), hostedService => hostedService is SymbolExposureGaugeWorker);
+        Assert.Contains(appServices.GetServices<IHostedService>(), hostedService => hostedService is SymbolExposureGaugeBackgroundService);
         Assert.Equal(
             [new SymbolExposure("PETR4", 0m), new SymbolExposure("VALE3", 4321.50m), new SymbolExposure("VIIA4", 0m)],
-            appServices.GetRequiredService<SymbolExposureMemoryService>().ReadCurrentSymbolExposures());
+            appServices.GetRequiredService<ISymbolExposureMemoryPort>().ReadCurrentSymbolExposures());
     }
 
     // Own database per app test: the exposure loaded at startup does not depend on the other tests.
@@ -273,8 +277,9 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         {
             Database = startupDatabaseName
         }.ConnectionString;
+        await using (var startupConnectionSource = new PostgresConnectionSource(startupDatabaseConnectionString))
+            await startupConnectionSource.ApplyOrderAccumulatorSchemaAsync();
         await using var startupDatabase = NpgsqlDataSource.Create(startupDatabaseConnectionString);
-        await startupDatabase.ApplyOrderAccumulatorSchemaAsync();
         if (sqlBeforeTheAppStarts is not null)
         {
             await using var startupDatabaseConnection = await startupDatabase.OpenConnectionAsync();
@@ -330,7 +335,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     private async Task<List<DogStatsdMetricLine>> SendSentinelAndReadOrderMetricsAsync()
     {
         orderMetricsClient.Flush();
-        orderMetricsClient.Increment(SentinelMetricName);
+        orderMetricsClient.IncrementCounter(SentinelMetricName, []);
         orderMetricsClient.Flush();
         var receivedFlowaMetrics = await dogStatsdUdpListener.ReadFlowaMetricsUntilAsync(SentinelMetricName);
         return receivedFlowaMetrics.Where(receivedFlowaMetric => receivedFlowaMetric.MetricName != SentinelMetricName).ToList();

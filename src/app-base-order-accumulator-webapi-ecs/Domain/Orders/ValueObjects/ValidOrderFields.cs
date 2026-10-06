@@ -1,6 +1,7 @@
-namespace Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Domain.Orders.Enums;
 
-// The four fields of an order that follow the field rule; only OrderFieldRule creates it.
+namespace Base.OrderAccumulator.Domain.Orders.ValueObjects;
+
 public sealed record ValidOrderFields
 {
     public string Symbol { get; }
@@ -16,6 +17,3 @@ public sealed record ValidOrderFields
         Price = price;
     }
 }
-
-// Either the valid fields, or one reason per invalid field in the order symbol, side, quantity, price.
-public sealed record OrderFieldValidation(ValidOrderFields? ValidOrderFields, IReadOnlyList<string> InvalidOrderFieldMessages);

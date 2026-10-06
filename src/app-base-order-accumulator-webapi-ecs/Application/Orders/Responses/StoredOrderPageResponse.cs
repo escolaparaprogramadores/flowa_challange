@@ -1,13 +1,3 @@
-namespace Base.OrderAccumulator.Application.Orders.ListOrders;
+namespace Base.OrderAccumulator.Application.Orders.Responses;
 
-public sealed record OrderListPage(long TotalStoredOrders, IReadOnlyList<OrderListItem> StoredOrders);
-
-public sealed record OrderListItem(
-    DateTime ReceivedAt,
-    bool Accepted,
-    string? Symbol,
-    string Side,
-    decimal Quantity,
-    decimal Price,
-    string OrderId,
-    string ClOrdId);
+public sealed record StoredOrderPageResponse(long TotalStoredOrders, IReadOnlyList<StoredOrderResponse> StoredOrders);

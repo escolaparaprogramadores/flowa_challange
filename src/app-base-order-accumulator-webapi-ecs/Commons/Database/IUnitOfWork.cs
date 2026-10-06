@@ -1,4 +1,4 @@
-namespace Base.OrderAccumulator.Commons;
+namespace Base.OrderAccumulator.Commons.Database;
 
 public interface IUnitOfWork
 {

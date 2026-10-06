@@ -3,13 +3,15 @@ using System.Net.Http.Json;
 using System.Net.NetworkInformation;
 using System.Net;
 using System.Text.Json;
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Application.Exposures.Responses;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Commons.Logging;
+using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
+using Base.OrderAccumulator.Entrypoint.BackgroundService;
 using Base.OrderAccumulator.Entrypoint.Fix;
-using Base.OrderAccumulator.Entrypoint.Workers;
-using Base.OrderAccumulator.Entrypoint;
 using Base.OrderAccumulator.Infrastructure.Fix;
-using Base.OrderAccumulator.Infrastructure.Logging;
-using Base.OrderAccumulator.Infrastructure.Persistence;
+using Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -213,7 +215,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
             orderAccumulatorTestServices.AddScoped<IOrderRepository>(orderOperationServices =>
-                new OrderRepositoryFailingForClOrdId("database-failure", new OrderRepository(orderOperationServices.GetRequiredService<PostgresUnitOfWork>())))).StartWithFixAcceptor();
+                new OrderRepositoryFailingForClOrdId("database-failure", new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())))).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
         await fixTestInitiator.ExpectNoAnswerAsync(FixTestInitiator.NewOrder("database-failure", "PETR4", '1', 10, 1.00m), TimeSpan.FromSeconds(2));
@@ -227,7 +229,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Acceptor_session_is_fix44_with_ephemeral_store_reset_on_every_reconnect()
     {
-        var loadedFixAcceptorSettings = FixAcceptorWorker.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration(("Fix:AcceptorPort", "19876")));
+        var loadedFixAcceptorSettings = FixAcceptorBackgroundService.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration(("Fix:AcceptorPort", "19876")));
 
         var fixSessionId = Assert.Single(loadedFixAcceptorSettings.GetSessions());
         Assert.Equal(new SessionID("FIX.4.4", "ORDERACCUMULATOR", "ORDERGENERATOR"), fixSessionId);
@@ -247,7 +249,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Bind_host_from_configuration_limits_the_acceptor_to_that_address()
     {
-        var loadedFixAcceptorSettings = FixAcceptorWorker.LoadFixAcceptorSessionSettings(
+        var loadedFixAcceptorSettings = FixAcceptorBackgroundService.LoadFixAcceptorSessionSettings(
             BuildFixAcceptorConfiguration(("Fix:AcceptorPort", "19876"), ("Fix:AcceptorBindHost", "127.0.0.1")));
 
         Assert.Equal("127.0.0.1", loadedFixAcceptorSettings.Get(loadedFixAcceptorSettings.GetSessions().Single()).GetString("SocketAcceptHost"));
@@ -314,7 +316,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     public async Task Stopping_and_disposing_the_acceptor_in_any_order_frees_the_fix_port()
     {
         var fixAcceptorPort = OrderAccumulatorFixTestHost.FindFreeFixAcceptorTcpPort();
-        var fixAcceptorService = new FixAcceptorWorker(
+        var fixAcceptorService = new FixAcceptorBackgroundService(
             new NewOrderSingleConsumer(
                 new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
                 new ApplicationLogger<NewOrderSingleConsumer>(NullLogger<NewOrderSingleConsumer>.Instance)),
@@ -334,7 +336,7 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     [Fact]
     public void Missing_acceptor_port_stops_the_startup_with_a_clear_message()
     {
-        var missingAcceptorPortError = Assert.Throws<InvalidOperationException>(() => FixAcceptorWorker.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration()));
+        var missingAcceptorPortError = Assert.Throws<InvalidOperationException>(() => FixAcceptorBackgroundService.LoadFixAcceptorSessionSettings(BuildFixAcceptorConfiguration()));
 
         Assert.Equal("Set the FIX acceptor port in Fix__AcceptorPort.", missingAcceptorPortError.Message);
     }

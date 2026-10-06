@@ -1,6 +1,7 @@
-namespace Base.OrderAccumulator.Infrastructure.Metrics;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 
-// Names agreed with the Datadog dashboard (observabilidade/datadog/). Changing them here erases the chart.
+namespace Base.OrderAccumulator.Infrastructure.Orders.Adapters;
+
 public static class OrderMetricNames
 {
     public const string AcceptedOrders = "flowa.ordens.aceitas";

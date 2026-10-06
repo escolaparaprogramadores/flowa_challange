@@ -1,11 +1,9 @@
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Entrypoint.Http;
+using Base.OrderAccumulator.Commons.Responses;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
-namespace Base.OrderAccumulator.Entrypoint.Errors;
+namespace Base.OrderAccumulator.Entrypoint.ErrorHandling;
 
-// HTTP contract of the /api routes (backend-problem-details.md): success as DataMessage, error as problem+json.
 public static class ApiProblemDetailsExtensions
 {
     public const string ProblemTypePrefix = "urn:base-investimentos:problem:";
@@ -13,7 +11,6 @@ public static class ApiProblemDetailsExtensions
     public static IResult ConvertToHttpResponse<T>(this DataMessage<T> useCaseMessage) =>
         useCaseMessage.ConvertToHttpResponse(useCaseData => useCaseData);
 
-    // The route promises its own body in "data"; status, message and errors stay the ones of the use case.
     public static IResult ConvertToHttpResponse<T, TResponseData>(this DataMessage<T> useCaseMessage, Func<T, TResponseData> convertToResponseData)
     {
         if (useCaseMessage.Success)
@@ -21,8 +18,6 @@ public static class ApiProblemDetailsExtensions
                 DataMessage<TResponseData>.CreateSuccessMessage(convertToResponseData(useCaseMessage.Data!), useCaseMessage.Message, useCaseMessage.Status),
                 statusCode: ResultStatusHttpMapper.ConvertToHttpStatusCode(useCaseMessage.Status));
 
-        // InternalError is a technical failure: it becomes an exception, so the GlobalErrorHandler logs Error with the
-        // stack trace and answers the generic 500. The use case message never reaches the caller.
         if (useCaseMessage.Status == ResultStatus.InternalError)
             throw new InvalidOperationException(useCaseMessage.Message);
 
@@ -43,9 +38,6 @@ public static class ApiProblemDetailsExtensions
         return errorProblemDetails;
     }
 
-    // Runs on every problem+json, also the ones ASP.NET writes itself (404 of a route, 405, malformed JSON): that is
-    // what gives all of them the URN type, the pt-BR text and the DataMessage compatibility fields.
-    // The traceId comes from the place that writes the log line of the error (HttpErrorTraceScope).
     public static void CompleteProblemDetails(ProblemDetailsContext problemDetailsContext)
     {
         var responseProblemDetails = problemDetailsContext.ProblemDetails;
@@ -71,8 +63,6 @@ public static class ApiProblemDetailsExtensions
         responseProblemDetails.Extensions.TryAdd("errors", Array.Empty<string>());
     }
 
-    // The route template, never the raw path, keeps the log field low in cardinality. Inside the exception handler the
-    // endpoint was already taken off the context and only the exception feature still has it.
     public static string? ReadRouteTemplate(HttpContext httpContext) =>
         ((httpContext.GetEndpoint() ?? httpContext.Features.Get<IExceptionHandlerFeature>()?.Endpoint) as RouteEndpoint)?.RoutePattern.RawText;
 

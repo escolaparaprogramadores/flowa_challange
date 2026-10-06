@@ -1,7 +1,5 @@
-namespace Base.OrderAccumulator.Commons;
+namespace Base.OrderAccumulator.Commons.Responses;
 
-// The one return of every use case (backend-datamessage.md). Over HTTP only the success leaves in this
-// shape; an error leaves as problem+json, built by the Entrypoint from Message, Errors and ErrorCode.
 public sealed class DataMessage<T>
 {
     public bool Success { get; private set; }

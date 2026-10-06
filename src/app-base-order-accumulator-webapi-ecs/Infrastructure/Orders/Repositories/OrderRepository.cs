@@ -1,11 +1,11 @@
-using Base.OrderAccumulator.Domain.Orders;
-using Dapper;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
 
-namespace Base.OrderAccumulator.Infrastructure.Persistence;
+namespace Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 
-public sealed class OrderRepository(PostgresUnitOfWork orderDatabaseUnitOfWork) : IOrderRepository
+public sealed class OrderRepository(IDatabase orderDatabase) : IOrderRepository
 {
-    // If the ClOrdID already exists, nothing is written: the caller rolls back and reads the original answer.
     private const string InsertOrderSql = """
         INSERT INTO orders (cl_ord_id, order_id, exec_id, symbol, side, quantity, price, accepted, reject_reason)
         VALUES (@ClOrdId, @OrderId, @ExecId, @Symbol, @Side, @Quantity, @Price, @Accepted, @RejectReason)
@@ -23,9 +23,7 @@ public sealed class OrderRepository(PostgresUnitOfWork orderDatabaseUnitOfWork) 
 
     public async Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default)
     {
-        var orderDatabaseConnection = await orderDatabaseUnitOfWork.GetOpenConnectionAsync(cancellationToken);
-        var storedOrder = await orderDatabaseConnection.QuerySingleOrDefaultAsync<StoredOrderRow>(new CommandDefinition(
-            SelectOrderSql, new { ClOrdId = clOrdId }, orderDatabaseUnitOfWork.CurrentTransaction, cancellationToken: cancellationToken));
+        var storedOrder = await orderDatabase.QuerySingleRecordAsync<StoredOrderRow>(SelectOrderSql, new { ClOrdId = clOrdId }, cancellationToken);
         if (storedOrder is null)
             return null;
 
@@ -36,18 +34,12 @@ public sealed class OrderRepository(PostgresUnitOfWork orderDatabaseUnitOfWork) 
 
     public async Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default)
     {
-        var orderDatabaseConnection = await orderDatabaseUnitOfWork.GetOpenConnectionAsync(cancellationToken);
-        var insertedOrders = await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
-            InsertOrderSql, ToOrderInsertParameters(answeredOrder), orderDatabaseUnitOfWork.CurrentTransaction, cancellationToken: cancellationToken));
+        var insertedOrders = await orderDatabase.ExecuteSqlCommandAsync(InsertOrderSql, ToOrderInsertParameters(answeredOrder), cancellationToken);
         return insertedOrders == 1;
     }
 
-    public async Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default)
-    {
-        var orderDatabaseConnection = await orderDatabaseUnitOfWork.GetOpenConnectionAsync(cancellationToken);
-        await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
-            DeleteAllStoredOrdersSql, transaction: orderDatabaseUnitOfWork.CurrentTransaction, cancellationToken: cancellationToken));
-    }
+    public async Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
+        await orderDatabase.ExecuteSqlCommandAsync(DeleteAllStoredOrdersSql, null, cancellationToken);
 
     private static object ToOrderInsertParameters(Order answeredOrder) => new
     {

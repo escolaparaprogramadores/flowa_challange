@@ -1,28 +1,26 @@
-using Base.OrderAccumulator.Application.Exposures;
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.Exposures.Interfaces;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
-namespace Base.OrderAccumulator.Application.Orders.DeleteAllOrders;
+namespace Base.OrderAccumulator.Application.Orders.UseCases;
 
-// "Delete all": database and memory are zeroed together, with no order in between.
 public sealed class DeleteAllOrdersUseCase(
     IUnitOfWork unitOfWork,
     IOrderRepository orderRepository,
     IExposureRepository exposureRepository,
-    SymbolExposureMemoryService symbolExposureMemory)
+    ISymbolExposureMemoryPort symbolExposureMemory)
 {
     public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
         symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(DeleteAllStoredOrdersAndZeroExposuresAsync, cancellationToken);
 
-    // Once inside, the delete runs to the end even if the client gives up. All or nothing: first it
-    // zeroes the exposure of the three symbols, then deletes the orders.
     private async Task DeleteAllStoredOrdersAndZeroExposuresAsync()
     {
         await unitOfWork.BeginTransactionAsync(CancellationToken.None);
         try
         {
-            await exposureRepository.ZeroSymbolExposuresAsync(OrderFieldRule.AllowedOrderSymbols, CancellationToken.None);
+            await exposureRepository.ZeroSymbolExposuresAsync(OrderFieldPolicy.AllowedOrderSymbols, CancellationToken.None);
             await orderRepository.DeleteAllOrdersAsync(CancellationToken.None);
             await unitOfWork.CommitTransactionAsync(CancellationToken.None);
         }

@@ -1,10 +1,8 @@
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Domain.Orders.Entities;
 
-namespace Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+namespace Base.OrderAccumulator.Application.Orders.Responses;
 
-// The answer given to the order, already stored. Repeating the ClOrdID returns exactly this one,
-// with IsRepeat = true.
-public sealed record DecideIncomingOrderOutput(
+public sealed record DecideIncomingOrderResponse(
     string ClOrdId,
     string OrderId,
     string ExecId,
@@ -17,7 +15,7 @@ public sealed record DecideIncomingOrderOutput(
     bool RejectedForInvalidFields,
     bool IsRepeat)
 {
-    public static DecideIncomingOrderOutput FromAnsweredOrder(Order answeredOrder, bool isRepeat) => new(
+    public static DecideIncomingOrderResponse FromAnsweredOrder(Order answeredOrder, bool isRepeat) => new(
         answeredOrder.ClOrdId, answeredOrder.OrderId, answeredOrder.ExecId, answeredOrder.Symbol, answeredOrder.Side,
         answeredOrder.Quantity, answeredOrder.Price, answeredOrder.Accepted, answeredOrder.RejectReason,
         answeredOrder.WasRejectedForInvalidFields(), isRepeat);

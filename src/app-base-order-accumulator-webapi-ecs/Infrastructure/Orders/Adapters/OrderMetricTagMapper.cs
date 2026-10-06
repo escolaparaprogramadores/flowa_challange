@@ -1,9 +1,8 @@
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Domain.Orders.Enums;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
-namespace Base.OrderAccumulator.Infrastructure.Metrics;
+namespace Base.OrderAccumulator.Infrastructure.Orders.Adapters;
 
-// Tags with closed values: each new value becomes a paid series in Datadog.
-// A symbol outside the list counts in a single series, so the total does not exceed 20 series.
 public static class OrderMetricTagMapper
 {
     public const string InvalidTagValue = "invalido";
@@ -12,7 +11,7 @@ public static class OrderMetricTagMapper
 
     public static string[] BuildOrderDecisionTags(string? orderSymbol, char orderSide)
     {
-        if (orderSymbol is null || !OrderFieldRule.AllowedOrderSymbols.Contains(orderSymbol))
+        if (orderSymbol is null || !OrderFieldPolicy.AllowedOrderSymbols.Contains(orderSymbol))
             return [$"symbol:{InvalidTagValue}", $"side:{InvalidTagValue}"];
 
         return [$"symbol:{orderSymbol}", $"side:{ToOrderSideTagValue(orderSide)}"];

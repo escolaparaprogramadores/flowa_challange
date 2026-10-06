@@ -1,9 +1,9 @@
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Domain.Exposures;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Commons.Responses;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 
-namespace Base.OrderAccumulator.Application.Exposures.GetExposures;
+namespace Base.OrderAccumulator.Application.Exposures.UseCases;
 
-// The exposure of the three symbols, read from the database for the screen.
 public sealed class GetExposuresUseCase(ISymbolExposureReadRepository symbolExposureReadRepository)
 {
     public const string ExposuresReadMessage = "Exposição dos símbolos lida.";

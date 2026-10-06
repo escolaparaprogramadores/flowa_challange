@@ -1,13 +1,10 @@
-using Base.OrderAccumulator.Domain.Exposures;
-using Dapper;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.Exposures.Interfaces;
 
-namespace Base.OrderAccumulator.Infrastructure.Persistence;
+namespace Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
 
-public sealed class ExposureRepository(PostgresUnitOfWork orderDatabaseUnitOfWork) : IExposureRepository
+public sealed class ExposureRepository(IDatabase orderDatabase) : IExposureRepository
 {
-    // The limit is enforced here, in the database, not in memory: the UPDATE only moves the exposure if the
-    // new value fits. Two orders on the same symbol at the same time compete for the row lock, and the
-    // second one re-evaluates the condition on the value the first one just stored.
     private const string MoveExposureSql = """
         UPDATE exposures
         SET exposure = exposure + @Delta
@@ -16,23 +13,18 @@ public sealed class ExposureRepository(PostgresUnitOfWork orderDatabaseUnitOfWor
 
     private const string SymbolExistsSql = "SELECT count(*) FROM exposures WHERE symbol = @Symbol";
 
-    // Zeroes instead of deleting: without the symbol row, moving the exposure throws
-    // (TryMoveSymbolExposureWithinLimitAsync).
     private const string ZeroSymbolExposuresSql = "UPDATE exposures SET exposure = 0 WHERE symbol = ANY(@Symbols)";
 
     public async Task<bool> TryMoveSymbolExposureWithinLimitAsync(
         string orderSymbol, decimal exposureDelta, decimal exposureLimit, CancellationToken cancellationToken = default)
     {
-        var orderDatabaseConnection = await orderDatabaseUnitOfWork.GetOpenConnectionAsync(cancellationToken);
         var exposureMoveParameters = new { Symbol = orderSymbol, Delta = exposureDelta, Limit = exposureLimit };
 
-        var movedExposureRows = await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
-            MoveExposureSql, exposureMoveParameters, orderDatabaseUnitOfWork.CurrentTransaction, cancellationToken: cancellationToken));
+        var movedExposureRows = await orderDatabase.ExecuteSqlCommandAsync(MoveExposureSql, exposureMoveParameters, cancellationToken);
         if (movedExposureRows == 1)
             return true;
 
-        var exposureRowsOfSymbol = await orderDatabaseConnection.ExecuteScalarAsync<long>(new CommandDefinition(
-            SymbolExistsSql, exposureMoveParameters, orderDatabaseUnitOfWork.CurrentTransaction, cancellationToken: cancellationToken));
+        var exposureRowsOfSymbol = await orderDatabase.QueryScalarAsync<long>(SymbolExistsSql, exposureMoveParameters, cancellationToken);
         if (exposureRowsOfSymbol == 0)
             throw new InvalidOperationException(
                 $"The symbol {orderSymbol} has no exposure row. The database migration was not applied.");
@@ -40,10 +32,6 @@ public sealed class ExposureRepository(PostgresUnitOfWork orderDatabaseUnitOfWor
         return false;
     }
 
-    public async Task ZeroSymbolExposuresAsync(IReadOnlyList<string> orderSymbols, CancellationToken cancellationToken = default)
-    {
-        var orderDatabaseConnection = await orderDatabaseUnitOfWork.GetOpenConnectionAsync(cancellationToken);
-        await orderDatabaseConnection.ExecuteAsync(new CommandDefinition(
-            ZeroSymbolExposuresSql, new { Symbols = orderSymbols.ToArray() }, orderDatabaseUnitOfWork.CurrentTransaction, cancellationToken: cancellationToken));
-    }
+    public async Task ZeroSymbolExposuresAsync(IReadOnlyList<string> orderSymbols, CancellationToken cancellationToken = default) =>
+        await orderDatabase.ExecuteSqlCommandAsync(ZeroSymbolExposuresSql, new { Symbols = orderSymbols.ToArray() }, cancellationToken);
 }

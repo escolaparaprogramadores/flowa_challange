@@ -1,4 +1,4 @@
-namespace Base.OrderAccumulator.Domain.Exposures;
+namespace Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 
 public sealed record SymbolExposure(string Symbol, decimal Exposure)
 {

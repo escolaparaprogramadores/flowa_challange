@@ -1,10 +1,7 @@
 using System.Collections;
-using Base.OrderAccumulator.Commons;
 
-namespace Base.OrderAccumulator.Infrastructure.Logging;
+namespace Base.OrderAccumulator.Commons.Logging;
 
-// Writes through the framework logger, which prints one JSON line per event. The context goes in as the
-// structured state of the event, so each field becomes a JSON field of "State"; fields without a value are left out.
 public sealed class ApplicationLogger<T>(ILogger<T> frameworkLogger) : IApplicationLogger<T>
 {
     public void LogInformation(string message, object? context = null) => WriteLogLine(LogLevel.Information, null, message, context);
@@ -30,7 +27,6 @@ public sealed class ApplicationLogger<T>(ILogger<T> frameworkLogger) : IApplicat
                 .Where(logContextField => logContextField.Value is not null)
                 .ToList();
 
-    // The shape the framework reads as structured state: the fields, and the message as ToString.
     private sealed class LogLineState(string logMessage, List<KeyValuePair<string, object?>> logContextFields) : IReadOnlyList<KeyValuePair<string, object?>>
     {
         public KeyValuePair<string, object?> this[int logContextFieldIndex] => logContextFields[logContextFieldIndex];

@@ -1,24 +1,24 @@
-using Base.OrderAccumulator.Application.Exposures;
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Responses;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.DomainServices;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
-namespace Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
+namespace Base.OrderAccumulator.Application.Orders.UseCases;
 
-// The flow of one order that arrived by FIX: a repeated ClOrdID gets the stored answer back; a new
-// one is decided by the domain and stored in the same transaction that moved the exposure.
 public sealed class DecideIncomingOrderUseCase(
     IUnitOfWork unitOfWork,
     IOrderRepository orderRepository,
     OrderDecisionDomainService orderDecisionDomainService,
-    SymbolExposureMemoryService symbolExposureMemory,
+    ISymbolExposureMemoryPort symbolExposureMemory,
     IOrderMetricsPort orderMetrics)
 {
-    public async Task<DecideIncomingOrderOutput> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
+    public async Task<DecideIncomingOrderResponse> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default)
     {
-        // Without a ClOrdID a repeat cannot be recognised: different orders would collide on the same key.
         ArgumentException.ThrowIfNullOrWhiteSpace(incomingOrder.ClOrdId);
 
-        // Storing in the database and adding to memory happen together, with no "Delete all" in between.
         var orderDecision = await symbolExposureMemory.DecideOrderOutsideDeleteAllAsync(async () =>
         {
             var storedOrderDecision = await DecideAndStoreIncomingOrderAsync(incomingOrder, cancellationToken);
@@ -27,19 +27,17 @@ public sealed class DecideIncomingOrderUseCase(
             return storedOrderDecision;
         }, cancellationToken);
 
-        // A repeat returns the old answer and is not counted again; an exception passes through uncounted.
         if (!orderDecision.IsRepeat)
             orderMetrics.CountAnsweredOrder(orderDecision.Symbol, orderDecision.Side, orderDecision.Accepted);
 
         return orderDecision;
     }
 
-    private async Task<DecideIncomingOrderOutput> DecideAndStoreIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken)
+    private async Task<DecideIncomingOrderResponse> DecideAndStoreIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken)
     {
-        // A stored repeat returns at once, without competing with new orders for the symbol row lock.
         var storedOrder = await orderRepository.FindOrderByClOrdIdAsync(incomingOrder.ClOrdId, cancellationToken);
         if (storedOrder is not null)
-            return DecideIncomingOrderOutput.FromAnsweredOrder(storedOrder, isRepeat: true);
+            return DecideIncomingOrderResponse.FromAnsweredOrder(storedOrder, isRepeat: true);
 
         await unitOfWork.BeginTransactionAsync(cancellationToken);
         try
@@ -48,11 +46,9 @@ public sealed class DecideIncomingOrderUseCase(
             if (await orderRepository.TryAddOrderAsync(answeredOrder, cancellationToken))
             {
                 await unitOfWork.CommitTransactionAsync(cancellationToken);
-                return DecideIncomingOrderOutput.FromAnsweredOrder(answeredOrder, isRepeat: false);
+                return DecideIncomingOrderResponse.FromAnsweredOrder(answeredOrder, isRepeat: false);
             }
 
-            // The same order arrived in parallel and the other one stored first: the rollback undoes what this
-            // attempt changed in the exposure.
             await unitOfWork.RollbackTransactionAsync(cancellationToken);
         }
         catch
@@ -63,6 +59,6 @@ public sealed class DecideIncomingOrderUseCase(
 
         var orderStoredInParallel = await orderRepository.FindOrderByClOrdIdAsync(incomingOrder.ClOrdId, cancellationToken)
             ?? throw new InvalidOperationException($"The order {incomingOrder.ClOrdId} collided on the key, but was not found.");
-        return DecideIncomingOrderOutput.FromAnsweredOrder(orderStoredInParallel, isRepeat: true);
+        return DecideIncomingOrderResponse.FromAnsweredOrder(orderStoredInParallel, isRepeat: true);
     }
 }
