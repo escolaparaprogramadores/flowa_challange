@@ -1,6 +1,5 @@
 using System.Data;
 using Flowa.OrderAccumulator.Application.ErrorHandling;
-using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.Commons.Database;
@@ -24,7 +23,6 @@ public sealed class DecideIncomingOrderUseCase
     private readonly IUnitOfWork unitOfWork;
     private readonly IOrderRepository orderRepository;
     private readonly OrderDecisionDomainService orderDecisionDomainService;
-    private readonly ISymbolExposureMemoryPort symbolExposureMemory;
     private readonly IOrderMetricsPort orderMetrics;
     private readonly IOperationMonitoring operationMonitoring;
     private readonly IApplicationLogger<DecideIncomingOrderUseCase> orderDecisionLogger;
@@ -33,7 +31,6 @@ public sealed class DecideIncomingOrderUseCase
         IUnitOfWork unitOfWork,
         IOrderRepository orderRepository,
         OrderDecisionDomainService orderDecisionDomainService,
-        ISymbolExposureMemoryPort symbolExposureMemory,
         IOrderMetricsPort orderMetrics,
         IOperationMonitoring operationMonitoring,
         IApplicationLogger<DecideIncomingOrderUseCase> orderDecisionLogger)
@@ -41,7 +38,6 @@ public sealed class DecideIncomingOrderUseCase
         this.unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         this.orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         this.orderDecisionDomainService = orderDecisionDomainService ?? throw new ArgumentNullException(nameof(orderDecisionDomainService));
-        this.symbolExposureMemory = symbolExposureMemory ?? throw new ArgumentNullException(nameof(symbolExposureMemory));
         this.orderMetrics = orderMetrics ?? throw new ArgumentNullException(nameof(orderMetrics));
         this.operationMonitoring = operationMonitoring ?? throw new ArgumentNullException(nameof(operationMonitoring));
         this.orderDecisionLogger = orderDecisionLogger ?? throw new ArgumentNullException(nameof(orderDecisionLogger));
@@ -54,13 +50,7 @@ public sealed class DecideIncomingOrderUseCase
         {
             ArgumentNullException.ThrowIfNull(incomingOrder);
 
-            var orderAnswer = await symbolExposureMemory.DecideOrderOutsideDeleteAllAsync(async () =>
-            {
-                var storedOrderAnswer = await DecideAndStoreIncomingOrderAsync(incomingOrder, cancellationToken);
-                if (storedOrderAnswer.ShouldMoveSymbolExposure())
-                    symbolExposureMemory.ApplyAcceptedOrder(DecideIncomingOrderResponse.MapFromOrderAnswer(storedOrderAnswer));
-                return storedOrderAnswer;
-            }, cancellationToken);
+            var orderAnswer = await DecideAndStoreIncomingOrderAsync(incomingOrder, cancellationToken);
 
             var answeredOrder = orderAnswer.AnsweredOrder;
             if (orderAnswer.ShouldCountInOrderMetrics())

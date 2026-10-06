@@ -1,6 +1,5 @@
 using System.Data;
 using Flowa.OrderAccumulator.Application.ErrorHandling;
-using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.Commons.Database;
 using Flowa.Commons.Logging;
@@ -20,7 +19,6 @@ public sealed class DeleteAllOrdersUseCase
     private readonly IUnitOfWork unitOfWork;
     private readonly IOrderRepository orderRepository;
     private readonly IExposureRepository exposureRepository;
-    private readonly ISymbolExposureMemoryPort symbolExposureMemory;
     private readonly IOperationMonitoring operationMonitoring;
     private readonly IApplicationLogger<DeleteAllOrdersUseCase> deleteAllOrdersLogger;
 
@@ -28,14 +26,12 @@ public sealed class DeleteAllOrdersUseCase
         IUnitOfWork unitOfWork,
         IOrderRepository orderRepository,
         IExposureRepository exposureRepository,
-        ISymbolExposureMemoryPort symbolExposureMemory,
         IOperationMonitoring operationMonitoring,
         IApplicationLogger<DeleteAllOrdersUseCase> deleteAllOrdersLogger)
     {
         this.unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         this.orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         this.exposureRepository = exposureRepository ?? throw new ArgumentNullException(nameof(exposureRepository));
-        this.symbolExposureMemory = symbolExposureMemory ?? throw new ArgumentNullException(nameof(symbolExposureMemory));
         this.operationMonitoring = operationMonitoring ?? throw new ArgumentNullException(nameof(operationMonitoring));
         this.deleteAllOrdersLogger = deleteAllOrdersLogger ?? throw new ArgumentNullException(nameof(deleteAllOrdersLogger));
     }
@@ -45,7 +41,7 @@ public sealed class DeleteAllOrdersUseCase
         using var deleteAllOrdersMonitoring = operationMonitoring.StartOperationMonitoring(OperationName);
         try
         {
-            await symbolExposureMemory.DeleteAllOrdersAndZeroExposuresAsync(DeleteAllStoredOrdersAndZeroExposuresAsync, cancellationToken);
+            await DeleteAllStoredOrdersAndZeroExposuresAsync();
             deleteAllOrdersLogger.LogInformation("All orders deleted and symbol exposures zeroed.");
             return DataMessage<AllOrdersDeletedResponse>.CreateSuccessMessage(
                 new AllOrdersDeletedResponse(OrderFieldPolicy.AllowedOrderSymbols), AllOrdersDeletedMessage);

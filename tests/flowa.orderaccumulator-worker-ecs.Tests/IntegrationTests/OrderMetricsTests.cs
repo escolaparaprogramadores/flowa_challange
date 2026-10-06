@@ -13,7 +13,6 @@ using Flowa.OrderAccumulator.Domain.Orders.Entities;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Entrypoint.BackgroundService;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Adapters;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
@@ -37,24 +36,25 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
 
     private readonly DogStatsdUdpListener dogStatsdUdpListener = new();
     private DogStatsdMetricsClient orderMetricsClient = null!;
-    private ISymbolExposureMemoryPort symbolExposureMemory = null!;
+    private ServiceProvider storedExposureReadServices = null!;
     private DecideIncomingOrderTestRunner meteredOrderDecisionRunner = null!;
 
     public async Task InitializeAsync()
     {
         await orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
         orderMetricsClient = OrderMetricsExtensions.CreateOrderMetricsClient(dogStatsdUdpListener.ListenerPort, UnifiedServiceConfiguration());
-        symbolExposureMemory = new InMemorySymbolExposureAdapter();
-        symbolExposureMemory.LoadStoredExposures(await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
+        storedExposureReadServices = new ServiceCollection()
+            .AddOrderAccumulatorPersistence(orderAccumulatorDatabase.OrderDatabaseConnectionString, new ConfigurationBuilder().Build())
+            .BuildServiceProvider();
         meteredOrderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient));
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new DatadogOrderMetricsAdapter(orderMetricsClient));
     }
 
-    public Task DisposeAsync()
+    public async Task DisposeAsync()
     {
+        await storedExposureReadServices.DisposeAsync();
         orderMetricsClient.Dispose();
         dogStatsdUdpListener.Dispose();
-        return Task.CompletedTask;
     }
 
     [Fact]
@@ -80,11 +80,11 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.False(rejectedOrderDecision.Accepted);
         var rejectedOrderMetric = Assert.Single(sentOrderMetrics);
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.RejectedOrders, "1", "c", ExpectedTags("symbol:VALE3", "side:sell")), rejectedOrderMetric);
-        Assert.Equal(-ExposureLimitPolicy.PerSymbol, ExposureInMemory("VALE3"));
+        Assert.Equal(-ExposureLimitPolicy.PerSymbol, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
     }
 
     [Fact]
-    public async Task Repeated_clordid_is_counted_once_and_moves_the_exposure_memory_once()
+    public async Task Repeated_clordid_is_counted_once_and_moves_the_stored_exposure_once()
     {
         var firstBuyOrder = TestOrders.NewBuyOrder("VIIA4", 200, 3.25m);
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(firstBuyOrder);
@@ -95,7 +95,6 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.True(repeatedOrderDecision.IsRepeat);
         var acceptedOrderMetric = Assert.Single(sentOrderMetrics);
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.AcceptedOrders, "1", "c", ExpectedTags("symbol:VIIA4", "side:buy")), acceptedOrderMetric);
-        Assert.Equal(650m, ExposureInMemory("VIIA4"));
         Assert.Equal(650m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VIIA4"));
     }
 
@@ -110,7 +109,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.RejectedOrders, "1", "c", ExpectedTags("symbol:invalido", "side:invalido")), rejectedOrderMetric);
         Assert.Equal(
             [new SymbolExposure("PETR4", 0m), new SymbolExposure("VALE3", 0m), new SymbolExposure("VIIA4", 0m)],
-            symbolExposureMemory.ReadCurrentSymbolExposures());
+            await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
     }
 
     [Fact]
@@ -122,7 +121,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
 
         var rejectedOrderMetric = Assert.Single(sentOrderMetrics);
         Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.RejectedOrders, "1", "c", ExpectedTags("symbol:PETR4", "side:invalido")), rejectedOrderMetric);
-        Assert.Equal(0m, ExposureInMemory("PETR4"));
+        Assert.Equal(0m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     [Fact]
@@ -143,7 +142,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     {
         var databaseFailure = new NpgsqlException("database down");
         var meteredRunnerWithFailingDatabase = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new DatadogOrderMetricsAdapter(orderMetricsClient),
             wrapOrderRepository: _ => new OrderRepositoryFailingWith(databaseFailure));
 
         var failedOrderDecisionMessage = await meteredRunnerWithFailingDatabase.DecideIncomingOrderMessageAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m));
@@ -154,18 +153,18 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal("internal-error", failedOrderDecisionMessage.ErrorCode);
         Assert.Same(databaseFailure, failedOrderDecisionMessage.Failure);
         Assert.Empty(sentOrderMetrics);
-        Assert.Equal(0m, ExposureInMemory("PETR4"));
+        Assert.Equal(0m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
     }
 
     [Fact]
-    public async Task Exposure_gauge_sends_the_three_symbols_from_memory_after_accepted_buys_and_sells()
+    public async Task Exposure_gauge_sends_the_three_symbols_from_the_database_after_accepted_buys_and_sells()
     {
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1000, 12.34m));
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewSellOrder("VALE3", 300, 50.10m));
         await SendSentinelAndReadOrderMetricsAsync();
 
-        new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, TimeProvider.System,
-            TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>()).SendSymbolExposureGauges();
+        await CreateExposureGaugeService(TimeProvider.System, TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>())
+            .SendSymbolExposureGaugesAsync();
         var sentExposureGauges = await SendSentinelAndReadOrderMetricsAsync();
 
         Assert.Equal(
@@ -183,8 +182,8 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         await meteredOrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 2m));
         await SendSentinelAndReadOrderMetricsAsync();
         var manualGaugeClock = new ManualGaugeClock();
-        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock,
-            TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>());
+        using var symbolExposureGaugeService = CreateExposureGaugeService(
+            manualGaugeClock, TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>());
         IReadOnlyList<DogStatsdMetricLine> expectedExposureGauges =
         [
             new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "20", "g", ExpectedTags("symbol:PETR4")),
@@ -212,8 +211,7 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     {
         var manualGaugeClock = new ManualGaugeClock();
         var recordingGaugeLogger = new RecordingApplicationLogger<SymbolExposureGaugeBackgroundService>();
-        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(
-            new DatadogOrderMetricsAdapter(orderMetricsClient), symbolExposureMemory, manualGaugeClock, recordingGaugeLogger);
+        using var symbolExposureGaugeService = CreateExposureGaugeService(manualGaugeClock, recordingGaugeLogger);
 
         await symbolExposureGaugeService.StartAsync(CancellationToken.None);
         var gaugesAtStartup = await ReadThreeExposureGaugesAsync();
@@ -227,6 +225,62 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         Assert.Equal(3, gaugesAfterTheFirstTick.Count);
         Assert.Equal(3, gaugesAfterTheSecondTick.Count);
         Assert.Equal(["Information Symbol exposure gauge loop started."], recordingGaugeLogger.RecordedLogLines);
+    }
+
+    // CA-17: the gauge has no copy of its own. A value written straight in the database, by another process, is the
+    // value the next tick sends.
+    [Fact]
+    public async Task Exposure_gauge_sends_the_value_another_process_wrote_in_the_database_on_the_next_tick()
+    {
+        var manualGaugeClock = new ManualGaugeClock();
+        using var symbolExposureGaugeService = CreateExposureGaugeService(
+            manualGaugeClock, TestObservability.CreateDiscardingLogger<SymbolExposureGaugeBackgroundService>());
+
+        await symbolExposureGaugeService.StartAsync(CancellationToken.None);
+        var gaugesAtStartup = await ReadThreeExposureGaugesAsync();
+        await SetStoredExposureAsync("VALE3", 4321.50m);
+        manualGaugeClock.TickGaugeTimer();
+        var gaugesAfterTheTick = await ReadThreeExposureGaugesAsync();
+        await symbolExposureGaugeService.StopAsync(CancellationToken.None);
+
+        Assert.Equal(new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "0", "g", ExpectedTags("symbol:VALE3")), gaugesAtStartup[1]);
+        Assert.Equal(
+            [
+                new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "0", "g", ExpectedTags("symbol:PETR4")),
+                new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "4321.5", "g", ExpectedTags("symbol:VALE3")),
+                new DogStatsdMetricLine(OrderMetricNames.SymbolExposure, "0", "g", ExpectedTags("symbol:VIIA4"))
+            ],
+            gaugesAfterTheTick);
+    }
+
+    // The read can fail now that it goes to the database: the failed tick writes one Error line, sends no gauge and the
+    // loop keeps going, so the next tick sends the three symbols again. The app is not brought down by the gauge.
+    [Fact]
+    public async Task Exposure_gauge_logs_one_error_for_a_failed_read_and_sends_again_on_the_next_tick()
+    {
+        var manualGaugeClock = new ManualGaugeClock();
+        var recordingGaugeLogger = new RecordingApplicationLogger<SymbolExposureGaugeBackgroundService>();
+        var exposureReaderFailingOnce = new SymbolExposureReaderFailingOnTheFirstRead(orderAccumulatorDatabase.ExposureReader);
+        await using var failingOnceReadServices = new ServiceCollection()
+            .AddSingleton<ISymbolExposureReadRepository>(exposureReaderFailingOnce)
+            .BuildServiceProvider();
+        using var symbolExposureGaugeService = new SymbolExposureGaugeBackgroundService(
+            new DatadogOrderMetricsAdapter(orderMetricsClient), failingOnceReadServices.GetRequiredService<IServiceScopeFactory>(),
+            manualGaugeClock, recordingGaugeLogger);
+
+        await symbolExposureGaugeService.StartAsync(CancellationToken.None);
+        await exposureReaderFailingOnce.FirstReadFailed.WaitAsync(TimeSpan.FromSeconds(15));
+        var gaugesAfterTheFailedRead = await SendSentinelAndReadOrderMetricsAsync();
+        manualGaugeClock.TickGaugeTimer();
+        var gaugesAfterTheNextTick = await ReadThreeExposureGaugesAsync();
+        await symbolExposureGaugeService.StopAsync(CancellationToken.None);
+
+        Assert.Empty(gaugesAfterTheFailedRead);
+        Assert.Equal(3, gaugesAfterTheNextTick.Count);
+        Assert.False(symbolExposureGaugeService.ExecuteTask!.IsFaulted);
+        Assert.Equal(
+            ["Information Symbol exposure gauge loop started.", "Error Symbol exposure gauge could not read the stored exposures."],
+            recordingGaugeLogger.RecordedLogLines);
     }
 
     [Fact]
@@ -283,19 +337,19 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
     }
 
     [Fact]
-    public async Task App_counts_orders_through_the_datadog_adapter_and_loads_the_stored_exposure_at_startup()
+    public async Task App_counts_orders_through_the_datadog_adapter_and_reads_the_exposure_stored_before_startup()
     {
         var startupDatabaseConnectionString = await CreateStartupDatabaseAsync("UPDATE exposures SET exposure = 4321.50 WHERE symbol = 'VALE3'");
         await using var orderAccumulatorApp = CreateOrderAccumulatorApp(startupDatabaseConnectionString, "test-sha", new OrderAccumulatorCapturedLogs());
 
         var appServices = orderAccumulatorApp.Services;
         Assert.IsType<DatadogOrderMetricsAdapter>(appServices.GetRequiredService<IOrderMetricsPort>());
-        await using (var orderOperationScope = appServices.CreateAsyncScope())
-            Assert.IsType<OrderRepository>(orderOperationScope.ServiceProvider.GetRequiredService<IOrderRepository>());
+        await using var orderOperationScope = appServices.CreateAsyncScope();
+        Assert.IsType<OrderRepository>(orderOperationScope.ServiceProvider.GetRequiredService<IOrderRepository>());
         Assert.Contains(appServices.GetServices<IHostedService>(), hostedService => hostedService is SymbolExposureGaugeBackgroundService);
         Assert.Equal(
             [new SymbolExposure("PETR4", 0m), new SymbolExposure("VALE3", 4321.50m), new SymbolExposure("VIIA4", 0m)],
-            appServices.GetRequiredService<ISymbolExposureMemoryPort>().ReadCurrentSymbolExposures());
+            await orderOperationScope.ServiceProvider.GetRequiredService<ISymbolExposureReadRepository>().GetSymbolExposuresAsync());
     }
 
     // Own database per app test: the exposure loaded at startup does not depend on the other tests.
@@ -351,15 +405,16 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
         return receivedExposureGauges.OrderBy(exposureGauge => exposureGauge.MetricTags.Single(metricTag => metricTag.StartsWith("symbol:"))).ToList();
     }
 
-    private decimal ExposureInMemory(string orderSymbol) =>
-        symbolExposureMemory.ReadCurrentSymbolExposures().Single(currentSymbolExposure => currentSymbolExposure.Symbol == orderSymbol).Exposure;
+    private SymbolExposureGaugeBackgroundService CreateExposureGaugeService(
+        TimeProvider gaugeClock, IApplicationLogger<SymbolExposureGaugeBackgroundService> gaugeLogger) =>
+        new(new DatadogOrderMetricsAdapter(orderMetricsClient), storedExposureReadServices.GetRequiredService<IServiceScopeFactory>(),
+            gaugeClock, gaugeLogger);
 
     private async Task SetStoredExposureAsync(string orderSymbol, decimal storedExposure)
     {
         await using (var orderDatabaseConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync())
             await orderDatabaseConnection.ExecuteAsync(
                 "UPDATE exposures SET exposure = @StoredExposure WHERE symbol = @Symbol", new { StoredExposure = storedExposure, Symbol = orderSymbol });
-        symbolExposureMemory.LoadStoredExposures(await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
     }
 
     // The absence of a metric can only be proven with a send afterwards: everything that arrived before the sentinel is what was sent.
@@ -394,6 +449,23 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
             Task.FromException<bool>(databaseFailure);
 
         public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) => Task.FromException(databaseFailure);
+    }
+
+    private sealed class SymbolExposureReaderFailingOnTheFirstRead(ISymbolExposureReadRepository storedExposureReader) : ISymbolExposureReadRepository
+    {
+        private readonly TaskCompletionSource firstReadFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int exposureReadCount;
+
+        public Task FirstReadFailed => firstReadFailed.Task;
+
+        public Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref exposureReadCount) > 1)
+                return storedExposureReader.GetSymbolExposuresAsync(cancellationToken);
+
+            firstReadFailed.SetResult();
+            return Task.FromException<IReadOnlyList<SymbolExposure>>(new NpgsqlException("database down"));
+        }
     }
 
     // A clock that only moves when the test says so: the gauge PeriodicTimer asks for its timer here.

@@ -55,7 +55,6 @@ orderAccumulatorApp.UseStatusCodePages();
 orderAccumulatorApp.UseMiddleware<RequestReceivedLoggingMiddleware>();
 
 await orderAccumulatorApp.Services.GetRequiredService<IDatabaseConnectionSource>().ApplyOrderAccumulatorSchemaAsync();
-await orderAccumulatorApp.Services.LoadSymbolExposureMemoryAsync();
 
 orderAccumulatorApp.MapGet("/health", () => "Healthy");
 orderAccumulatorApp.MapGet("/version", () => new { commit = buildCommitSha });

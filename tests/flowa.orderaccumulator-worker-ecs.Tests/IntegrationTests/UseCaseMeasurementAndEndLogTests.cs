@@ -9,7 +9,6 @@ using Flowa.OrderAccumulator.Domain.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Flowa.OrderAccumulator.Domain.Orders.Entities;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 
 namespace Flowa.OrderAccumulator.Tests;
 
@@ -30,10 +29,10 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
         var recordingMonitoring = new RecordingOperationMonitoring();
         var recordingLogger = new RecordingApplicationLogger<DecideIncomingOrderUseCase>();
         var orderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics(),
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new UncountedOrderMetrics(),
             operationMonitoring: recordingMonitoring, orderDecisionLogger: recordingLogger);
         var failingOrderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics(),
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new UncountedOrderMetrics(),
             wrapOrderRepository: _ => new OrderRepositoryAnswering(UseCaseFailure), operationMonitoring: recordingMonitoring, orderDecisionLogger: recordingLogger);
         var acceptedSale = TestOrders.NewSellOrder("VIIA4", 99999, 999.99m);
 
@@ -92,11 +91,11 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
 
         await new DeleteAllOrdersUseCase(
                 new UnitOfWorkWithoutDatabase(), new OrderRepositoryAnswering(null), new ExposureRepositoryAnswering(null),
-                new InMemorySymbolExposureAdapter(), recordingMonitoring, recordingLogger)
+                recordingMonitoring, recordingLogger)
             .DeleteAllOrdersAsync();
         var failedDeleteAll = await new DeleteAllOrdersUseCase(
                 new UnitOfWorkWithoutDatabase(), new OrderRepositoryAnswering(null), new ExposureRepositoryAnswering(UseCaseFailure),
-                new InMemorySymbolExposureAdapter(), recordingMonitoring, recordingLogger)
+                recordingMonitoring, recordingLogger)
             .DeleteAllOrdersAsync();
 
         Assert.Same(UseCaseFailure, failedDeleteAll.Failure);

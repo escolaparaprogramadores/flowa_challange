@@ -1,6 +1,3 @@
-using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
-
 namespace Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 
 internal static class InfrastructureServiceCollectionExtensions
@@ -10,7 +7,6 @@ internal static class InfrastructureServiceCollectionExtensions
     {
         orderAccumulatorServices.AddOrderAccumulatorPersistence(orderDatabaseConnectionString, orderAccumulatorConfiguration);
         orderAccumulatorServices.AddOrderMetrics(orderAccumulatorConfiguration);
-        orderAccumulatorServices.AddSingleton<ISymbolExposureMemoryPort, InMemorySymbolExposureAdapter>();
         return orderAccumulatorServices;
     }
 }
