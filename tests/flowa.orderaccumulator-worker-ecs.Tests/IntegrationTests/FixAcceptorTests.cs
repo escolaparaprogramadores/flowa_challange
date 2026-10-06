@@ -211,19 +211,120 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
     }
 
     [Fact]
-    public async Task Database_failure_sends_no_execution_report_logs_the_order_and_keeps_the_fix_session_up()
+    public async Task Database_failure_answers_execution_report_rejected_with_reason_and_leaves_exposure_untouched()
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
             orderAccumulatorTestServices.AddScoped<IOrderRepository>(orderOperationServices =>
                 new OrderRepositoryFailingForClOrdId("database-failure", new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())))).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
 
-        await fixTestInitiator.ExpectNoAnswerAsync(FixTestInitiator.NewOrder("database-failure", "PETR4", '1', 10, 1.00m), TimeSpan.FromSeconds(2));
+        var databaseFailureExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("database-failure", "PETR4", '1', 10, 1.00m));
+        var exposuresAfterDatabaseFailure = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/exposures");
         var orderExecutionReportAfterDatabaseFailure = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("after-the-failure", "PETR4", '1', 10, 1.00m));
 
+        await AssertRejectedOrderGotNewIdsAndWasNotStoredAsync(databaseFailureExecutionReport);
+        Assert.Equal(
+            $"35=8|37={databaseFailureExecutionReport.OrderID.Value}|17={databaseFailureExecutionReport.ExecID.Value}|150=8|39=8|11=database-failure|55=PETR4|54=1|151=0|14=0|6=0" +
+            "|58=Ordem rejeitada: o OrderAccumulator não conseguiu decidir a ordem agora. Tente de novo.",
+            FormatExecutionReportContractTags(databaseFailureExecutionReport));
+        Assert.Equal([0m, 0m, 0m], ReadExposuresData(exposuresAfterDatabaseFailure).Exposures.Select(symbolExposure => symbolExposure.Exposure));
+        Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("database-failure"));
         Assert.Equal(ExecType.NEW, orderExecutionReportAfterDatabaseFailure.ExecType.Value);
-        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Error Flowa.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: Order decision failed; no ExecutionReport sent.");
+        Assert.Single(orderAccumulatorTestApp.CapturedOrderAccumulatorLogs.CapturedLogLines, capturedLogLine => capturedLogLine == "Error Flowa.OrderAccumulator.Entrypoint.Fix.NewOrderSingleConsumer: Order decision failed; ExecutionReport Rejected sent.");
         Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
+    }
+
+    [Fact]
+    public async Task Slow_database_past_the_default_four_seconds_answers_rejected_by_the_deadline_and_the_session_stays_up()
+    {
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        var stalledOrderInsert = new OrderInsertStalledPastTheDeadline("slow-database", TimeSpan.FromSeconds(6));
+        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
+            orderAccumulatorTestServices.AddScoped<IOrderRepository>(orderOperationServices =>
+                stalledOrderInsert.WrapPostgresOrderRepository(new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())))).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort, heartbeatIntervalSeconds: 5);
+
+        var answerClock = System.Diagnostics.Stopwatch.StartNew();
+        var deadlineExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("slow-database", "PETR4", '1', 10, 1.00m));
+        var deadlineAnswerTime = answerClock.Elapsed;
+        await stalledOrderInsert.StalledInsertFinished.WaitAsync(TimeSpan.FromSeconds(10));
+        var orderExecutionReportAfterTheStall = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("after-the-stall", "PETR4", '1', 20, 1.00m));
+        var heartbeatClock = System.Diagnostics.Stopwatch.StartNew();
+        while (fixTestInitiator.ReceivedHeartbeatCount < 1 && heartbeatClock.Elapsed < TimeSpan.FromSeconds(10))
+            await Task.Delay(100);
+        var exposuresAfterTheStall = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/exposures");
+        var ordersAfterTheStall = await orderAccumulatorTestApp.CreateClient().GetFromJsonAsync<JsonElement>("/api/orders?page=1");
+
+        Assert.InRange(deadlineAnswerTime, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(4.5));
+        await AssertRejectedOrderGotNewIdsAndWasNotStoredAsync(deadlineExecutionReport);
+        Assert.Equal(
+            $"35=8|37={deadlineExecutionReport.OrderID.Value}|17={deadlineExecutionReport.ExecID.Value}|150=8|39=8|11=slow-database|55=PETR4|54=1|151=0|14=0|6=0" +
+            "|58=Ordem rejeitada: o banco de dados não respondeu em 4 s. Tente de novo.",
+            FormatExecutionReportContractTags(deadlineExecutionReport));
+        Assert.Equal(ExecType.NEW, orderExecutionReportAfterTheStall.ExecType.Value);
+        Assert.True(fixTestInitiator.ReceivedHeartbeatCount >= 1, "no heartbeat came from the acceptor after the stalled order");
+        Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("slow-database"));
+        Assert.Equal(20.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
+        Assert.Equal(20.00m, ReadExposuresData(exposuresAfterTheStall).Exposures.Single(symbolExposure => symbolExposure.Symbol == "PETR4").Exposure);
+        Assert.Equal(["after-the-stall"], ordersAfterTheStall.GetProperty("data").GetProperty("orders").EnumerateArray()
+            .Select(listedOrder => listedOrder.GetProperty("clOrdId").GetString()));
+        Assert.DoesNotContain(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.ReadLogField("FixMessage")?.Contains("|35=5|") == true);
+        var deadlineLogLine = Assert.Single(stdoutJsonLogCapture.JsonLogLines, jsonLogLine => jsonLogLine.LogLevel is "Warning" or "Error");
+        Assert.Equal(("Warning", "Order decision passed the deadline; ExecutionReport Rejected sent.", "order_decision_timeout"),
+            (deadlineLogLine.LogLevel, deadlineLogLine.Message, deadlineLogLine.ReadLogField("ErrorCode")));
+    }
+
+    [Fact]
+    public async Task Deadline_set_to_two_seconds_in_configuration_rejects_at_two_seconds()
+    {
+        var stalledOrderInsert = new OrderInsertStalledPastTheDeadline("slow-database-2s", TimeSpan.FromSeconds(4));
+        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString, replaceOrderAccumulatorServices: orderAccumulatorTestServices =>
+        {
+            orderAccumulatorTestServices.AddScoped<IOrderRepository>(orderOperationServices =>
+                stalledOrderInsert.WrapPostgresOrderRepository(new OrderRepository(orderOperationServices.GetRequiredService<IDatabase>())));
+            orderAccumulatorTestServices.AddSingleton(orderAccumulatorServices => new NewOrderSingleConsumer(
+                orderAccumulatorServices.GetRequiredService<IServiceScopeFactory>(),
+                orderAccumulatorServices.GetRequiredService<IApplicationLogger<NewOrderSingleConsumer>>(),
+                new ConfigurationBuilder()
+                    .AddConfiguration(orderAccumulatorServices.GetRequiredService<IConfiguration>())
+                    .AddInMemoryCollection([KeyValuePair.Create("Orders:DecisionTimeoutSeconds", (string?)"2")])
+                    .Build()));
+        }).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+
+        var answerClock = System.Diagnostics.Stopwatch.StartNew();
+        var deadlineExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("slow-database-2s", "VALE3", '2', 10, 1.00m));
+        var deadlineAnswerTime = answerClock.Elapsed;
+        await stalledOrderInsert.StalledInsertFinished.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.InRange(deadlineAnswerTime, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2.5));
+        Assert.Equal(
+            $"35=8|37={deadlineExecutionReport.OrderID.Value}|17={deadlineExecutionReport.ExecID.Value}|150=8|39=8|11=slow-database-2s|55=VALE3|54=2|151=0|14=0|6=0" +
+            "|58=Ordem rejeitada: o banco de dados não respondeu em 2 s. Tente de novo.",
+            FormatExecutionReportContractTags(deadlineExecutionReport));
+        Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("slow-database-2s"));
+        Assert.Equal(0m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("VALE3"));
+    }
+
+    [Fact]
+    public void Order_decision_deadline_is_four_seconds_without_the_key_and_in_appsettings()
+    {
+        var orderAccumulatorAppsettings = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(AppContext.BaseDirectory, "appsettings.json"))
+            .Build();
+
+        Assert.Equal(4, NewOrderSingleConsumer.ReadOrderDecisionTimeoutSeconds(BuildFixAcceptorConfiguration()));
+        Assert.Equal(4, NewOrderSingleConsumer.ReadOrderDecisionTimeoutSeconds(orderAccumulatorAppsettings));
+        Assert.Equal(7, NewOrderSingleConsumer.ReadOrderDecisionTimeoutSeconds(BuildFixAcceptorConfiguration(("Orders:DecisionTimeoutSeconds", "7"))));
+    }
+
+    [Fact]
+    public void Order_decision_deadline_of_zero_stops_the_startup_with_a_clear_message()
+    {
+        var zeroDeadlineError = Assert.Throws<InvalidOperationException>(() =>
+            NewOrderSingleConsumer.ReadOrderDecisionTimeoutSeconds(BuildFixAcceptorConfiguration(("Orders:DecisionTimeoutSeconds", "0"))));
+
+        Assert.Equal("Set Orders__DecisionTimeoutSeconds to a number of seconds greater than zero.", zeroDeadlineError.Message);
     }
 
     [Fact]
@@ -267,24 +368,55 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         Assert.Equal([new IPEndPoint(IPAddress.Loopback, orderAccumulatorTestApp.FixAcceptorPort)], fixListeners);
     }
 
-    [Fact]
-    public async Task Order_without_price_gets_business_reject_and_is_not_recorded()
+    public static TheoryData<int, string, string> OrdersMissingQuantityOrPrice => new()
+    {
+        { Tags.OrderQty, "no-quantity", "A quantidade deve ser maior que zero." },
+        { Tags.Price, "no-price", "O preço deve ser maior que zero." }
+    };
+
+    [Theory]
+    [MemberData(nameof(OrdersMissingQuantityOrPrice))]
+    public async Task Order_without_quantity_or_price_gets_execution_report_rejected_with_reason_instead_of_business_reject(
+        int missingOrderTag, string clOrdId, string expectedRejectionText)
     {
         await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
         using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
-        var orderWithoutPrice = FixTestInitiator.NewOrder("no-price", "PETR4", '1', 10, 1.00m);
-        orderWithoutPrice.RemoveField(Tags.Price);
+        var orderMissingOneField = FixTestInitiator.NewOrder(clOrdId, "PETR4", '1', 10, 1.00m);
+        orderMissingOneField.RemoveField(missingOrderTag);
 
-        var missingPriceBusinessReject = await fixTestInitiator.SendExpectingBusinessRejectAsync(orderWithoutPrice);
-        var orderExecutionReportAfterBusinessReject = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("after-no-price", "PETR4", '1', 10, 1.00m));
+        var missingFieldExecutionReport = await fixTestInitiator.SendExpectingExecutionReportAsync(orderMissingOneField);
+        var orderExecutionReportAfterMissingField = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder($"after-{clOrdId}", "PETR4", '1', 10, 1.00m));
 
-        Assert.Equal("D", missingPriceBusinessReject.RefMsgType.Value);
-        // QuickFIX/n 1.14.1 does not fill RefTagID (371); the reason goes in 380 and 58.
-        Assert.Equal("Conditionally Required Field Missing", missingPriceBusinessReject.Text.Value);
-        Assert.Equal(BusinessRejectReason.CONDITIONALLY_REQUIRED_FIELD_MISSING, missingPriceBusinessReject.BusinessRejectReason.Value);
-        Assert.Equal(ExecType.NEW, orderExecutionReportAfterBusinessReject.ExecType.Value);
-        Assert.Equal(0, await orderAccumulatorDatabase.CountStoredOrdersAsync("no-price"));
+        var storedOrderExecutionIds = await ReadStoredOrderExecutionIdsAsync(clOrdId);
+        Assert.Equal(
+            $"35=8|37={storedOrderExecutionIds.OrderId}|17={storedOrderExecutionIds.ExecId}|150=8|39=8|11={clOrdId}|55=PETR4|54=1|151=0|14=0|6=0|58={expectedRejectionText}",
+            FormatExecutionReportContractTags(missingFieldExecutionReport));
+        Assert.Equal(ExecType.NEW, orderExecutionReportAfterMissingField.ExecType.Value);
         Assert.Equal(10.00m, await orderAccumulatorDatabase.ReadExposureOfSymbolAsync("PETR4"));
+    }
+
+    public static TheoryData<int, string> OrdersMissingFieldRequiredByTheFixDictionary => new()
+    {
+        { Tags.ClOrdID, "35=3|371=11|372=D|373=1|58=Required tag missing" },
+        { Tags.Symbol, "35=3|371=55|372=D|373=1|58=Required tag missing" },
+        { Tags.Side, "35=3|371=54|372=D|373=1|58=Required tag missing" }
+    };
+
+    [Theory]
+    [MemberData(nameof(OrdersMissingFieldRequiredByTheFixDictionary))]
+    public async Task Order_without_clordid_symbol_or_side_gets_the_session_reject_of_the_fix_dictionary(int missingOrderTag, string expectedSessionReject)
+    {
+        await using var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString).StartWithFixAcceptor();
+        using var fixTestInitiator = await FixTestInitiator.LogOnToAcceptorAsync(orderAccumulatorTestApp.FixAcceptorPort);
+        var orderMissingOneField = FixTestInitiator.NewOrder("missing-required-tag", "PETR4", '1', 10, 1.00m);
+        orderMissingOneField.RemoveField(missingOrderTag);
+
+        var missingFieldSessionReject = await fixTestInitiator.SendExpectingSessionRejectAsync(orderMissingOneField);
+        var orderExecutionReportAfterSessionReject = await fixTestInitiator.SendExpectingExecutionReportAsync(FixTestInitiator.NewOrder("after-session-reject", "PETR4", '1', 10, 1.00m));
+
+        Assert.Equal(expectedSessionReject, FormatSessionRejectTags(missingFieldSessionReject));
+        Assert.Equal(ExecType.NEW, orderExecutionReportAfterSessionReject.ExecType.Value);
+        Assert.Equal(1, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }
 
     [Fact]
@@ -319,7 +451,8 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
         var fixAcceptorService = new FixAcceptorBackgroundService(
             new NewOrderSingleConsumer(
                 new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>(),
-                new ApplicationLogger<NewOrderSingleConsumer>(NullLogger<NewOrderSingleConsumer>.Instance)),
+                new ApplicationLogger<NewOrderSingleConsumer>(NullLogger<NewOrderSingleConsumer>.Instance),
+                BuildFixAcceptorConfiguration()),
             BuildFixAcceptorConfiguration(("Fix:AcceptorPort", fixAcceptorPort.ToString()), ("Fix:AcceptorBindHost", OrderAccumulatorFixTestHost.FixAcceptorLoopbackBindHost)),
             new FixSessionLogFactory(new ApplicationLogger<FixSessionLog>(NullLogger<FixSessionLog>.Instance)));
         await fixAcceptorService.StartAsync(CancellationToken.None);
@@ -352,6 +485,21 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
                 Tags.LeavesQty, Tags.CumQty, Tags.AvgPx, Tags.Text }
             .Select(executionReportTag => $"{executionReportTag}={(orderExecutionReport.IsSetField(executionReportTag) ? orderExecutionReport.GetString(executionReportTag) : "")}"));
 
+    private static string FormatSessionRejectTags(Reject fixSessionReject) =>
+        $"35={fixSessionReject.Header.GetString(Tags.MsgType)}|" + string.Join('|',
+            new[] { Tags.RefTagID, Tags.RefMsgType, Tags.SessionRejectReason, Tags.Text }
+            .Select(sessionRejectTag => $"{sessionRejectTag}={(fixSessionReject.IsSetField(sessionRejectTag) ? fixSessionReject.GetString(sessionRejectTag) : "")}"));
+
+    private async Task AssertRejectedOrderGotNewIdsAndWasNotStoredAsync(ExecutionReport rejectedOrderExecutionReport)
+    {
+        Assert.Matches("^[0-9a-f]{32}$", rejectedOrderExecutionReport.OrderID.Value);
+        Assert.Matches("^[0-9a-f]{32}$", rejectedOrderExecutionReport.ExecID.Value);
+        Assert.NotEqual(rejectedOrderExecutionReport.OrderID.Value, rejectedOrderExecutionReport.ExecID.Value);
+        await using var orderDatabaseConnection = await orderAccumulatorDatabase.OrderDatabaseDataSource.OpenConnectionAsync();
+        Assert.Equal(0, await orderDatabaseConnection.ExecuteScalarAsync<long>(
+            "SELECT count(*) FROM orders WHERE order_id = @OrderId", new { OrderId = rejectedOrderExecutionReport.OrderID.Value }));
+    }
+
     private static IConfiguration BuildFixAcceptorConfiguration(params (string SettingKey, string SettingValue)[] fixAcceptorSettingEntries) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(fixAcceptorSettingEntries.Select(fixAcceptorSettingEntry => KeyValuePair.Create(fixAcceptorSettingEntry.SettingKey, (string?)fixAcceptorSettingEntry.SettingValue)))
@@ -377,5 +525,43 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
 
         public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
             postgresOrderRepository.DeleteAllOrdersAsync(cancellationToken);
+    }
+
+    // Plays a database that stops answering inside the transaction: the INSERT runs, then the call hangs past the
+    // deadline without looking at the token, as a stuck connection would.
+    private sealed class OrderInsertStalledPastTheDeadline(string stalledClOrdId, TimeSpan orderInsertStall)
+    {
+        private readonly TaskCompletionSource stalledInsertFinished = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task StalledInsertFinished => stalledInsertFinished.Task;
+
+        private string StalledClOrdId => stalledClOrdId;
+
+        private TimeSpan OrderInsertStall => orderInsertStall;
+
+        private void MarkStalledInsertFinished() => stalledInsertFinished.TrySetResult();
+
+        public IOrderRepository WrapPostgresOrderRepository(IOrderRepository postgresOrderRepository) =>
+            new OrderRepositoryStallingTheInsert(this, postgresOrderRepository);
+
+        private sealed class OrderRepositoryStallingTheInsert(OrderInsertStalledPastTheDeadline stalledOrderInsert, IOrderRepository postgresOrderRepository) : IOrderRepository
+        {
+            public Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default) =>
+                postgresOrderRepository.FindOrderByClOrdIdAsync(clOrdId, cancellationToken);
+
+            public async Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default)
+            {
+                var orderInserted = await postgresOrderRepository.TryAddOrderAsync(answeredOrder, cancellationToken);
+                if (answeredOrder.ClOrdId != stalledOrderInsert.StalledClOrdId)
+                    return orderInserted;
+
+                await Task.Delay(stalledOrderInsert.OrderInsertStall, CancellationToken.None);
+                stalledOrderInsert.MarkStalledInsertFinished();
+                return orderInserted;
+            }
+
+            public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
+                postgresOrderRepository.DeleteAllOrdersAsync(cancellationToken);
+        }
     }
 }
