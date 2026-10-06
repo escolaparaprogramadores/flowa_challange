@@ -1,4 +1,4 @@
-using Base.OrderAccumulator.Infrastructure.Logging;
+using Base.OrderAccumulator.Commons.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Base.OrderAccumulator.Tests;

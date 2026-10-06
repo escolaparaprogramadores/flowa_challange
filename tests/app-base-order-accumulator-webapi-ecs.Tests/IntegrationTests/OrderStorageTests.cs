@@ -1,11 +1,17 @@
-using Base.OrderAccumulator.Application.Exposures.GetExposures;
-using Base.OrderAccumulator.Application.Exposures;
-using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
-using Base.OrderAccumulator.Application.Orders.ListOrders;
-using Base.OrderAccumulator.Commons;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
-using Base.OrderAccumulator.Infrastructure.Persistence;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Interfaces;
+using Base.OrderAccumulator.Application.Orders.UseCases;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.DomainServices;
+using Base.OrderAccumulator.Domain.Exposures.Interfaces;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Enums;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
+using Base.OrderAccumulator.Infrastructure.DependencyInjection;
+using Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
+using Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
+using Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -142,7 +148,7 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
     {
         await orderAccumulatorDatabase.OrderDecisionRunner.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 10, 10.00m));
 
-        await orderAccumulatorDatabase.OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();
+        await orderAccumulatorDatabase.OrderDatabaseConnectionSource.ApplyOrderAccumulatorSchemaAsync();
 
         Assert.Equal(
             [new SymbolExposure("PETR4", 100.00m), new("VALE3", 0m), new("VIIA4", 0m)],
@@ -220,14 +226,14 @@ public sealed class OrderStorageTests(OrderAccumulatorPostgresFixture orderAccum
         var registeredExposureReader = orderAccumulatorServiceProvider.GetRequiredService<ISymbolExposureReadRepository>();
         var registeredServicesOrderDecision = await new DecideIncomingOrderUseCase(
                 registeredUnitOfWork, registeredOrderRepository, new OrderDecisionDomainService(registeredSymbolExposureRepository),
-                new SymbolExposureMemoryService(), new UncountedOrderMetrics())
+                new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics())
             .DecideIncomingOrderAsync(TestOrders.NewBuyOrder("VALE3", 10, 5.00m));
 
         Assert.IsType<OrderRepository>(registeredOrderRepository);
         Assert.IsType<ExposureRepository>(registeredSymbolExposureRepository);
         Assert.IsType<SymbolExposureReadRepository>(registeredExposureReader);
         Assert.IsType<OrderListReadRepository>(orderAccumulatorServiceProvider.GetRequiredService<IOrderListReadRepository>());
-        Assert.Same(orderOperationServices.GetRequiredService<PostgresUnitOfWork>(), registeredUnitOfWork);
+        Assert.Same(orderOperationServices.GetRequiredService<DatabaseUnitOfWork>(), registeredUnitOfWork);
         Assert.NotSame(registeredUnitOfWork, otherOrderOperationScope.ServiceProvider.GetRequiredService<IUnitOfWork>());
         Assert.True(registeredServicesOrderDecision.Accepted);
         Assert.Equal(50.00m, (await registeredExposureReader.GetSymbolExposuresAsync())

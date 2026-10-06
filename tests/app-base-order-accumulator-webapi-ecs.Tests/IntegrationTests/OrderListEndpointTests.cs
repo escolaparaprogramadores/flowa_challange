@@ -178,7 +178,7 @@ public sealed class OrderListEndpointTests(OrderAccumulatorPostgresFixture order
             .ToList();
         // The two good pages write nothing; the invalid page is an HTTP error and has its one Warning (CA-6).
         Assert.Equal(
-            ["Warning Base.OrderAccumulator.Entrypoint.Errors.GlobalErrorHandler: Expected error in request."],
+            ["Warning Base.OrderAccumulator.Entrypoint.ErrorHandling.GlobalErrorHandler: Expected error in request."],
             logLinesOfTheListing);
     }
 

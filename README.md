@@ -174,7 +174,7 @@ valida mesmo que a tela seja burlada.
 
 ## Como funciona
 
-![Desenho da arquitetura local](docs/arquitetura/arquitetura-local.png)
+![Desenho da arquitetura local](docs/architecture/arquitetura-local.png)
 
 A tela é servida pelo próprio OrderGenerator. Quando você envia uma ordem, a tela chama
 `POST /api/orders`. O OrderGenerator só confere se o pedido tem o formato de uma ordem e manda uma
@@ -183,7 +183,7 @@ regra do limite no PostgreSQL e responde com um `ExecutionReport` (35=8): `New` 
 quando não aceita. O OrderGenerator devolve essa resposta para a tela.
 
 O painel de exposição chama `GET /api/exposures` no OrderGenerator, que só repassa a pergunta para o
-OrderAccumulator. A fonte do desenho fica em `docs/arquitetura/arquitetura-local.drawio` e o contrato
+OrderAccumulator. A fonte do desenho fica em `docs/architecture/arquitetura-local.drawio` e o contrato
 entre as partes (rotas, mensagens FIX, portas) em `docs/contracts/contracts.md`.
 
 ### Termos do negócio no código
@@ -261,7 +261,7 @@ e o código do PostgreSQL na Infrastructure.
 A aplicação está publicada em https://h2asgc2sce.execute-api.us-east-1.amazonaws.com. É a mesma tela
 da versão local, e as ordens vão para um PostgreSQL de verdade na AWS.
 
-![Desenho da arquitetura na AWS](docs/arquitetura/arquitetura-aws.png)
+![Desenho da arquitetura na AWS](docs/architecture/arquitetura-aws.png)
 
 O navegador fala só com o API Gateway. Ele passa o pedido por um VPC Link para o OrderGenerator, que
 roda no ECS Fargate. O OrderGenerator acha o OrderAccumulator pelo Cloud Map e conversa com ele por FIX,
@@ -276,7 +276,7 @@ repositório. Nada é criado pelo console. Quando um PR que muda código é mesc
 workflow `.github/workflows/2-develop.yml` roda o CI no mesmo commit e, com ele verde, constrói só a
 imagem do serviço que mudou, manda para o ECR e roda o `terraform apply`. Merge só de texto (`*.md` e
 `docs/`) não publica nada. O GitHub entra na AWS por OIDC, com uma credencial temporária, sem chave
-guardada no repositório. A fonte do desenho fica em `docs/arquitetura/arquitetura-aws.drawio`.
+guardada no repositório. A fonte do desenho fica em `docs/architecture/arquitetura-aws.drawio`.
 
 ## Observabilidade
 
@@ -286,17 +286,17 @@ São três painéis no Datadog, todos públicos e sem login. Os prints são da n
 **[Four Golden Signals](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-a9e17306767d8f22537a7acb53350942)**:
 latência, tráfego, erros e saturação dos dois serviços.
 
-![Painel Four Golden Signals](docs/observabilidade/painel-four-golden-signals.png)
+![Painel Four Golden Signals](docs/observability/painel-four-golden-signals.png)
 
 **[Ordens e exposição](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-cb393cd3b3760676912c981fa71f3372)**:
 taxa de aceite, ordens aceitas e rejeitadas e a exposição de cada ativo perto do limite de 100 milhões.
 
-![Painel de ordens e exposição](docs/observabilidade/painel-ordens-e-exposicao.png)
+![Painel de ordens e exposição](docs/observability/painel-ordens-e-exposicao.png)
 
 **[Jornada da ordem](https://p.datadoghq.com/sb/63578a59-bd12-11f1-a546-261a98ac5284-b5d1b14c994996116b3fe646ff8d78d5)**:
 o rastro de cada ordem, do `POST /api/orders` até o Postgres, passando pelo FIX, com o tempo de cada etapa.
 
-![Painel da jornada da ordem](docs/observabilidade/painel-jornada-da-ordem.png)
+![Painel da jornada da ordem](docs/observability/painel-jornada-da-ordem.png)
 
 Na AWS, cada task roda um agente do Datadog ao lado do app. Os dois apps mandam rastros para o agente
 em `localhost:8126`, o OrderAccumulator manda também métricas em `localhost:8125`, e o agente envia

@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Base.OrderAccumulator.Commons;
+using Base.OrderAccumulator.Commons.Logging;
 using Base.OrderAccumulator.Infrastructure.Fix;
 
 namespace Base.OrderAccumulator.Tests;

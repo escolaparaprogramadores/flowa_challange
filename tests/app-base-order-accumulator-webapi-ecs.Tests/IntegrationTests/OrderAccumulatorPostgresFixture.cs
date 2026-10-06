@@ -1,8 +1,11 @@
-using Base.OrderAccumulator.Application.Exposures.GetExposures;
-using Base.OrderAccumulator.Application.Orders.DecideIncomingOrder;
-using Base.OrderAccumulator.Domain.Exposures;
-using Base.OrderAccumulator.Domain.Orders;
-using Base.OrderAccumulator.Infrastructure.Persistence;
+using Base.OrderAccumulator.Application.Exposures.Interfaces;
+using Base.OrderAccumulator.Application.Orders.Responses;
+using Base.OrderAccumulator.Commons.Database;
+using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
+using Base.OrderAccumulator.Domain.Orders.Enums;
+using Base.OrderAccumulator.Domain.Orders.ValueObjects;
+using Base.OrderAccumulator.Infrastructure.DependencyInjection;
+using Base.OrderAccumulator.Infrastructure.Exposures.Repositories;
 using Dapper;
 using Npgsql;
 using Testcontainers.PostgreSql;
@@ -23,6 +26,7 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
 
     public string OrderDatabaseConnectionString { get; private set; } = null!;
     public NpgsqlDataSource OrderDatabaseDataSource { get; private set; } = null!;
+    public PostgresConnectionSource OrderDatabaseConnectionSource { get; private set; } = null!;
     public DecideIncomingOrderTestRunner OrderDecisionRunner { get; private set; } = null!;
     public ISymbolExposureReadRepository ExposureReader { get; private set; } = null!;
 
@@ -36,15 +40,17 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
             CommandTimeout = OrderDatabaseTestCommandTimeoutSeconds
         }.ConnectionString;
         OrderDatabaseDataSource = NpgsqlDataSource.Create(OrderDatabaseConnectionString);
-        await OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();
+        OrderDatabaseConnectionSource = new PostgresConnectionSource(OrderDatabaseConnectionString);
+        await OrderDatabaseConnectionSource.ApplyOrderAccumulatorSchemaAsync();
 
-        OrderDecisionRunner = new DecideIncomingOrderTestRunner(OrderDatabaseDataSource);
-        ExposureReader = new SymbolExposureReadRepository(OrderDatabaseDataSource);
+        OrderDecisionRunner = new DecideIncomingOrderTestRunner(OrderDatabaseConnectionSource);
+        ExposureReader = new SymbolExposureReaderWithOwnConnection(OrderDatabaseConnectionSource);
     }
 
     public async Task DisposeAsync()
     {
         await OrderDatabaseDataSource.DisposeAsync();
+        await OrderDatabaseConnectionSource.DisposeAsync();
         await orderAccumulatorPostgresContainer.DisposeAsync();
     }
 
@@ -54,7 +60,7 @@ public sealed class OrderAccumulatorPostgresFixture : IAsyncLifetime
         await using (var orderDatabaseConnection = await OrderDatabaseDataSource.OpenConnectionAsync())
             await orderDatabaseConnection.ExecuteAsync("TRUNCATE orders, exposures");
 
-        await OrderDatabaseDataSource.ApplyOrderAccumulatorSchemaAsync();
+        await OrderDatabaseConnectionSource.ApplyOrderAccumulatorSchemaAsync();
     }
 
     public async Task<decimal> ReadExposureOfSymbolAsync(string symbol) =>
@@ -99,8 +105,19 @@ public static class TestOrders
     public static IncomingOrder NewSellOrder(string symbol, decimal quantity, decimal price) =>
         NewIncomingOrder(symbol, OrderSideCodes.SellOrderSideFixCode, quantity, price);
 
-    public static decimal ExposureDeltaOf(DecideIncomingOrderOutput orderDecision) =>
+    public static decimal ExposureDeltaOf(DecideIncomingOrderResponse orderDecision) =>
         ExposureLimitPolicy.CalculateOrderExposureDelta(
             orderDecision.Side == OrderSideCodes.BuyOrderSideFixCode ? OrderSide.Buy : OrderSide.Sell,
             (int)orderDecision.Quantity, orderDecision.Price);
+}
+
+// Reads the exposure on a connection of its own per call, as the read repository did before it moved to the
+// connection of the operation scope: a test can read while other orders use their own connections.
+public sealed class SymbolExposureReaderWithOwnConnection(IDatabaseConnectionSource orderDatabaseConnectionSource) : ISymbolExposureReadRepository
+{
+    public async Task<IReadOnlyList<SymbolExposure>> GetSymbolExposuresAsync(CancellationToken cancellationToken = default)
+    {
+        await using var exposureReadUnitOfWork = new DatabaseUnitOfWork(orderDatabaseConnectionSource);
+        return await new SymbolExposureReadRepository(new DapperDatabase(exposureReadUnitOfWork)).GetSymbolExposuresAsync(cancellationToken);
+    }
 }

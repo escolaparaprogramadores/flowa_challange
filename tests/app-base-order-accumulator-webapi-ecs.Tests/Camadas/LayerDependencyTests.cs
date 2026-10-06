@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
-using Base.OrderAccumulator.Domain.Orders;
+using Base.OrderAccumulator.Domain.Orders.Entities;
 using NetArchTest.Rules;
 
 namespace Base.OrderAccumulator.Tests;
@@ -13,20 +13,31 @@ public sealed class LayerDependencyTests
     private const string RootNamespace = "Base.OrderAccumulator";
     private const string ProjectFolderName = "app-base-order-accumulator-webapi-ecs";
     private const string BaseClassLibraryNamespace = "System";
+    private static readonly string[] CommonsTechnicalLibraryNamespaces = ["Microsoft.Extensions", "Dapper", "Npgsql", "StatsdClient"];
 
     private static readonly Assembly OrderAccumulatorAssembly = typeof(Order).Assembly;
     private static readonly string[] LayerNames = ["Entrypoint", "Application", "Domain", "Infrastructure", "Commons"];
 
     [Fact]
-    public void Domain_depends_only_on_the_base_class_library_and_itself()
+    public void Domain_depends_only_on_the_base_class_library_the_commons_shared_kernel_and_itself()
     {
-        AssertLayerOnlyDependsOn("Domain", BaseClassLibraryNamespace, LayerNamespace("Domain"));
+        AssertLayerOnlyDependsOn(
+            "Domain", BaseClassLibraryNamespace, LayerNamespace("Commons.Entities"), LayerNamespace("Commons.Exceptions"), LayerNamespace("Commons.ValueObjects"),
+            LayerNamespace("Domain"));
     }
 
     [Fact]
-    public void Commons_depends_only_on_the_base_class_library_and_itself()
+    public void Commons_and_each_commons_folder_depend_only_on_the_base_class_library_their_technical_library_and_themselves()
     {
-        AssertLayerOnlyDependsOn("Commons", BaseClassLibraryNamespace, LayerNamespace("Commons"));
+        AssertLayerOnlyDependsOn("Commons", [BaseClassLibraryNamespace, .. CommonsTechnicalLibraryNamespaces, LayerNamespace("Commons")]);
+        AssertLayerOnlyDependsOn("Commons.Entities", BaseClassLibraryNamespace, LayerNamespace("Commons.Entities"));
+        AssertLayerOnlyDependsOn("Commons.Responses", BaseClassLibraryNamespace, LayerNamespace("Commons.Responses"));
+        AssertLayerOnlyDependsOn("Commons.Database", BaseClassLibraryNamespace, "Dapper", "Npgsql", LayerNamespace("Commons.Database"));
+        AssertLayerOnlyDependsOn("Commons.Observability", BaseClassLibraryNamespace, "StatsdClient", LayerNamespace("Commons.Observability"));
+        AssertLayerOnlyDependsOn("Commons.Logging", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Logging"));
+        AssertLayerOnlyDependsOn(
+            "Commons.DependencyInjection", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Database"), LayerNamespace("Commons.Logging"),
+            LayerNamespace("Commons.DependencyInjection"));
     }
 
     [Fact]
@@ -98,8 +109,8 @@ public sealed class LayerDependencyTests
         Assert.True(entrypointDatadogResult.IsSuccessful, DescribeFailingTypes(entrypointDatadogResult));
     }
 
-    // Proves the allow list really refuses: the Domain list applied to the Infrastructure, which uses
-    // Npgsql and Dapper, has to fail and name the class.
+    // Proves the allow list really refuses: the Domain list applied to the Infrastructure, whose FIX session log
+    // uses QuickFIX/n, has to fail and name the class.
     [Fact]
     public void Domain_allow_list_rejects_the_infrastructure_that_uses_an_external_library()
     {
@@ -107,21 +118,21 @@ public sealed class LayerDependencyTests
             .OnlyHaveDependenciesOn(BaseClassLibraryNamespace, LayerNamespace("Domain")).GetResult();
 
         Assert.False(infrastructureCheckedAgainstTheDomainList.IsSuccessful);
-        Assert.Contains("Base.OrderAccumulator.Infrastructure.Persistence.OrderRepository", infrastructureCheckedAgainstTheDomainList.FailingTypeNames ?? []);
+        Assert.Contains("Base.OrderAccumulator.Infrastructure.Fix.FixSessionLog", infrastructureCheckedAgainstTheDomainList.FailingTypeNames ?? []);
     }
 
     // CA-7: the application logs only through IApplicationLogger<T> (Commons); the logging SDK of the framework
-    // is used only by the Infrastructure implementation, never by the other layers.
+    // is used only by its implementation in Commons.Logging, never by the other layers.
     [Fact]
-    public void Only_the_infrastructure_uses_the_logging_sdk()
+    public void Only_the_commons_logging_uses_the_logging_sdk()
     {
         var typesUsingTheLoggingSdk = Types.InAssembly(OrderAccumulatorAssembly).That().HaveDependencyOn("Microsoft.Extensions.Logging").GetTypes()
             // The generated Program (and its closures) is the composition root: it only calls AddApplicationLogging.
             .Where(declaredType => declaredType.Namespace is not null)
             .ToList();
 
-        Assert.Contains(typesUsingTheLoggingSdk, declaredType => declaredType.Namespace == LayerNamespace("Infrastructure.Logging"));
-        Assert.All(typesUsingTheLoggingSdk, declaredType => Assert.StartsWith(LayerNamespace("Infrastructure") + ".", declaredType.Namespace));
+        Assert.Contains(typesUsingTheLoggingSdk, declaredType => declaredType.Namespace == LayerNamespace("Commons.Logging"));
+        Assert.All(typesUsingTheLoggingSdk, declaredType => Assert.Equal(LayerNamespace("Commons.Logging"), declaredType.Namespace));
     }
 
     private static void AssertLayerOnlyDependsOn(string layerName, params string[] allowedNamespaces)
