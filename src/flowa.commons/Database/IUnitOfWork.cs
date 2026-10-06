@@ -1,8 +1,10 @@
+using System.Data;
+
 namespace Flowa.Commons.Database;
 
 public interface IUnitOfWork
 {
-    Task BeginTransactionAsync(CancellationToken cancellationToken = default);
+    Task BeginTransactionAsync(IsolationLevel transactionIsolationLevel, CancellationToken cancellationToken = default);
 
     Task CommitTransactionAsync(CancellationToken cancellationToken = default);
 

@@ -1,5 +1,4 @@
 using System.Runtime.ExceptionServices;
-using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
@@ -10,7 +9,6 @@ using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.DomainServices;
 using Flowa.OrderAccumulator.Domain.Orders.Interfaces;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
-using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using Flowa.OrderAccumulator.Infrastructure.Exposures.Repositories;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,14 +19,13 @@ namespace Flowa.OrderAccumulator.Tests;
 // order, against the test database. The order repository can be wrapped to make it fail on purpose.
 public sealed class DecideIncomingOrderTestRunner(
     IDatabaseConnectionSource orderDatabaseConnectionSource,
-    ISymbolExposureMemoryPort symbolExposureMemory,
     IOrderMetricsPort orderMetrics,
     Func<IOrderRepository, IOrderRepository>? wrapOrderRepository = null,
     IOperationMonitoring? operationMonitoring = null,
     IApplicationLogger<DecideIncomingOrderUseCase>? orderDecisionLogger = null)
 {
     public DecideIncomingOrderTestRunner(IDatabaseConnectionSource orderDatabaseConnectionSource)
-        : this(orderDatabaseConnectionSource, new InMemorySymbolExposureAdapter(), new UncountedOrderMetrics())
+        : this(orderDatabaseConnectionSource, new UncountedOrderMetrics())
     {
     }
 
@@ -47,7 +44,6 @@ public sealed class DecideIncomingOrderTestRunner(
             orderDatabaseUnitOfWork,
             orderRepository,
             new OrderDecisionDomainService(new ExposureRepository(orderDatabase)),
-            symbolExposureMemory,
             orderMetrics,
             operationMonitoring ?? TestObservability.CreateOperationMonitoring(),
             orderDecisionLogger ?? TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());

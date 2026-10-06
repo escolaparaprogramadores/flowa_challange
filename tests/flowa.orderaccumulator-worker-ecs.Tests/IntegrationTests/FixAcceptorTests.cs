@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Net.NetworkInformation;
@@ -717,8 +718,8 @@ public sealed class FixAcceptorTests(OrderAccumulatorPostgresFixture orderAccumu
 
         private sealed class UnitOfWorkAnsweringTheCommitLate(CommitConfirmedAfterTheDeadline lateCommitConfirmation, DatabaseUnitOfWork databaseUnitOfWork) : IUnitOfWork
         {
-            public Task BeginTransactionAsync(CancellationToken cancellationToken = default) =>
-                databaseUnitOfWork.BeginTransactionAsync(cancellationToken);
+            public Task BeginTransactionAsync(IsolationLevel transactionIsolationLevel, CancellationToken cancellationToken = default) =>
+                databaseUnitOfWork.BeginTransactionAsync(transactionIsolationLevel, cancellationToken);
 
             public async Task CommitTransactionAsync(CancellationToken cancellationToken = default)
             {
