@@ -310,7 +310,7 @@ número de séries ficar pequeno.
 
 A esteira só põe o agente nas tasks quando o cofre do Datadog no Secrets Manager já tem a chave
 (`infra/datadog-agente.tf`, variável `datadog_ligado`). O painel de ordens e exposição nasceu no
-Terraform de `observability/datadog/`, aplicado pelo workflow
+Terraform de `observabilidade/datadog/`, aplicado pelo workflow
 `.github/workflows/2-develop-painel-datadog.yml`, com quatro gráficos. Depois ele foi ampliado direto no
 Datadog, e essa versão, a do print, ainda não voltou para o código: um novo apply desse workflow volta o
 painel aos quatro gráficos. Os outros dois painéis foram montados direto no Datadog e não estão no
