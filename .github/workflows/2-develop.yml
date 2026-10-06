@@ -65,10 +65,10 @@ jobs:
         id: infra
         if: steps.develop_tip.outputs.publish == 'true'
         run: |
-          if [ -d infra ]; then
+          if [ -d infra-aws ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "nothing to apply: infra/ does not exist"
+            echo "nothing to apply: infra-aws/ does not exist"
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -138,8 +138,8 @@ jobs:
             echo "${image_in_use##*:}"
           }
 
-          for service_container_and_folder in flowa-challenge-order-generator:generator:app-base-order-generator-webapi-ecs \
-                                           flowa-challenge-order-accumulator:accumulator:app-base-order-accumulator-webapi-ecs; do
+          for service_container_and_folder in flowa-challenge-order-generator:generator:flowa.ordergenerator-webapi-ecs \
+                                           flowa-challenge-order-accumulator:accumulator:flowa.orderaccumulator-worker-ecs; do
             IFS=: read -r ecs_service_name container_name service_folder <<< "$service_container_and_folder"
             tag_in_use=$(service_image_tag_in_use "$ecs_service_name" "$container_name")
             mapfile -t image_inputs < <(service_image_inputs "src/$service_folder/Dockerfile")
@@ -182,7 +182,7 @@ jobs:
 
       - name: terraform init and ECR repositories
         if: steps.infra.outputs.exists == 'true'
-        working-directory: infra
+        working-directory: infra-aws
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
         run: |
@@ -198,7 +198,7 @@ jobs:
           mapfile -t ecr_repository_targets < <(grep -hoE '^resource "aws_ecr_repository" "[A-Za-z0-9_-]+"' ./*.tf |
             awk -F'"' '{ print "-target=aws_ecr_repository." $4 }')
           if [ "${#ecr_repository_targets[@]}" -eq 0 ]; then
-            echo "no resource \"aws_ecr_repository\" in infra/*.tf" >&2
+            echo "no resource \"aws_ecr_repository\" in infra-aws/*.tf" >&2
             exit 1
           fi
           terraform_quieto apply -auto-approve "${ecr_repository_targets[@]}"
@@ -213,8 +213,8 @@ jobs:
           BUILD_ACCUMULATOR_IMAGE: ${{ steps.tags.outputs.accumulator_build }}
         run: |
           for service_repository_and_decision in \
-              "app-base-order-generator-webapi-ecs:flowa-challenge-order-generator:$BUILD_GENERATOR_IMAGE" \
-              "app-base-order-accumulator-webapi-ecs:flowa-challenge-order-accumulator:$BUILD_ACCUMULATOR_IMAGE"; do
+              "flowa.ordergenerator-webapi-ecs:flowa-challenge-order-generator:$BUILD_GENERATOR_IMAGE" \
+              "flowa.orderaccumulator-worker-ecs:flowa-challenge-order-accumulator:$BUILD_ACCUMULATOR_IMAGE"; do
             IFS=: read -r service_folder ecr_repository build_service_image <<< "$service_repository_and_decision"
             if [ "$build_service_image" != "true" ]; then
               echo "$service_folder: no new image; the running one stays"
@@ -263,7 +263,7 @@ jobs:
 
       - name: terraform plan and apply
         if: steps.infra.outputs.exists == 'true'
-        working-directory: infra
+        working-directory: infra-aws
         env:
           GENERATOR_IMAGE_TAG: ${{ steps.tags.outputs.generator_tag }}
           ACCUMULATOR_IMAGE_TAG: ${{ steps.tags.outputs.accumulator_tag }}
@@ -280,7 +280,7 @@ jobs:
           # Plan guard: only the two task definitions may be destroyed or replaced (every image deploy replaces
           # them); only they and the log collector's task roles may be created, and those roles may only be
           # removed when Datadog is switched off. Anything else stops the run here, before apply. The plan JSON
-          # stays on the runner. New resources in infra/ must be added to these lists.
+          # stays on the runner. New resources in infra-aws/ must be added to these lists.
           terraform show -json tfplan > "$RUNNER_TEMP/deploy-plan.json"
           jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
             | "plan: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/deploy-plan.json"

@@ -10,7 +10,7 @@ import '@fontsource/manrope/latin-800.css';
 import './styles/base-theme.css';
 import { OrderTicketPage } from './pages/OrderTicketPage';
 
-// The "raiz" id is read by tests/Base.IntegrationTests (ComposeTests), outside the screen code.
+// The "raiz" id is read by tests/IntegrationTests (ComposeTests), outside the screen code.
 createRoot(document.getElementById('raiz')!).render(
   <StrictMode>
     <OrderTicketPage />

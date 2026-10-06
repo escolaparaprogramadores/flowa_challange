@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: '../src/app-base-order-generator-webapi-ecs/wwwroot',
+    outDir: '../src/flowa.ordergenerator-webapi-ecs/wwwroot',
     emptyOutDir: true,
   },
   server: {
