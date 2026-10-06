@@ -12,7 +12,7 @@ public sealed class PainelDatadogStaticTests
     private static readonly string RepoRoot = FindRepoRoot();
     private static readonly string PainelWorkflow = ReadText(Path.Combine(RepoRoot, ".github", "workflows", "2-develop-painel-datadog.yml"));
     private static readonly string DeployWorkflow = ReadText(Path.Combine(RepoRoot, ".github", "workflows", "2-develop.yml"));
-    private static readonly string PainelDirectory = Path.Combine(RepoRoot, "observability", "datadog");
+    private static readonly string PainelDirectory = Path.Combine(RepoRoot, "observabilidade", "datadog");
     private static readonly string MainTf = ReadText(Path.Combine(PainelDirectory, "main.tf"));
     private static readonly string PainelTf = ReadText(Path.Combine(PainelDirectory, "painel.tf"));
     private static readonly string LockFile = ReadText(Path.Combine(PainelDirectory, ".terraform.lock.hcl"));
@@ -26,7 +26,7 @@ public sealed class PainelDatadogStaticTests
         Assert.Equal(["push", "workflow_dispatch"], triggerKeys);
         Assert.Contains("    branches: [develop]\n", onBlock);
         var pathFilters = Regex.Matches(onBlock, @"^      - ""(?<caminho>[^""]+)""", RegexOptions.Multiline).Select(caminho => caminho.Groups["caminho"].Value);
-        Assert.Equal(["observability/datadog/**", ".github/workflows/2-develop-painel-datadog.yml"], pathFilters);
+        Assert.Equal(["observabilidade/datadog/**", ".github/workflows/2-develop-painel-datadog.yml"], pathFilters);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class PainelDatadogStaticTests
     [Fact]
     public void Workflow_keeps_the_painel_state_in_its_own_key_with_lock()
     {
-        Assert.Contains("working-directory: observability/datadog", PainelWorkflow);
+        Assert.Contains("working-directory: observabilidade/datadog", PainelWorkflow);
         Assert.Contains(@"-backend-config=""bucket=$TF_STATE_BUCKET""", PainelWorkflow);
         Assert.Contains(@"-backend-config=""key=flowa/datadog-dev.tfstate""", PainelWorkflow);
         Assert.Contains(@"-backend-config=""use_lockfile=true""", PainelWorkflow);
