@@ -2,6 +2,8 @@ using System.Net;
 using System.Text.Json;
 using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Responses;
+using Base.OrderAccumulator.Domain.Orders.Entities;
+using Base.OrderAccumulator.Domain.Orders.Interfaces;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Base.OrderAccumulator.Tests;
@@ -101,6 +103,30 @@ public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture order
         Assert.StartsWith($"System.InvalidOperationException: {DatabaseFailureDetail}", unexpectedErrorLine.Exception);
     }
 
+    [Fact]
+    public async Task Failed_delete_all_answers_500_problem_with_one_error_and_no_internal_detail()
+    {
+        using var stdoutJsonLogCapture = new StdoutJsonLogCapture();
+        HttpResponseMessage failedDeleteResponse;
+        JsonElement failedDeleteProblem;
+        await using (var orderAccumulatorTestApp = new OrderAccumulatorFixTestHost(orderAccumulatorDatabase.OrderDatabaseConnectionString,
+            replaceOrderAccumulatorServices: testServices => testServices.AddScoped<IOrderRepository, OrderRepositoryFailingToDeleteAll>()).StartWithFixAcceptor())
+        {
+            failedDeleteResponse = await orderAccumulatorTestApp.CreateClient().DeleteAsync("/api/orders");
+            failedDeleteProblem = await HttpContractAssertions.ReadProblemDetailsAsync(failedDeleteResponse, HttpStatusCode.InternalServerError);
+        }
+
+        Assert.Equal("urn:base-investimentos:problem:internal-error", failedDeleteProblem.GetProperty("type").GetString());
+        Assert.Equal("Erro interno", failedDeleteProblem.GetProperty("title").GetString());
+        Assert.Equal("Aconteceu um erro inesperado. Informe o traceId ao suporte.", failedDeleteProblem.GetProperty("detail").GetString());
+        Assert.Equal("InternalError", failedDeleteProblem.GetProperty("statusResultado").GetString());
+        Assert.Empty(failedDeleteProblem.GetProperty("errors").EnumerateArray());
+        Assert.DoesNotContain(DatabaseFailureDetail, await failedDeleteResponse.Content.ReadAsStringAsync());
+        var failedDeleteLine = AssertSingleHttpErrorLine(stdoutJsonLogCapture, "Error", "Unexpected application error.", failedDeleteProblem);
+        Assert.Equal(("DELETE", "/api/orders"), (failedDeleteLine.ReadLogField("Method"), failedDeleteLine.ReadLogField("Route")));
+        Assert.StartsWith($"System.InvalidOperationException: {DatabaseFailureDetail}", failedDeleteLine.Exception);
+    }
+
     private static Task<HttpResponseMessage> SendGetAcceptingAsync(OrderAccumulatorFixTestHost orderAccumulatorTestApp, string apiPath, string acceptedMediaType)
     {
         var apiRequest = new HttpRequestMessage(HttpMethod.Get, apiPath);
@@ -123,5 +149,15 @@ public sealed class HttpErrorContractTests(OrderAccumulatorPostgresFixture order
     {
         public Task<StoredOrderPageResponse> ReadStoredOrderPageAsync(int pageNumber, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(DatabaseFailureDetail);
+    }
+
+    private sealed class OrderRepositoryFailingToDeleteAll : IOrderRepository
+    {
+        public Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default) => Task.FromResult<Order?>(null);
+
+        public Task<bool> TryAddOrderAsync(Order answeredOrder, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+        public Task DeleteAllOrdersAsync(CancellationToken cancellationToken = default) =>
+            Task.FromException(new InvalidOperationException(DatabaseFailureDetail));
     }
 }

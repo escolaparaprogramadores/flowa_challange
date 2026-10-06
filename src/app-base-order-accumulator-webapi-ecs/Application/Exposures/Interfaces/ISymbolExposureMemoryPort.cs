@@ -5,7 +5,7 @@ namespace Base.OrderAccumulator.Application.Exposures.Interfaces;
 
 public interface ISymbolExposureMemoryPort
 {
-    Task<DecideIncomingOrderResponse> DecideOrderOutsideDeleteAllAsync(Func<Task<DecideIncomingOrderResponse>> decideIncomingOrder, CancellationToken cancellationToken);
+    Task<TOrderDecision> DecideOrderOutsideDeleteAllAsync<TOrderDecision>(Func<Task<TOrderDecision>> decideIncomingOrder, CancellationToken cancellationToken);
 
     Task DeleteAllOrdersAndZeroExposuresAsync(Func<Task> deleteAllStoredOrdersAndZeroExposures, CancellationToken cancellationToken);
 

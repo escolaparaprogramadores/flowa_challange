@@ -5,12 +5,21 @@ using QuickFix.Logger;
 
 namespace Base.OrderAccumulator.Infrastructure.Fix;
 
-public sealed class FixSessionLog(IApplicationLogger<FixSessionLog> fixSessionLogger, string? fixSessionId) : ILog
+public sealed class FixSessionLog : ILog
 {
     private const char FixFieldSeparator = '\u0001';
     private const string HeartbeatMessageTypeField = "\u000135=0\u0001";
 
     private static readonly Regex ClOrdIdTraceIdPattern = new("\u000111=(?<clOrdId>[0-9a-f]{32})\u0001", RegexOptions.CultureInvariant);
+
+    private readonly IApplicationLogger<FixSessionLog> fixSessionLogger;
+    private readonly string? fixSessionId;
+
+    public FixSessionLog(IApplicationLogger<FixSessionLog> fixSessionLogger, string? fixSessionId)
+    {
+        this.fixSessionLogger = fixSessionLogger ?? throw new ArgumentNullException(nameof(fixSessionLogger));
+        this.fixSessionId = fixSessionId;
+    }
 
     public void OnIncoming(string incomingFixMessage) => LogFixMessage("FIX message received.", incomingFixMessage);
 

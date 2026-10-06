@@ -1,6 +1,8 @@
 using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Application.Orders.UseCases;
 using Base.OrderAccumulator.Commons.Logging;
+using Base.OrderAccumulator.Commons.Responses;
+using Base.OrderAccumulator.Domain.Orders.Enums;
 using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using QuickFix.FIX44;
@@ -10,13 +12,19 @@ using Message = QuickFix.Message;
 
 namespace Base.OrderAccumulator.Entrypoint.Fix;
 
-public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationScopeFactory, IApplicationLogger<NewOrderSingleConsumer> orderFixLogger)
-    : MessageCracker, IApplication
+public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
 {
-    private const string InvalidOrderFieldsErrorCode = "invalid_order_fields";
-    private const string ExposureLimitExceededErrorCode = "exposure_limit_exceeded";
     private const string ExecutionReportNotSentErrorCode = "execution_report_not_sent";
     private const string UnexpectedErrorCode = "error";
+
+    private readonly IServiceScopeFactory orderOperationScopeFactory;
+    private readonly IApplicationLogger<NewOrderSingleConsumer> orderFixLogger;
+
+    public NewOrderSingleConsumer(IServiceScopeFactory orderOperationScopeFactory, IApplicationLogger<NewOrderSingleConsumer> orderFixLogger)
+    {
+        this.orderOperationScopeFactory = orderOperationScopeFactory ?? throw new ArgumentNullException(nameof(orderOperationScopeFactory));
+        this.orderFixLogger = orderFixLogger ?? throw new ArgumentNullException(nameof(orderFixLogger));
+    }
 
     public void FromApp(Message fixMessage, SessionID fixSessionId) => Crack(fixMessage, fixSessionId);
 
@@ -27,37 +35,51 @@ public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationSc
             : null;
         using var orderReceiving = FixOrderTraceProvider.StartOrderReceiving(receivedTraceParent);
 
-        var incomingOrder = new IncomingOrder(
-            newOrderSingle.ClOrdID.Value, newOrderSingle.Symbol.Value, newOrderSingle.Side.Value, newOrderSingle.OrderQty.Value, newOrderSingle.Price.Value);
+        var receivedClOrdId = newOrderSingle.ClOrdID.Value;
+        var receivedOrderSymbol = newOrderSingle.Symbol.Value;
+        var receivedOrderSide = newOrderSingle.Side.Value;
+        var receivedOrderQuantity = newOrderSingle.OrderQty.Value;
+        var receivedOrderPrice = newOrderSingle.Price.Value;
 
-        DecideIncomingOrderResponse orderDecision;
+        DataMessage<DecideIncomingOrderResponse> orderDecisionMessage;
         try
         {
-            orderDecision = DecideIncomingOrderInOwnScopeAsync(incomingOrder).GetAwaiter().GetResult();
+            var incomingOrder = new IncomingOrder(receivedClOrdId, receivedOrderSymbol, receivedOrderSide, receivedOrderQuantity, receivedOrderPrice);
+            orderDecisionMessage = DecideIncomingOrderInOwnScopeAsync(incomingOrder).GetAwaiter().GetResult();
         }
         catch (Exception orderDecisionException)
         {
-            orderFixLogger.LogError(orderDecisionException, "Order decision failed; no ExecutionReport sent.", new { ErrorCode = UnexpectedErrorCode });
+            LogOrderDecisionFailure(orderDecisionException);
             return;
         }
 
+        if (orderDecisionMessage.UnexpectedFailure is { } orderDecisionFailure)
+        {
+            LogOrderDecisionFailure(orderDecisionFailure);
+            return;
+        }
+
+        var orderDecision = orderDecisionMessage.Data!;
         LogOrderDecision(orderDecision);
 
         if (!Session.SendToTarget(BuildExecutionReport(orderDecision), fixSessionId))
             orderFixLogger.LogWarning("ExecutionReport not sent: the FIX session is not logged on.", new { ErrorCode = ExecutionReportNotSentErrorCode });
     }
 
+    private void LogOrderDecisionFailure(Exception orderDecisionFailure) =>
+        orderFixLogger.LogError(orderDecisionFailure, "Order decision failed; no ExecutionReport sent.", new { ErrorCode = UnexpectedErrorCode });
+
     private void LogOrderDecision(DecideIncomingOrderResponse orderDecision)
     {
         if (orderDecision.IsRepeat)
             orderFixLogger.LogInformation("Repeated ClOrdID: sending the stored answer back.");
-        else if (orderDecision is { Accepted: false, RejectedForInvalidFields: true })
-            orderFixLogger.LogWarning("Order rejected: invalid fields.", new { ErrorCode = InvalidOrderFieldsErrorCode });
-        else if (!orderDecision.Accepted)
-            orderFixLogger.LogWarning("Order rejected: exposure limit exceeded.", new { ErrorCode = ExposureLimitExceededErrorCode });
+        else if (orderDecision.DecisionOutcome == OrderDecisionOutcome.RejectedForInvalidFields)
+            orderFixLogger.LogWarning("Order rejected: invalid fields.", new { ErrorCode = OrderRejectionErrorCodes.InvalidOrderFields });
+        else if (orderDecision.DecisionOutcome == OrderDecisionOutcome.RejectedOverExposureLimit)
+            orderFixLogger.LogWarning("Order rejected: exposure limit exceeded.", new { ErrorCode = OrderRejectionErrorCodes.ExposureLimitExceeded });
     }
 
-    private async Task<DecideIncomingOrderResponse> DecideIncomingOrderInOwnScopeAsync(IncomingOrder incomingOrder)
+    private async Task<DataMessage<DecideIncomingOrderResponse>> DecideIncomingOrderInOwnScopeAsync(IncomingOrder incomingOrder)
     {
         await using var orderOperationScope = orderOperationScopeFactory.CreateAsyncScope();
         return await orderOperationScope.ServiceProvider.GetRequiredService<DecideIncomingOrderUseCase>().DecideIncomingOrderAsync(incomingOrder);
@@ -65,6 +87,8 @@ public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationSc
 
     public static ExecutionReport BuildExecutionReport(DecideIncomingOrderResponse orderDecision)
     {
+        ArgumentNullException.ThrowIfNull(orderDecision);
+
         var executionReport = new ExecutionReport(
             new OrderID(orderDecision.OrderId),
             new ExecID(orderDecision.ExecId),
@@ -72,15 +96,15 @@ public sealed class NewOrderSingleConsumer(IServiceScopeFactory orderOperationSc
             new OrdStatus(orderDecision.Accepted ? OrdStatus.NEW : OrdStatus.REJECTED),
             new Symbol(orderDecision.Symbol!),
             new Side(orderDecision.Side),
-            new LeavesQty(orderDecision.Accepted ? orderDecision.Quantity : 0m),
+            new LeavesQty(orderDecision.LeavesQuantity),
             new CumQty(0m),
             new AvgPx(0m))
         {
             ClOrdID = new ClOrdID(orderDecision.ClOrdId)
         };
 
-        if (!orderDecision.Accepted)
-            executionReport.Text = new Text(orderDecision.RejectReason!);
+        if (orderDecision.RejectReason is { } orderRejectReason)
+            executionReport.Text = new Text(orderRejectReason);
 
         return executionReport;
     }

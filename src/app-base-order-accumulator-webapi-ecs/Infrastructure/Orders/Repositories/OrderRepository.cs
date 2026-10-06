@@ -4,7 +4,7 @@ using Base.OrderAccumulator.Domain.Orders.Interfaces;
 
 namespace Base.OrderAccumulator.Infrastructure.Orders.Repositories;
 
-public sealed class OrderRepository(IDatabase orderDatabase) : IOrderRepository
+public sealed class OrderRepository : IOrderRepository
 {
     private const string InsertOrderSql = """
         INSERT INTO orders (cl_ord_id, order_id, exec_id, symbol, side, quantity, price, accepted, reject_reason)
@@ -20,6 +20,13 @@ public sealed class OrderRepository(IDatabase orderDatabase) : IOrderRepository
         """;
 
     private const string DeleteAllStoredOrdersSql = "DELETE FROM orders";
+
+    private readonly IDatabase orderDatabase;
+
+    public OrderRepository(IDatabase orderDatabase)
+    {
+        this.orderDatabase = orderDatabase ?? throw new ArgumentNullException(nameof(orderDatabase));
+    }
 
     public async Task<Order?> FindOrderByClOrdIdAsync(string clOrdId, CancellationToken cancellationToken = default)
     {

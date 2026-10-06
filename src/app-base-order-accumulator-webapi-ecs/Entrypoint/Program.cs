@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
-using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Exposures.UseCases;
 using Base.OrderAccumulator.Application.Orders.UseCases;
 using Base.OrderAccumulator.Commons.Database;
@@ -13,7 +12,6 @@ using Base.OrderAccumulator.Entrypoint.Exposures.Endpoints;
 using Base.OrderAccumulator.Entrypoint.Fix;
 using Base.OrderAccumulator.Entrypoint.Orders.Endpoints;
 using Base.OrderAccumulator.Infrastructure.DependencyInjection;
-using Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
 using Base.OrderAccumulator.Infrastructure.Fix;
 using Base.OrderAccumulator.Infrastructure.Orders.Options;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -29,9 +27,7 @@ var buildCommitSha = ReadBuildCommitSha() is { Length: 40 } shaFromBuild
 
 var flowaConnectionString = orderAccumulatorWebBuilder.Configuration.GetConnectionString(OrderAccumulatorConfigurationKeys.OrderDatabaseConnectionStringName)
     ?? throw new InvalidOperationException("Set ConnectionStrings__Flowa to the PostgreSQL connection.");
-orderAccumulatorWebBuilder.Services.AddOrderAccumulatorPersistence(flowaConnectionString);
-orderAccumulatorWebBuilder.Services.AddOrderMetrics(orderAccumulatorWebBuilder.Configuration);
-orderAccumulatorWebBuilder.Services.AddSingleton<ISymbolExposureMemoryPort, InMemorySymbolExposureAdapter>();
+orderAccumulatorWebBuilder.Services.AddOrderAccumulatorInfrastructure(flowaConnectionString, orderAccumulatorWebBuilder.Configuration);
 orderAccumulatorWebBuilder.Services.TryAddSingleton(TimeProvider.System);
 orderAccumulatorWebBuilder.Services.AddScoped<OrderDecisionDomainService>();
 orderAccumulatorWebBuilder.Services.AddScoped<DecideIncomingOrderUseCase>();

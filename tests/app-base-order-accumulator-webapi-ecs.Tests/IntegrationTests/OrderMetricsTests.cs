@@ -6,6 +6,7 @@ using Base.OrderAccumulator.Application.Orders.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Commons.Database;
 using Base.OrderAccumulator.Commons.Observability;
+using Base.OrderAccumulator.Commons.Responses;
 using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
 using Base.OrderAccumulator.Domain.Orders.Entities;
 using Base.OrderAccumulator.Domain.Orders.Interfaces;
@@ -144,11 +145,13 @@ public sealed class OrderMetricsTests(OrderAccumulatorPostgresFixture orderAccum
             orderAccumulatorDatabase.OrderDatabaseConnectionSource, symbolExposureMemory, new DatadogOrderMetricsAdapter(orderMetricsClient),
             wrapOrderRepository: _ => new OrderRepositoryFailingWith(databaseFailure));
 
-        var thrownFailure = await Assert.ThrowsAsync<NpgsqlException>(() =>
-            meteredRunnerWithFailingDatabase.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m)));
+        var failedOrderDecisionMessage = await meteredRunnerWithFailingDatabase.DecideIncomingOrderMessageAsync(TestOrders.NewBuyOrder("PETR4", 1, 1m));
         var sentOrderMetrics = await SendSentinelAndReadOrderMetricsAsync();
 
-        Assert.Same(databaseFailure, thrownFailure);
+        Assert.False(failedOrderDecisionMessage.Success);
+        Assert.Equal(ResultStatus.InternalError, failedOrderDecisionMessage.Status);
+        Assert.Equal("internal-error", failedOrderDecisionMessage.ErrorCode);
+        Assert.Same(databaseFailure, failedOrderDecisionMessage.UnexpectedFailure);
         Assert.Empty(sentOrderMetrics);
         Assert.Equal(0m, ExposureInMemory("PETR4"));
     }

@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using Base.OrderAccumulator.Application.Exposures.Interfaces;
 using Base.OrderAccumulator.Application.Orders.Responses;
 using Base.OrderAccumulator.Domain.Exposures.ValueObjects;
-using Base.OrderAccumulator.Domain.Orders.Enums;
 using Base.OrderAccumulator.Domain.Orders.ValueObjects;
 
 namespace Base.OrderAccumulator.Infrastructure.Exposures.Adapters;
@@ -16,7 +15,7 @@ public sealed class InMemorySymbolExposureAdapter : ISymbolExposureMemoryPort
     private readonly SemaphoreSlim ordersInProgressCountLock = new(1, 1);
     private int ordersInProgressCount;
 
-    public async Task<DecideIncomingOrderResponse> DecideOrderOutsideDeleteAllAsync(Func<Task<DecideIncomingOrderResponse>> decideIncomingOrder, CancellationToken cancellationToken)
+    public async Task<TOrderDecision> DecideOrderOutsideDeleteAllAsync<TOrderDecision>(Func<Task<TOrderDecision>> decideIncomingOrder, CancellationToken cancellationToken)
     {
         await deleteAllOrdersDoor.WaitAsync(cancellationToken);
         deleteAllOrdersDoor.Release();
@@ -70,8 +69,8 @@ public sealed class InMemorySymbolExposureAdapter : ISymbolExposureMemoryPort
 
     public void ApplyAcceptedOrder(DecideIncomingOrderResponse acceptedOrder)
     {
-        var acceptedOrderSide = acceptedOrder.Side == OrderSideCodes.BuyOrderSideFixCode ? OrderSide.Buy : OrderSide.Sell;
-        var acceptedOrderExposureDelta = ExposureLimitPolicy.CalculateOrderExposureDelta(acceptedOrderSide, (int)acceptedOrder.Quantity, acceptedOrder.Price);
+        ArgumentNullException.ThrowIfNull(acceptedOrder);
+        var acceptedOrderExposureDelta = ExposureLimitPolicy.CalculateAcceptedOrderExposureDelta(acceptedOrder.Side, acceptedOrder.Quantity, acceptedOrder.Price);
         exposureBySymbol.AddOrUpdate(
             acceptedOrder.Symbol!, acceptedOrderExposureDelta, (_, currentSymbolExposure) => currentSymbolExposure + acceptedOrderExposureDelta);
     }

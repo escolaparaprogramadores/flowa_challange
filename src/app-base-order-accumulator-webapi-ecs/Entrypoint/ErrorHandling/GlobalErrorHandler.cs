@@ -4,10 +4,19 @@ using Microsoft.AspNetCore.Diagnostics;
 
 namespace Base.OrderAccumulator.Entrypoint.ErrorHandling;
 
-public sealed class GlobalErrorHandler(IProblemDetailsService problemDetailsService, IApplicationLogger<GlobalErrorHandler> httpErrorLogger) : IExceptionHandler
+public sealed class GlobalErrorHandler : IExceptionHandler
 {
     public const string InvalidRequestMessage = "Dados inválidos";
     public const string UnexpectedErrorMessage = "Aconteceu um erro inesperado. Informe o traceId ao suporte.";
+
+    private readonly IProblemDetailsService problemDetailsService;
+    private readonly IApplicationLogger<GlobalErrorHandler> httpErrorLogger;
+
+    public GlobalErrorHandler(IProblemDetailsService problemDetailsService, IApplicationLogger<GlobalErrorHandler> httpErrorLogger)
+    {
+        this.problemDetailsService = problemDetailsService ?? throw new ArgumentNullException(nameof(problemDetailsService));
+        this.httpErrorLogger = httpErrorLogger ?? throw new ArgumentNullException(nameof(httpErrorLogger));
+    }
 
     public async ValueTask<bool> TryHandleAsync(HttpContext httpContext, Exception exception, CancellationToken cancellationToken)
     {
