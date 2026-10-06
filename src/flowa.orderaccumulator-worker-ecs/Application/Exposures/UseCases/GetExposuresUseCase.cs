@@ -1,8 +1,8 @@
 using Flowa.OrderAccumulator.Application.ErrorHandling;
 using Flowa.OrderAccumulator.Application.Exposures.Interfaces;
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Observability;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.Exposures.ValueObjects;
 
 namespace Flowa.OrderAccumulator.Application.Exposures.UseCases;

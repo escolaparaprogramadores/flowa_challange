@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.Orders.Entities;
 using NetArchTest.Rules;
 
@@ -8,44 +9,51 @@ namespace Flowa.OrderAccumulator.Tests;
 
 // Each layer is a folder and a namespace inside one .csproj, so the compiler does not stop a wrong
 // dependency: this test does, written as the list of what MAY come in (dotnet-clean-architecture.md).
+// The Commons is its own project (src/flowa.commons), shared by the apps: the same rules apply to its assembly.
 public sealed class LayerDependencyTests
 {
     private const string RootNamespace = "Flowa.OrderAccumulator";
     private const string ProjectFolderName = "flowa.orderaccumulator-worker-ecs";
+    private const string CommonsRootNamespace = "Flowa.Commons";
+    private const string CommonsProjectFolderName = "flowa.commons";
     private const string BaseClassLibraryNamespace = "System";
     private static readonly string[] CommonsTechnicalLibraryNamespaces = ["Microsoft.Extensions", "Dapper", "Npgsql", "StatsdClient"];
 
     private static readonly Assembly OrderAccumulatorAssembly = typeof(Order).Assembly;
-    private static readonly string[] LayerNames = ["Entrypoint", "Application", "Domain", "Infrastructure", "Commons"];
+    private static readonly Assembly CommonsAssembly = typeof(DataMessage<>).Assembly;
+    private static readonly string[] LayerNames = ["Entrypoint", "Application", "Domain", "Infrastructure"];
 
     [Fact]
     public void Domain_depends_only_on_the_base_class_library_the_commons_shared_kernel_and_itself()
     {
         AssertLayerOnlyDependsOn(
-            "Domain", BaseClassLibraryNamespace, LayerNamespace("Commons.Entities"), LayerNamespace("Commons.Exceptions"), LayerNamespace("Commons.ValueObjects"),
+            "Domain", BaseClassLibraryNamespace, CommonsNamespace("Entities"), CommonsNamespace("Exceptions"), CommonsNamespace("ValueObjects"),
             LayerNamespace("Domain"));
     }
 
     [Fact]
     public void Commons_and_each_commons_folder_depend_only_on_the_base_class_library_their_technical_library_and_themselves()
     {
-        AssertLayerOnlyDependsOn("Commons", [BaseClassLibraryNamespace, .. CommonsTechnicalLibraryNamespaces, LayerNamespace("Commons")]);
-        AssertLayerOnlyDependsOn("Commons.Entities", BaseClassLibraryNamespace, LayerNamespace("Commons.Entities"));
-        AssertLayerOnlyDependsOn("Commons.Responses", BaseClassLibraryNamespace, LayerNamespace("Commons.Responses"));
-        AssertLayerOnlyDependsOn("Commons.Database", BaseClassLibraryNamespace, "Dapper", "Npgsql", LayerNamespace("Commons.Database"));
-        AssertLayerOnlyDependsOn("Commons.Observability", BaseClassLibraryNamespace, "StatsdClient", LayerNamespace("Commons.Observability"));
-        AssertLayerOnlyDependsOn("Commons.Logging", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Logging"));
-        AssertLayerOnlyDependsOn(
-            "Commons.DependencyInjection", BaseClassLibraryNamespace, "Microsoft.Extensions", LayerNamespace("Commons.Database"), LayerNamespace("Commons.Logging"),
-            LayerNamespace("Commons.Observability"),
-            LayerNamespace("Commons.DependencyInjection"));
+        AssertCommonsFolderOnlyDependsOn(CommonsRootNamespace, [BaseClassLibraryNamespace, .. CommonsTechnicalLibraryNamespaces, CommonsRootNamespace]);
+        AssertCommonsFolderOnlyDependsOn(CommonsNamespace("Entities"), BaseClassLibraryNamespace, CommonsNamespace("Entities"));
+        AssertCommonsFolderOnlyDependsOn(CommonsNamespace("Responses"), BaseClassLibraryNamespace, CommonsNamespace("Responses"));
+        AssertCommonsFolderOnlyDependsOn(CommonsNamespace("Database"), BaseClassLibraryNamespace, "Dapper", "Npgsql", CommonsNamespace("Database"));
+        AssertCommonsFolderOnlyDependsOn(CommonsNamespace("Observability"), BaseClassLibraryNamespace, "StatsdClient", CommonsNamespace("Observability"));
+        AssertCommonsFolderOnlyDependsOn(CommonsNamespace("Logging"), BaseClassLibraryNamespace, "Microsoft.Extensions", CommonsNamespace("Logging"));
+        AssertCommonsFolderOnlyDependsOn(
+            CommonsNamespace("Http"), BaseClassLibraryNamespace, "Microsoft.Extensions", CommonsNamespace("Http"), CommonsNamespace("Logging"),
+            CommonsNamespace("Responses"));
+        AssertCommonsFolderOnlyDependsOn(
+            CommonsNamespace("DependencyInjection"), BaseClassLibraryNamespace, "Microsoft.Extensions", CommonsNamespace("Database"), CommonsNamespace("Logging"),
+            CommonsNamespace("Observability"),
+            CommonsNamespace("DependencyInjection"));
     }
 
     [Fact]
     public void Application_depends_only_on_the_base_class_library_domain_commons_and_itself()
     {
         AssertLayerOnlyDependsOn(
-            "Application", BaseClassLibraryNamespace, LayerNamespace("Domain"), LayerNamespace("Commons"), LayerNamespace("Application"));
+            "Application", BaseClassLibraryNamespace, LayerNamespace("Domain"), CommonsRootNamespace, LayerNamespace("Application"));
     }
 
     [Fact]
@@ -77,7 +85,7 @@ public sealed class LayerDependencyTests
     {
         var applicationTypes = TypesOfLayer("Application");
         var applicationDatabaseResult = applicationTypes.ShouldNot()
-            .HaveDependencyOnAny(LayerNamespace("Commons.Database.IDatabase"), LayerNamespace("Commons.Database.DapperDatabase")).GetResult();
+            .HaveDependencyOnAny(CommonsNamespace("Database.IDatabase"), CommonsNamespace("Database.DapperDatabase")).GetResult();
 
         Assert.NotEmpty(applicationTypes.GetTypes());
         Assert.True(applicationDatabaseResult.IsSuccessful, DescribeFailingTypes(applicationDatabaseResult));
@@ -94,33 +102,23 @@ public sealed class LayerDependencyTests
             .Select(declaredType => declaredType.FullName)
             .ToList();
 
+        var commonsTypesOutsideTheCommonsNamespace = CommonsAssembly.GetTypes()
+            .Where(declaredType => declaredType.DeclaringType is null && !declaredType.IsDefined(typeof(CompilerGeneratedAttribute)))
+            .Where(declaredType => declaredType.Namespace?.StartsWith(CommonsRootNamespace + ".", StringComparison.Ordinal) != true)
+            .Select(declaredType => declaredType.FullName)
+            .ToList();
+
         Assert.Empty(typesOutsideTheLayers);
         Assert.All(LayerNames, layerName => Assert.NotEmpty(TypesOfLayer(layerName).GetTypes()));
+        Assert.Empty(commonsTypesOutsideTheCommonsNamespace);
+        Assert.NotEmpty(TypesOfCommonsFolder(CommonsRootNamespace).GetTypes());
     }
 
     [Fact]
     public void Every_source_file_namespace_matches_its_folder()
     {
-        var projectFolder = Path.Combine(FindRepositoryRoot(), "src", ProjectFolderName);
-        var sourceFiles = Directory.EnumerateFiles(projectFolder, "*.cs", SearchOption.AllDirectories)
-            .Where(sourceFile => !IsBuildOutput(Path.GetRelativePath(projectFolder, sourceFile)))
-            .ToList();
-
-        Assert.NotEmpty(sourceFiles);
-        foreach (var sourceFile in sourceFiles)
-        {
-            var relativeFolder = Path.GetDirectoryName(Path.GetRelativePath(projectFolder, sourceFile))!;
-            var declaredNamespace = Regex.Match(File.ReadAllText(sourceFile), @"^namespace\s+([\w.]+);", RegexOptions.Multiline).Groups[1].Value;
-            if (Path.GetFileName(sourceFile) == "Program.cs")
-            {
-                Assert.Equal("Entrypoint", relativeFolder);
-                Assert.Equal(string.Empty, declaredNamespace);
-                continue;
-            }
-
-            var expectedNamespace = string.Join('.', [RootNamespace, .. relativeFolder.Split(Path.DirectorySeparatorChar)]);
-            Assert.True(expectedNamespace == declaredNamespace, $"{sourceFile}: expected {expectedNamespace}, declared {declaredNamespace}");
-        }
+        AssertSourceFileNamespacesMatchTheirFolders(ProjectFolderName, RootNamespace);
+        AssertSourceFileNamespacesMatchTheirFolders(CommonsProjectFolderName, CommonsRootNamespace);
     }
 
     // The Datadog client (StatsdClient) is wrapped by the Infrastructure adapter behind IOrderMetricsPort;
@@ -152,13 +150,15 @@ public sealed class LayerDependencyTests
     [Fact]
     public void Only_the_commons_logging_uses_the_logging_sdk()
     {
-        var typesUsingTheLoggingSdk = Types.InAssembly(OrderAccumulatorAssembly).That().HaveDependencyOn("Microsoft.Extensions.Logging").GetTypes()
+        var appTypesUsingTheLoggingSdk = Types.InAssembly(OrderAccumulatorAssembly).That().HaveDependencyOn("Microsoft.Extensions.Logging").GetTypes()
             // The generated Program (and its closures) is the composition root: it only calls AddApplicationLogging.
             .Where(declaredType => declaredType.Namespace is not null)
             .ToList();
+        var commonsTypesUsingTheLoggingSdk = TypesOfCommonsFolder(CommonsRootNamespace).And().HaveDependencyOn("Microsoft.Extensions.Logging").GetTypes().ToList();
 
-        Assert.Contains(typesUsingTheLoggingSdk, declaredType => declaredType.Namespace == LayerNamespace("Commons.Logging"));
-        Assert.All(typesUsingTheLoggingSdk, declaredType => Assert.Equal(LayerNamespace("Commons.Logging"), declaredType.Namespace));
+        Assert.Empty(appTypesUsingTheLoggingSdk);
+        Assert.Contains(commonsTypesUsingTheLoggingSdk, declaredType => declaredType.Namespace == CommonsNamespace("Logging"));
+        Assert.All(commonsTypesUsingTheLoggingSdk, declaredType => Assert.Equal(CommonsNamespace("Logging"), declaredType.Namespace));
     }
 
     private static void AssertLayerOnlyDependsOn(string layerName, params string[] allowedNamespaces)
@@ -170,10 +170,48 @@ public sealed class LayerDependencyTests
         Assert.True(layerDependencyResult.IsSuccessful, DescribeFailingTypes(layerDependencyResult));
     }
 
+    private static void AssertCommonsFolderOnlyDependsOn(string commonsFolderNamespace, params string[] allowedNamespaces)
+    {
+        var commonsFolderTypes = TypesOfCommonsFolder(commonsFolderNamespace);
+        var commonsFolderDependencyResult = commonsFolderTypes.Should().OnlyHaveDependenciesOn(allowedNamespaces).GetResult();
+
+        Assert.NotEmpty(commonsFolderTypes.GetTypes());
+        Assert.True(commonsFolderDependencyResult.IsSuccessful, DescribeFailingTypes(commonsFolderDependencyResult));
+    }
+
+    private static void AssertSourceFileNamespacesMatchTheirFolders(string projectFolderName, string projectRootNamespace)
+    {
+        var projectFolder = Path.Combine(FindRepositoryRoot(), "src", projectFolderName);
+        var sourceFiles = Directory.EnumerateFiles(projectFolder, "*.cs", SearchOption.AllDirectories)
+            .Where(sourceFile => !IsBuildOutput(Path.GetRelativePath(projectFolder, sourceFile)))
+            .ToList();
+
+        Assert.NotEmpty(sourceFiles);
+        foreach (var sourceFile in sourceFiles)
+        {
+            var relativeFolder = Path.GetDirectoryName(Path.GetRelativePath(projectFolder, sourceFile))!;
+            var declaredNamespace = Regex.Match(File.ReadAllText(sourceFile), @"^namespace\s+([\w.]+);", RegexOptions.Multiline).Groups[1].Value;
+            if (Path.GetFileName(sourceFile) == "Program.cs")
+            {
+                Assert.Equal("Entrypoint", relativeFolder);
+                Assert.Equal(string.Empty, declaredNamespace);
+                continue;
+            }
+
+            var expectedNamespace = string.Join('.', [projectRootNamespace, .. relativeFolder.Split(Path.DirectorySeparatorChar)]);
+            Assert.True(expectedNamespace == declaredNamespace, $"{sourceFile}: expected {expectedNamespace}, declared {declaredNamespace}");
+        }
+    }
+
     private static PredicateList TypesOfLayer(string layerName) =>
         Types.InAssembly(OrderAccumulatorAssembly).That().ResideInNamespace(LayerNamespace(layerName));
 
+    private static PredicateList TypesOfCommonsFolder(string commonsFolderNamespace) =>
+        Types.InAssembly(CommonsAssembly).That().ResideInNamespace(commonsFolderNamespace);
+
     private static string LayerNamespace(string layerName) => $"{RootNamespace}.{layerName}";
+
+    private static string CommonsNamespace(string commonsFolderName) => $"{CommonsRootNamespace}.{commonsFolderName}";
 
     private static string DescribeFailingTypes(TestResult layerDependencyResult) =>
         string.Join(", ", layerDependencyResult.FailingTypeNames ?? []);

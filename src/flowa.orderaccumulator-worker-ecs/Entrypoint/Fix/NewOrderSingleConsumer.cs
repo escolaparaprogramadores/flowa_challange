@@ -1,7 +1,7 @@
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Responses;
 using Flowa.OrderAccumulator.Domain.Orders.Enums;
 using Flowa.OrderAccumulator.Domain.Orders.ValueObjects;
 using Flowa.OrderAccumulator.Infrastructure.Fix;
@@ -53,7 +53,7 @@ public sealed class NewOrderSingleConsumer : MessageCracker, IApplication
             return;
         }
 
-        if (orderDecisionMessage.UnexpectedFailure is { } orderDecisionFailure)
+        if (orderDecisionMessage.Failure is { } orderDecisionFailure)
         {
             LogOrderDecisionFailure(orderDecisionFailure);
             return;

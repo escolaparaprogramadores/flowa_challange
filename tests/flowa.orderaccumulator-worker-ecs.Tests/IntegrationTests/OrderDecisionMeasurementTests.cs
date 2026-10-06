@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Flowa.OrderAccumulator.Commons.Observability;
+using Flowa.Commons.Observability;
 using Flowa.OrderAccumulator.Infrastructure.Exposures.Adapters;
 
 namespace Flowa.OrderAccumulator.Tests;

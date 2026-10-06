@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Observability;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
 
 namespace Flowa.OrderAccumulator.Tests;
 

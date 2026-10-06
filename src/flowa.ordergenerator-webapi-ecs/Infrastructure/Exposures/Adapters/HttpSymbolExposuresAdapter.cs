@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using Flowa.OrderGenerator.Application.Exposures.Interfaces;
-using Flowa.OrderGenerator.Commons.Http;
-using Flowa.OrderGenerator.Commons.Responses;
+using Flowa.Commons.Http;
+using Flowa.Commons.Responses;
 using Flowa.OrderGenerator.Infrastructure.Orders.Adapters;
 
 namespace Flowa.OrderGenerator.Infrastructure.Exposures.Adapters;

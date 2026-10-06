@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using Flowa.OrderAccumulator.Commons.Observability;
+using Flowa.Commons.Observability;
+using Flowa.OrderAccumulator.Entrypoint.Observability;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Flowa.OrderAccumulator.Tests;
@@ -23,7 +24,7 @@ public sealed class ActiveSpanOperationMonitoringTests : IDisposable
     {
         durationListener.InstrumentPublished = (publishedInstrument, listener) =>
         {
-            if (publishedInstrument.Meter.Scope == meterFactory && publishedInstrument.Name == ActiveSpanOperationMonitoring.OperationDurationMetricName)
+            if (publishedInstrument.Meter.Scope == meterFactory && publishedInstrument.Name == OrderAccumulatorUseCaseDurationMetric.MetricName)
                 listener.EnableMeasurementEvents(publishedInstrument);
         };
         durationListener.SetMeasurementEventCallback<double>((publishedInstrument, durationSeconds, durationTags, _) =>
@@ -43,7 +44,7 @@ public sealed class ActiveSpanOperationMonitoringTests : IDisposable
     [Fact]
     public void Rejected_result_is_a_tag_on_the_open_span_and_a_histogram_measurement_without_error_status()
     {
-        var operationMonitoring = new ActiveSpanOperationMonitoring(meterFactory);
+        var operationMonitoring = new ActiveSpanOperationMonitoring(meterFactory, OrderAccumulatorUseCaseDurationMetric.MeterName, OrderAccumulatorUseCaseDurationMetric.MetricName);
         using var openSpan = OpenSpanTestSource.StartActivity("fix.recebimento_da_ordem")!;
 
         using (var decisionMonitoring = operationMonitoring.StartOperationMonitoring("orders.decide-incoming-order"))
@@ -65,7 +66,7 @@ public sealed class ActiveSpanOperationMonitoringTests : IDisposable
     [Fact]
     public void Without_an_open_span_the_operation_only_records_the_histogram_as_succeeded()
     {
-        var operationMonitoring = new ActiveSpanOperationMonitoring(meterFactory);
+        var operationMonitoring = new ActiveSpanOperationMonitoring(meterFactory, OrderAccumulatorUseCaseDurationMetric.MeterName, OrderAccumulatorUseCaseDurationMetric.MetricName);
         Assert.Null(Activity.Current);
 
         using (operationMonitoring.StartOperationMonitoring("orders.list-orders"))

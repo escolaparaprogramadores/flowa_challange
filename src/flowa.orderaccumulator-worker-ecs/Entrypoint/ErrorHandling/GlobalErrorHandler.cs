@@ -1,5 +1,5 @@
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Responses;
 using Microsoft.AspNetCore.Diagnostics;
 
 namespace Flowa.OrderAccumulator.Entrypoint.ErrorHandling;

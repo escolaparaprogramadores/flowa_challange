@@ -1,4 +1,4 @@
-using Flowa.OrderAccumulator.Commons.Database;
+using Flowa.Commons.Database;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 
 namespace Flowa.OrderAccumulator.Tests;

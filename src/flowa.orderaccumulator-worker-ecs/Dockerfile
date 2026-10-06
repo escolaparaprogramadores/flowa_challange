@@ -20,8 +20,10 @@ RUN case "$TARGETARCH" in \
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /repo
 COPY Directory.Build.props ./
+COPY src/flowa.commons/Commons.csproj src/flowa.commons/
 COPY src/flowa.orderaccumulator-worker-ecs/OrderAccumulator.csproj src/flowa.orderaccumulator-worker-ecs/
 RUN dotnet restore src/flowa.orderaccumulator-worker-ecs/OrderAccumulator.csproj
+COPY src/flowa.commons/ src/flowa.commons/
 COPY src/flowa.orderaccumulator-worker-ecs/ src/flowa.orderaccumulator-worker-ecs/
 # The apps only start with the commit recorded in the build (/version route). The build needs .git in the context:
 # in a clone the SHA comes from it; in a worktree, where .git is just a file, the caller passes SOURCE_REVISION_ID.

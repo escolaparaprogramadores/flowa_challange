@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/flowa.commons/Commons.csproj" />
     <Project Path="src/flowa.orderaccumulator-worker-ecs/OrderAccumulator.csproj" />
     <Project Path="src/flowa.ordergenerator-webapi-ecs/OrderGenerator.csproj" />
   </Folder>

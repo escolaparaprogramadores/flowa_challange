@@ -1,4 +1,4 @@
-using Flowa.OrderAccumulator.Commons.Logging;
+using Flowa.Commons.Logging;
 using Flowa.OrderAccumulator.Entrypoint.ErrorHandling;
 
 namespace Flowa.OrderAccumulator.Entrypoint.Logging;

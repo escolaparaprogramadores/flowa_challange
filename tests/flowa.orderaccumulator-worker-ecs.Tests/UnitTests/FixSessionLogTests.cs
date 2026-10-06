@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Flowa.OrderAccumulator.Commons.Logging;
+using Flowa.Commons.Logging;
 using Flowa.OrderAccumulator.Infrastructure.Fix;
 
 namespace Flowa.OrderAccumulator.Tests;

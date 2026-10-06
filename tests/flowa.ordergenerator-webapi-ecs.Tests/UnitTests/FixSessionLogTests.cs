@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Flowa.OrderGenerator.Commons.Logging;
+using Flowa.Commons.Logging;
 using Flowa.OrderGenerator.Infrastructure.Fix;
 
 namespace Flowa.OrderGenerator.Tests;

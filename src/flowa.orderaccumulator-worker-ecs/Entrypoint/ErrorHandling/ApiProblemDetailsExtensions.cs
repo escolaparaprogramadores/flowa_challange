@@ -1,5 +1,5 @@
 using System.Runtime.ExceptionServices;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Responses;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,7 +19,7 @@ public static class ApiProblemDetailsExtensions
                 DataMessage<TResponseData>.CreateSuccessMessage(convertToResponseData(useCaseMessage.Data!), useCaseMessage.Message, useCaseMessage.Status),
                 statusCode: ResultStatusHttpMapper.ConvertToHttpStatusCode(useCaseMessage.Status));
 
-        if (useCaseMessage.UnexpectedFailure is { } unexpectedUseCaseFailure)
+        if (useCaseMessage.Failure is { } unexpectedUseCaseFailure)
             ExceptionDispatchInfo.Throw(unexpectedUseCaseFailure);
 
         if (useCaseMessage.Status == ResultStatus.InternalError)

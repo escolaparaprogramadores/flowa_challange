@@ -2,15 +2,16 @@ using System.Reflection;
 using System.Text.Json.Serialization;
 using Flowa.OrderAccumulator.Application.Exposures.UseCases;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
-using Flowa.OrderAccumulator.Commons.Database;
-using Flowa.OrderAccumulator.Commons.DependencyInjection;
-using Flowa.OrderAccumulator.Commons.Logging;
+using Flowa.Commons.Database;
+using Flowa.Commons.DependencyInjection;
+using Flowa.Commons.Logging;
 using Flowa.OrderAccumulator.Domain.DomainServices;
 using Flowa.OrderAccumulator.Entrypoint.BackgroundService;
 using Flowa.OrderAccumulator.Entrypoint.ErrorHandling;
 using Flowa.OrderAccumulator.Entrypoint.Exposures.Endpoints;
 using Flowa.OrderAccumulator.Entrypoint.Fix;
 using Flowa.OrderAccumulator.Entrypoint.Logging;
+using Flowa.OrderAccumulator.Entrypoint.Observability;
 using Flowa.OrderAccumulator.Entrypoint.Orders.Endpoints;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 using Flowa.OrderAccumulator.Infrastructure.Fix;
@@ -20,7 +21,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 var orderAccumulatorWebBuilder = WebApplication.CreateBuilder(args);
 orderAccumulatorWebBuilder.Logging.AddJsonLogsWithTraceId();
 orderAccumulatorWebBuilder.Services.AddApplicationLogger();
-orderAccumulatorWebBuilder.Services.AddOperationMonitoring();
+orderAccumulatorWebBuilder.Services.AddOperationMonitoring(
+    OrderAccumulatorUseCaseDurationMetric.MeterName, OrderAccumulatorUseCaseDurationMetric.MetricName);
 
 var buildCommitSha = ReadBuildCommitSha() is { Length: 40 } shaFromBuild
     ? shaFromBuild

@@ -1,4 +1,4 @@
-using Flowa.OrderGenerator.Commons.Logging;
+using Flowa.Commons.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Flowa.OrderGenerator.Tests;

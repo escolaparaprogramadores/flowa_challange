@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using Flowa.OrderGenerator.Commons.Observability;
+using Flowa.Commons.Observability;
+using Flowa.OrderGenerator.Entrypoint.Observability;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Flowa.OrderGenerator.Tests;
@@ -23,7 +24,7 @@ public sealed class ActiveSpanOperationMonitoringTests
         using var openSpanListener = ListenToEverySpanOf(openSpanSource.Name);
         using var openSpan = openSpanSource.StartActivity("request")!;
 
-        using (var monitoredOperation = new ActiveSpanOperationMonitoring(meterFactory).StartOperationMonitoring(OperationName))
+        using (var monitoredOperation = new ActiveSpanOperationMonitoring(meterFactory, OrderGeneratorUseCaseDurationMetric.MeterName, OrderGeneratorUseCaseDurationMetric.MetricName).StartOperationMonitoring(OperationName))
             monitoredOperation.RecordOperationResult("rejected");
 
         Assert.Equal(OperationName, openSpan.GetTagItem("usecase"));
@@ -50,7 +51,7 @@ public sealed class ActiveSpanOperationMonitoringTests
 
         try
         {
-            using (new ActiveSpanOperationMonitoring(meterFactory).StartOperationMonitoring(OperationName))
+            using (new ActiveSpanOperationMonitoring(meterFactory, OrderGeneratorUseCaseDurationMetric.MeterName, OrderGeneratorUseCaseDurationMetric.MetricName).StartOperationMonitoring(OperationName))
             {
             }
         }
@@ -70,7 +71,7 @@ public sealed class ActiveSpanOperationMonitoringTests
         {
             InstrumentPublished = (publishedInstrument, listener) =>
             {
-                if (publishedInstrument.Meter.Scope == meterFactory && publishedInstrument.Name == ActiveSpanOperationMonitoring.OperationDurationMetricName)
+                if (publishedInstrument.Meter.Scope == meterFactory && publishedInstrument.Name == OrderGeneratorUseCaseDurationMetric.MetricName)
                     listener.EnableMeasurementEvents(publishedInstrument);
             }
         };

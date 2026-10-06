@@ -1,9 +1,9 @@
 using Flowa.OrderAccumulator.Application.ErrorHandling;
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
-using Flowa.OrderAccumulator.Commons.Logging;
-using Flowa.OrderAccumulator.Commons.Observability;
-using Flowa.OrderAccumulator.Commons.Responses;
+using Flowa.Commons.Logging;
+using Flowa.Commons.Observability;
+using Flowa.Commons.Responses;
 
 namespace Flowa.OrderAccumulator.Application.Orders.UseCases;
 

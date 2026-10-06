@@ -1,6 +1,6 @@
 using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
-using Flowa.OrderAccumulator.Commons.Database;
+using Flowa.Commons.Database;
 
 namespace Flowa.OrderAccumulator.Infrastructure.Orders.Repositories;
 
