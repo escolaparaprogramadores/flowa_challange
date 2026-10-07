@@ -38,11 +38,9 @@ async function sendOrderAndWaitForReread(orderTicketPage: Page) {
   return sentOrderRequest;
 }
 
+// No cleanup after each test on purpose: the CI stops the OrderAccumulator right after this suite, and
+// without-accumulator.spec.ts needs stored orders with exposure; the last test here leaves PETR4 100 × 10,00 accepted.
 test.beforeEach(async ({ page }) => {
-  await deleteAllOrdersOnServer(page);
-});
-
-test.afterEach(async ({ page }) => {
   await deleteAllOrdersOnServer(page);
 });
 
