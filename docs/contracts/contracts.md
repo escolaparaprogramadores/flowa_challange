@@ -1,11 +1,13 @@
-# Contrato entre as partes do Flowa — v3
+# Contrato entre as partes do Flowa — v4
 
-Este arquivo é o acordo entre o OrderGenerator, o OrderAccumulator, a tela e o `docker compose`.
+Este arquivo é o acordo entre o OrderGenerator, o OrderAccumulator, o worker de métricas, a tela e o `docker compose`.
 Quem implementa segue o que está aqui. Mudou alguma coisa? Sobe a versão e avisa quem usa.
 A v2 trocou o formato das respostas HTTP: sucesso em `DataMessage` e erro em `application/problem+json`.
 A v3 traz o motivo da rejeição na lista, a resposta `Rejected` para toda ordem que o OrderAccumulator
 não consegue decidir, o `422` e o `503` de sessão perdida no envio, os dois prazos configuráveis, o
 OrderGenerator lendo a lista e a exposição direto no banco e o OrderAccumulator sem HTTP, só com o FIX.
+A v4 traz o worker de métricas (seção 6), que lê o banco e manda as métricas ao Datadog no lugar do
+OrderAccumulator.
 
 A regra de campo da ordem (símbolos `PETR4`/`VALE3`/`VIIA4`, lado, quantidade inteira maior que zero e
 menor que 100.000, preço maior que zero, menor que 1.000 e múltiplo de 0,01) e as mensagens dela moram
@@ -299,7 +301,8 @@ zero; senão o app não sobe).
 |---|---|---|
 | OrderGenerator | 8080 (HTTP); 8443 (HTTPS, só fora do compose) | página, `/api/*`, `/health`, `/version` |
 | OrderAccumulator | 9876 (TCP) | acceptor FIX (o único canal dele; não tem HTTP) |
-| PostgreSQL | 5432 | banco: o OrderAccumulator grava; o OrderGenerator lê a lista e a exposição e apaga |
+| PostgreSQL | 5432 | banco: o OrderAccumulator grava; o OrderGenerator lê a lista e a exposição e apaga; o worker de métricas só lê |
+| Worker de métricas | nenhuma | não recebe conexão; manda as métricas ao agente do Datadog em `localhost:8125` (UDP) |
 
 As variáveis seguem o padrão do ASP.NET Core (`__` separa as seções). O valor da coluna "fora do
 compose" é o padrão para rodar na máquina, sem Docker.
@@ -312,15 +315,15 @@ compose" é o padrão para rodar na máquina, sem Docker.
 | `Fix__AcceptorPort` | os dois | `9876` | `9876` |
 | `Fix__ExecutionReportTimeoutSeconds` | OrderGenerator | `5` (de 1 a 5) | `5` (padrão) |
 | `Orders__DecisionTimeoutSeconds` | OrderAccumulator | `4` (maior que zero) | `4` (padrão) |
-| `ConnectionStrings__Flowa` | os dois | host `localhost` | host `postgres` |
-| `Database__MaximumPoolSize` | os dois, opcional | padrão do Npgsql | `10` |
+| `ConnectionStrings__Flowa` | os três | host `localhost` | host `postgres` |
+| `Database__MaximumPoolSize` | os três, opcional | padrão do Npgsql | `10` nos dois apps, `2` no worker de métricas |
 
 A string do banco tem o formato do Npgsql: `Host=<host>;Port=5432;Database=flowa;Username=flowa;`
 seguido da senha. A senha nunca fica escrita no código nem neste contrato: o compose lê de
 `POSTGRES_PASSWORD` e monta a string; fora do compose, quem roda define `ConnectionStrings__Flowa`
-inteira, a mesma nos dois apps. O valor de desenvolvimento local fica declarado no README.
+inteira, a mesma nos três. O valor de desenvolvimento local fica declarado no README.
 
-Nomes dos serviços no compose: `ordergenerator`, `orderaccumulator`, `postgres`. Para o avaliador,
+Nomes dos serviços no compose: `ordergenerator`, `orderaccumulator`, `datadogmetrics`, `postgres`. Para o avaliador,
 basta publicar a porta `8080` do OrderGenerator; as outras podem ficar só na rede interna.
 
 ## 5. A página
@@ -330,3 +333,28 @@ basta publicar a porta `8080` do OrderGenerator; as outras podem ficar só na re
 - O OrderGenerator serve essa pasta na raiz (`/`), com `index.html` como página padrão. Caminhos que
   começam com `/api` nunca caem no `index.html`.
 - Rodando o Vite em modo de desenvolvimento, ele repassa `/api` para `http://localhost:8080`.
+
+## 6. Worker de métricas
+
+O worker de métricas (`src/flowa.datadog-metrics-worker-ecs`) não tem HTTP nem FIX e ninguém o chama. Ele só
+lê o banco e manda métricas ao agente do Datadog. O OrderAccumulator não manda nenhuma métrica.
+
+- **Quando:** uma vez ao subir e depois a cada 5 minutos.
+- **O que lê:** a tabela `exposures` (exposição de PETR4, VALE3 e VIIA4) e a tabela `orders` (ativo, lado e se
+  foi aceita), só as ordens com `id` maior que a última já contada. Na primeira leitura depois de subir, ele só
+  guarda o maior `id` que já está gravado e começa a contar a partir dali.
+- **Para onde manda:** DogStatsD no agente do Datadog, em `localhost:8125` (UDP). Sem agente (no compose, por
+  exemplo), o envio não chega a lugar nenhum e não dá erro; o worker continua e escreve no log o que mandou.
+
+| Métrica | Tipo | Etiquetas | Valor |
+|---|---|---|---|
+| `flowa.exposicao` | gauge | `symbol` | a exposição atual do ativo, em reais |
+| `flowa.ordens.aceitas` | contagem | `symbol`, `side` (`buy` ou `sell`) | ordens aceitas que chegaram desde a leitura anterior |
+| `flowa.ordens.rejeitadas` | contagem | `symbol`, `side` (`buy` ou `sell`) | ordens rejeitadas que chegaram desde a leitura anterior |
+
+Ativo fora da lista vai com `symbol:invalido` e `side:invalido`. Ordem apagada pelo `DELETE /api/orders` antes da
+leitura seguinte não entra na contagem.
+
+Logs de cada ciclo: `Symbol exposure gauges sent.` (campo `SentExposures`) e `Answered order counts sent.`
+(campos `SentOrderCounts`, `CountedOrders`, `LastCountedOrderId`). Falha num ciclo vira um log de erro e o
+worker tenta de novo no ciclo seguinte.
