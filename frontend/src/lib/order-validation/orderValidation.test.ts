@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseTypedWholeQuantity, validateOrderPrice, validateOrderQuantity } from './orderValidation';
+import {
+  canIncreaseQuantity,
+  parseTypedWholeQuantity,
+  prepareOrderTicketSubmission,
+  validateOrderPrice,
+  validateOrderQuantity,
+} from './orderValidation';
 
 describe('validateOrderQuantity', () => {
   it.each([
@@ -61,5 +67,41 @@ describe('parseTypedWholeQuantity', () => {
 
   it.each(['', 'abc', '1,5'])('does not read "%s", which is not a whole number', (typedQuantity) => {
     expect(parseTypedWholeQuantity(typedQuantity)).toBeUndefined();
+  });
+});
+
+describe('canIncreaseQuantity', () => {
+  it.each([
+    ['99998', true],
+    ['1', true],
+    ['', true],
+    ['99999', false],
+  ])('with "%s" typed the + is enabled: %s', (typedQuantity, expectedCanIncrease) => {
+    expect(canIncreaseQuantity(typedQuantity)).toBe(expectedCanIncrease);
+  });
+});
+
+describe('prepareOrderTicketSubmission', () => {
+  it('normal mode hands over whole quantity and price in cents', () => {
+    expect(prepareOrderTicketSubmission({ mode: 'normal', symbol: 'VALE3', side: 'sell', typedQuantity: '99999', typedPrice: '25,00' })).toEqual({
+      orderToSend: { mode: 'normal', symbol: 'VALE3', side: 'sell', quantity: 99_999, priceInCents: 2_500 },
+    });
+  });
+
+  it('normal mode with empty quantity and 0,00 returns both field errors and nothing to send', () => {
+    expect(prepareOrderTicketSubmission({ mode: 'normal', symbol: 'PETR4', side: 'buy', typedQuantity: '', typedPrice: '0,00' })).toEqual({
+      fieldErrors: { quantityError: 'Informe a quantidade.', priceError: 'O preço deve ser maior que zero.' },
+    });
+  });
+
+  it.each([
+    ['ITUB4', '1,5', '10,005'],
+    [' ITUB4 ', ' 1,5 ', ' 10,005 '],
+    ['', 'abc', ''],
+    ['petr4', '-3', '1.000,50'],
+  ])('test mode hands over symbol %j, quantity %j and price %j exactly as typed', (symbolText, quantityText, priceText) => {
+    expect(prepareOrderTicketSubmission({ mode: 'test', symbolText, side: 'buy', quantityText, priceText })).toEqual({
+      orderToSend: { mode: 'test', symbol: symbolText, side: 'buy', quantityText, priceText },
+    });
   });
 });
