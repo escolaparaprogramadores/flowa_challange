@@ -1,6 +1,5 @@
 using System.Data;
 using Flowa.OrderAccumulator.Application.ErrorHandling;
-using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.Commons.Database;
 using Flowa.Commons.Logging;
@@ -26,7 +25,6 @@ public sealed class DecideIncomingOrderUseCase
     private readonly IUnitOfWork unitOfWork;
     private readonly IOrderRepository orderRepository;
     private readonly OrderDecisionDomainService orderDecisionDomainService;
-    private readonly IOrderMetricsPort orderMetrics;
     private readonly IOperationMonitoring operationMonitoring;
     private readonly IApplicationLogger<DecideIncomingOrderUseCase> orderDecisionLogger;
 
@@ -34,14 +32,12 @@ public sealed class DecideIncomingOrderUseCase
         IUnitOfWork unitOfWork,
         IOrderRepository orderRepository,
         OrderDecisionDomainService orderDecisionDomainService,
-        IOrderMetricsPort orderMetrics,
         IOperationMonitoring operationMonitoring,
         IApplicationLogger<DecideIncomingOrderUseCase> orderDecisionLogger)
     {
         this.unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         this.orderRepository = orderRepository ?? throw new ArgumentNullException(nameof(orderRepository));
         this.orderDecisionDomainService = orderDecisionDomainService ?? throw new ArgumentNullException(nameof(orderDecisionDomainService));
-        this.orderMetrics = orderMetrics ?? throw new ArgumentNullException(nameof(orderMetrics));
         this.operationMonitoring = operationMonitoring ?? throw new ArgumentNullException(nameof(operationMonitoring));
         this.orderDecisionLogger = orderDecisionLogger ?? throw new ArgumentNullException(nameof(orderDecisionLogger));
     }
@@ -62,9 +58,6 @@ public sealed class DecideIncomingOrderUseCase
                 return DataMessage<DecideIncomingOrderResponse>.CreateErrorMessage(
                     Order.BuildDuplicateClOrdIdRejectionText(incomingOrder.ClOrdId), ResultStatus.Conflict, errorCode: DuplicateClOrdIdErrorCode);
             }
-
-            if (orderAnswer.ShouldCountInOrderMetrics())
-                orderMetrics.CountAnsweredOrder(answeredOrder.Symbol, answeredOrder.Side, answeredOrder.Accepted);
 
             var orderDecision = DecideIncomingOrderResponse.MapFromOrderAnswer(orderAnswer);
             orderDecisionMonitoring.RecordOperationResult(ClassifyOrderDecisionResult(orderDecision));

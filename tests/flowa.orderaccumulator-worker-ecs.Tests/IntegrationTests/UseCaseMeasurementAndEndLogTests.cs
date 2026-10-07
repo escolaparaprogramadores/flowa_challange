@@ -22,10 +22,10 @@ public sealed class UseCaseMeasurementAndEndLogTests(OrderAccumulatorPostgresFix
         var recordingMonitoring = new RecordingOperationMonitoring();
         var recordingLogger = new RecordingApplicationLogger<DecideIncomingOrderUseCase>();
         var orderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new UncountedOrderMetrics(),
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource,
             operationMonitoring: recordingMonitoring, orderDecisionLogger: recordingLogger);
         var failingOrderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, new UncountedOrderMetrics(),
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource,
             wrapOrderRepository: _ => new OrderRepositoryAnswering(UseCaseFailure), operationMonitoring: recordingMonitoring, orderDecisionLogger: recordingLogger);
         var acceptedSale = TestOrders.NewSellOrder("VIIA4", 99999, 999.99m);
 

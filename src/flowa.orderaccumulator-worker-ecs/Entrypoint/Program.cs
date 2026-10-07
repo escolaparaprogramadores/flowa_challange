@@ -10,7 +10,6 @@ using Flowa.OrderAccumulator.Entrypoint.Observability;
 using Flowa.OrderAccumulator.Infrastructure.DependencyInjection;
 using Flowa.OrderAccumulator.Infrastructure.Fix;
 using Flowa.OrderAccumulator.Infrastructure.Orders.Options;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 var orderAccumulatorBuilder = Host.CreateApplicationBuilder(args);
 Program.AddOrderAccumulatorServices(orderAccumulatorBuilder);
@@ -31,10 +30,8 @@ public partial class Program
         var flowaConnectionString = orderAccumulatorBuilder.Configuration.GetConnectionString(OrderAccumulatorConfigurationKeys.OrderDatabaseConnectionStringName)
             ?? throw new InvalidOperationException("Set ConnectionStrings__Flowa to the PostgreSQL connection.");
         orderAccumulatorBuilder.Services.AddOrderAccumulatorInfrastructure(flowaConnectionString, orderAccumulatorBuilder.Configuration);
-        orderAccumulatorBuilder.Services.TryAddSingleton(TimeProvider.System);
         orderAccumulatorBuilder.Services.AddScoped<OrderDecisionDomainService>();
         orderAccumulatorBuilder.Services.AddScoped<DecideIncomingOrderUseCase>();
-        orderAccumulatorBuilder.Services.AddHostedService<SymbolExposureGaugeBackgroundService>();
 
         orderAccumulatorBuilder.Services.AddSingleton<FixSessionLogFactory>();
         orderAccumulatorBuilder.Services.AddSingleton<NewOrderSingleConsumer>();

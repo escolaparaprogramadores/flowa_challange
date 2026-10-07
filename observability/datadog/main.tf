@@ -1,5 +1,5 @@
 # Painel do Datadog, separado da infra da AWS: chave do Datadog com problema não trava o deploy do app.
-# O state fica no mesmo bucket do infra/, com chave e lock próprios; bucket e chave vêm do
+# O state fica no mesmo bucket do infra-aws/, com chave e lock próprios; bucket e chave vêm do
 # workflow (-backend-config), porque o nome do bucket não aparece no repositório público.
 terraform {
   required_version = ">= 1.8.0"

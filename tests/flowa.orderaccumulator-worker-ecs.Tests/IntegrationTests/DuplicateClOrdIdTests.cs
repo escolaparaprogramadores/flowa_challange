@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using Dapper;
 using Flowa.Commons.Responses;
-using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
 using QuickFix.Fields;
 using QuickFix.FIX44;
@@ -92,14 +90,13 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
     }
 
     [Fact]
-    public async Task Duplicate_cl_ord_id_is_measured_as_duplicate_and_is_neither_counted_nor_logged_by_the_use_case()
+    public async Task Duplicate_cl_ord_id_is_measured_as_duplicate_and_is_not_logged_by_the_use_case()
     {
         // Arrange
         var recordingOperationMonitoring = new RecordingOperationMonitoring();
-        var recordingOrderMetrics = new RecordingOrderMetrics();
         var recordingUseCaseLogger = new RecordingApplicationLogger<DecideIncomingOrderUseCase>();
         var measuredOrderDecisionRunner = new DecideIncomingOrderTestRunner(
-            orderAccumulatorDatabase.OrderDatabaseConnectionSource, recordingOrderMetrics,
+            orderAccumulatorDatabase.OrderDatabaseConnectionSource,
             operationMonitoring: recordingOperationMonitoring, orderDecisionLogger: recordingUseCaseLogger);
         await measuredOrderDecisionRunner.DecideIncomingOrderMessageAsync(new(OriginalClOrdId, "PETR4", '1', 100, 10.50m));
 
@@ -111,7 +108,6 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
         Assert.Equal(
             [(DecideIncomingOrderUseCase.OperationName, "accepted"), (DecideIncomingOrderUseCase.OperationName, "duplicate")],
             recordingOperationMonitoring.RecordedOperations);
-        Assert.Equal([("PETR4", '1', true)], recordingOrderMetrics.CountedAnsweredOrders);
         Assert.Equal(["Information Order accepted."], recordingUseCaseLogger.RecordedLogLines);
     }
 
@@ -229,20 +225,6 @@ public sealed class DuplicateClOrdIdTests(OrderAccumulatorPostgresFixture orderA
         } while (DateTime.UtcNow < lockWaitDeadline);
 
         return transactionsWaitingOnExposureRow;
-    }
-
-    private sealed class RecordingOrderMetrics : IOrderMetricsPort
-    {
-        private readonly ConcurrentQueue<(string? OrderSymbol, char OrderSide, bool OrderAccepted)> countedAnsweredOrders = new();
-
-        public IReadOnlyList<(string? OrderSymbol, char OrderSide, bool OrderAccepted)> CountedAnsweredOrders => countedAnsweredOrders.ToList();
-
-        public void CountAnsweredOrder(string? orderSymbol, char orderSide, bool orderAccepted) =>
-            countedAnsweredOrders.Enqueue((orderSymbol, orderSide, orderAccepted));
-
-        public void SendSymbolExposureGauge(string orderSymbol, decimal symbolExposure)
-        {
-        }
     }
 
     private sealed record StoredOrderInTheTable(

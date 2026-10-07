@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Flowa.OrderAccumulator.Tests;
 
-// The use cases and the gauge built by hand in the tests measure and log through the same Commons pieces the app registers.
+// The use cases built by hand in the tests measure and log through the same Commons pieces the app registers.
 public static class TestObservability
 {
     public static IOperationMonitoring CreateOperationMonitoring() =>

@@ -4,7 +4,7 @@ using Flowa.Commons.Observability;
 
 namespace Flowa.OrderAccumulator.Tests;
 
-// Records each line a use case or the gauge writes, as "<level> <message>", so the test compares the exact list.
+// Records each line a use case writes, as "<level> <message>", so the test compares the exact list.
 public sealed class RecordingApplicationLogger<T> : IApplicationLogger<T>
 {
     private readonly ConcurrentQueue<string> recordedLogLines = new();

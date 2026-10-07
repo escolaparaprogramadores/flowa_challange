@@ -7,7 +7,7 @@ on:
   push:
     branches: [develop]
     paths:
-      - "observabilidade/datadog/**"
+      - "observability/datadog/**"
       - ".github/workflows/2-develop-painel-datadog.yml"
   workflow_dispatch:
 
@@ -66,7 +66,7 @@ jobs:
           FIM
 
       - name: terraform init
-        working-directory: observabilidade/datadog
+        working-directory: observability/datadog
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
         run: |
@@ -79,7 +79,7 @@ jobs:
           echo "terraform init ok"
 
       - name: terraform plan e apply
-        working-directory: observabilidade/datadog
+        working-directory: observability/datadog
         env:
           DD_API_KEY: ${{ secrets.DATADOG_API_KEY }}
           DD_APP_KEY: ${{ secrets.DATADOG_APP_KEY }}

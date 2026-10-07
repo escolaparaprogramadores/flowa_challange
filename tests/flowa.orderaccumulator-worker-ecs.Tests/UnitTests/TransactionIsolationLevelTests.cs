@@ -18,7 +18,7 @@ public sealed class TransactionIsolationLevelTests
         var recordingUnitOfWork = new UnitOfWorkRecordingIsolationLevels();
         var orderDecisionUseCase = new DecideIncomingOrderUseCase(
             recordingUnitOfWork, new OrderRepositoryStoringEveryOrder(), new OrderDecisionDomainService(new ExposureAlwaysWithinLimit()),
-            new UncountedOrderMetrics(), TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());
+            TestObservability.CreateOperationMonitoring(), TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());
 
         var orderDecisionMessage = await orderDecisionUseCase.DecideIncomingOrderAsync(TestOrders.NewBuyOrder("PETR4", 100, 10.00m));
 

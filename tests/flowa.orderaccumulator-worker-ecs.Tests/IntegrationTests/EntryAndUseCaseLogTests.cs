@@ -2,13 +2,12 @@ using System.Diagnostics;
 
 namespace Flowa.OrderAccumulator.Tests;
 
-// CA-21 and CA-28: one Information line where something enters the app (start, gauge loop) and none from the framework,
+// CA-21 and CA-28: one Information line where something enters the app (start) and none from the framework,
 // read from the real stdout. The worker has no HTTP, so no request line exists; the FIX entry lines are in OrderDecisionLogTests.
 [Collection(OrderAccumulatorPostgresCollection.Name)]
 public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orderAccumulatorDatabase) : IAsyncLifetime
 {
     private const string ProgramCategory = "Program";
-    private const string GaugeCategory = "Flowa.OrderAccumulator.Entrypoint.BackgroundService.SymbolExposureGaugeBackgroundService";
     private const string FixSessionLogCategory = "Flowa.OrderAccumulator.Infrastructure.Fix.FixSessionLog";
 
     public Task InitializeAsync() => orderAccumulatorDatabase.ResetOrdersAndExposuresAsync();
@@ -16,7 +15,7 @@ public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orde
     public Task DisposeAsync() => Task.CompletedTask;
 
     [Fact]
-    public async Task Start_writes_one_application_started_line_with_the_commit_of_the_build_and_one_gauge_loop_line()
+    public async Task Start_writes_only_the_application_started_line_with_the_commit_of_the_build()
     {
         // Arrange
         var gitHeadSha = ReadGitHeadSha();
@@ -29,9 +28,7 @@ public sealed class EntryAndUseCaseLogTests(OrderAccumulatorPostgresFixture orde
         var applicationStartedLine = Assert.Single(appLogLines, appLogLine => appLogLine.Category == ProgramCategory);
         Assert.Equal(("Information", "Application started."), (applicationStartedLine.LogLevel, applicationStartedLine.Message));
         Assert.Equal((gitHeadSha, "Development"), (applicationStartedLine.ReadLogField("BuildCommitSha"), applicationStartedLine.ReadLogField("Environment")));
-        var gaugeLoopLine = Assert.Single(appLogLines, appLogLine => appLogLine.Category == GaugeCategory);
-        Assert.Equal(("Information", "Symbol exposure gauge loop started.", "30"), (gaugeLoopLine.LogLevel, gaugeLoopLine.Message, gaugeLoopLine.ReadLogField("IntervalSeconds")));
-        Assert.Equal(2, appLogLines.Count);
+        Assert.Single(appLogLines);
     }
 
     // The lines the application writes, except the QuickFIX session events, which were already there in c41ed4b and stay in
