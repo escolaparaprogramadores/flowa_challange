@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import fs from 'node:fs';
 import path from 'node:path';
 import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/services/ordersService';
 
@@ -7,13 +8,15 @@ import { CREATE_ORDER_ROUTE, EXPOSURES_ROUTE, ORDERS_ROUTE } from '../src/servic
 
 const EVIDENCE_FOLDER = process.env.ORDER_LIST_EVIDENCE_FOLDER ?? path.resolve('test-results', 'order-list-evidence');
 const EMPTY_LIST_TEXT = 'Nenhuma ordem enviada ainda. Preencha a boleta e envie para ver a resposta aqui.';
-const ORDER_LIST_COLUMNS = ['Data', 'Status', 'Ativo', 'Lado', 'Quantidade', 'Preço', 'Número da ordem', 'Identificador do envio'];
+const ORDER_LIST_COLUMNS = ['Data', 'Status', 'Motivo', 'Ativo', 'Lado', 'Quantidade', 'Preço', 'Número da ordem', 'Identificador do envio'];
 const ACCEPTED_BADGE_COLORS = { background: 'rgba(79, 227, 176, 0.13)', text: 'rgb(111, 235, 192)' };
 const REJECTED_BADGE_COLORS = { background: 'rgba(255, 138, 122, 0.12)', text: 'rgb(255, 164, 151)' };
 const SENDING_BADGE_COLORS = { background: 'rgba(242, 184, 75, 0.14)', text: 'rgb(244, 197, 106)' };
 const brazilianRealFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
+const LIMIT_REJECT_REASON = 'Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.';
+const PRICE_FIELD_REJECT_REASON = 'O preço deve ser múltiplo de 0,01.';
 
-type OrderStoredOnServer = { receivedAt: string; status: string; symbol: string | null; side: string | null; quantity: number; price: number; orderId: string; clOrdId: string };
+type OrderStoredOnServer = { receivedAt: string; status: string; symbol: string | null; side: string | null; quantity: number; price: number; orderId: string; clOrdId: string; rejectReason: string | null };
 type OrderPageOnServer = { page: number; pageSize: number; total: number; orders: OrderStoredOnServer[] };
 type TicketOrder = { side: 'Compra' | 'Venda'; quantity: string; price: string };
 
@@ -62,7 +65,7 @@ function formatBrasiliaHourMinute(utcIsoInstant: string) {
   return new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(utcIsoInstant));
 }
 
-async function checkOrderRowAgainstServer(orderRow: Locator, orderOnServer: OrderStoredOnServer, expectedOrder: { asset: string; side: string; quantity: string; price: string; badge: 'Aceita' | 'Rejeitada' }) {
+async function checkOrderRowAgainstServer(orderRow: Locator, orderOnServer: OrderStoredOnServer, expectedOrder: { asset: string; side: string; quantity: string; price: string; badge: 'Aceita' | 'Rejeitada'; reason: string }) {
   await expect(locateOrderRowCell(orderRow, 'date').locator('.order-row-day')).toHaveText(formatBrasiliaDayMonthYear(orderOnServer.receivedAt));
   await expect(locateOrderRowCell(orderRow, 'date').locator('.order-row-time')).toHaveText(formatBrasiliaHourMinute(orderOnServer.receivedAt));
   await expect(locateOrderRowCell(orderRow, 'date').locator('.order-row-time')).toHaveText(/^\d{2}:\d{2}$/);
@@ -72,6 +75,7 @@ async function checkOrderRowAgainstServer(orderRow: Locator, orderOnServer: Orde
   const expectedBadgeColors = expectedOrder.badge === 'Aceita' ? ACCEPTED_BADGE_COLORS : REJECTED_BADGE_COLORS;
   await expect(rowBadge).toHaveCSS('background-color', expectedBadgeColors.background);
   await expect(rowBadge).toHaveCSS('color', expectedBadgeColors.text);
+  await expect(locateOrderRowCell(orderRow, 'reject-reason')).toHaveText(expectedOrder.reason);
   await expect(locateOrderRowCell(orderRow, 'asset')).toHaveText(expectedOrder.asset);
   await expect(locateOrderRowCell(orderRow, 'side')).toHaveText(expectedOrder.side);
   await expect(locateOrderRowCell(orderRow, 'quantity')).toHaveText(expectedOrder.quantity);
@@ -105,7 +109,7 @@ test('CA-14: with no orders in the database, the card shows the empty state with
   await page.screenshot({ path: path.join(EVIDENCE_FOLDER, '06-empty-1440.png'), fullPage: true });
 });
 
-test('CA-11 and CA-36: two sent orders appear at the top, the newest first, with the 8 fields and the badges', async ({ page }) => {
+test('CA-11 and CA-36: two sent orders appear at the top, the newest first, with the 9 fields and the badges', async ({ page }) => {
   await deleteAllOrdersOnServer(page);
   try {
     await page.goto('/');
@@ -121,8 +125,10 @@ test('CA-11 and CA-36: two sent orders appear at the top, the newest first, with
     await expect(locateOrderListCard(page).locator('thead th')).toHaveText(ORDER_LIST_COLUMNS);
     await expect(locateOrderListRows(page)).toHaveCount(2);
     const expectedPrice = brazilianRealFormatter.format(999.99);
-    await checkOrderRowAgainstServer(locateOrderListRows(page).nth(0), orderPageOnServer.orders[0], { asset: 'PETR4', side: 'Compra', quantity: '99.999', price: expectedPrice, badge: 'Rejeitada' });
-    await checkOrderRowAgainstServer(locateOrderListRows(page).nth(1), orderPageOnServer.orders[1], { asset: 'PETR4', side: 'Compra', quantity: '99.999', price: expectedPrice, badge: 'Aceita' });
+    // CA-4: the rejected row carries the reason stored by the OrderAccumulator; the accepted one has none.
+    expect(orderPageOnServer.orders.map((orderOnServer) => orderOnServer.rejectReason)).toEqual([LIMIT_REJECT_REASON, null]);
+    await checkOrderRowAgainstServer(locateOrderListRows(page).nth(0), orderPageOnServer.orders[0], { asset: 'PETR4', side: 'Compra', quantity: '99.999', price: expectedPrice, badge: 'Rejeitada', reason: LIMIT_REJECT_REASON });
+    await checkOrderRowAgainstServer(locateOrderListRows(page).nth(1), orderPageOnServer.orders[1], { asset: 'PETR4', side: 'Compra', quantity: '99.999', price: expectedPrice, badge: 'Aceita', reason: '—' });
   } finally {
     // The large buy leaves PETR4 close to the limit; clearing again keeps the following specs from seeing a rejection.
     await deleteAllOrdersOnServer(page);
@@ -277,7 +283,7 @@ test('CA-11 and RNF-01: at 1440 px the 32-letter codes appear whole, each order 
 });
 
 const ORDER_FIELD_LABELS = [
-  ['date', 'Data'], ['status', 'Status'], ['asset', 'Ativo'], ['side', 'Lado'], ['quantity', 'Quantidade'],
+  ['date', 'Data'], ['status', 'Status'], ['reject-reason', 'Motivo'], ['asset', 'Ativo'], ['side', 'Lado'], ['quantity', 'Quantidade'],
   ['price', 'Preço'], ['order-number', 'Número da ordem'], ['send-identifier', 'Identificador do envio'],
 ] as const;
 const ORDERS_PER_PAGE = 10;
@@ -373,11 +379,12 @@ test.describe('full list of wide orders', () => {
 
   // ASSUMI-04, card narrower than 800 px: grid block, label above each value, nothing outside the card (CA-26).
   for (const { windowWidth, blockColumns, maxBlockHeightOnScreen } of [
-    { windowWidth: 375, blockColumns: 2, maxBlockHeightOnScreen: 260 },
-    { windowWidth: 861, blockColumns: 2, maxBlockHeightOnScreen: 260 },
+    // In 2 columns the reason (9th field) takes a whole row of its own: 40 px more than the 8-field block.
+    { windowWidth: 375, blockColumns: 2, maxBlockHeightOnScreen: 320 },
+    { windowWidth: 861, blockColumns: 2, maxBlockHeightOnScreen: 320 },
     { windowWidth: 1180, blockColumns: 4, maxBlockHeightOnScreen: 180 },
   ]) {
-    test(`CA-26 and ASSUMI-04: at ${windowWidth} px each order becomes a ${blockColumns}-column block with the 8 labeled fields, label above the value, all inside the card`, async ({ page }) => {
+    test(`CA-26 and ASSUMI-04: at ${windowWidth} px each order becomes a ${blockColumns}-column block with the 9 labeled fields, label above the value, all inside the card`, async ({ page }) => {
       await page.setViewportSize({ width: windowWidth, height: 900 });
       await page.goto('/');
       await expect(locateOrderListRows(page)).toHaveCount(ORDERS_PER_PAGE);
@@ -403,6 +410,11 @@ test.describe('full list of wide orders', () => {
           expect(fieldBox.x, `${fieldName}: starts inside the card`).toBeGreaterThanOrEqual(cardBox.x);
           expect(fieldBox.x + fieldBox.width, `${fieldName}: ends inside the card`).toBeLessThanOrEqual(cardBox.x + cardBox.width);
         }
+        // The reason is free text: it takes two grid columns (the whole row in 2 columns), never a single one.
+        const reasonBox = (await locateOrderRowCell(orderRow, 'reject-reason').boundingBox())!;
+        const dateBox = (await locateOrderRowCell(orderRow, 'date').boundingBox())!;
+        const statusBox = (await locateOrderRowCell(orderRow, 'status').boundingBox())!;
+        expect(reasonBox.width, `row ${rowPosition + 1}: reason spans two columns`).toBeGreaterThanOrEqual(statusBox.x + statusBox.width - dateBox.x - 1);
       }
       if (windowWidth === 375) await page.screenshot({ path: path.join(EVIDENCE_FOLDER, '06-list-375.png'), fullPage: true });
     });
@@ -455,4 +467,51 @@ test('ASSUMI-03: an order stored without symbol and without side (rejection comi
   await expect(locateOrderRowCell(rowWithoutSymbolOrSide, 'status').locator('.order-badge')).toHaveText('Rejeitada');
   await expect(locateOrderRowCell(rowWithoutSymbolOrSide, 'date').locator('.order-row-day')).toHaveText('04/10/2026');
   await expect(locateOrderRowCell(rowWithoutSymbolOrSide, 'date').locator('.order-row-time')).toHaveText('20:30');
+});
+
+// CA-4: the three kinds of row side by side, all stored by the real OrderAccumulator: accepted, rejected by the limit
+// and rejected by a field (price 10.005 goes as text, as the test mode sends it, and the OrderAccumulator refuses it).
+test('CA-4 and CA-10: GET /api/orders brings the reason of each order, and the "Motivo" column shows it right after "Status"', async ({ page }) => {
+  await deleteAllOrdersOnServer(page);
+  try {
+    const seedOrders = [
+      { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 },
+      { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 },
+      { symbol: 'PETR4', side: 'buy', quantity: '100', price: '10.005' },
+    ];
+    for (const seedOrder of seedOrders) expect((await page.request.post(CREATE_ORDER_ROUTE, { data: seedOrder })).status()).toBe(200);
+    const orderListResponse = await page.request.get(ORDERS_ROUTE + '?page=1');
+    expect(orderListResponse.status()).toBe(200);
+    const orderListBody = await orderListResponse.text();
+    fs.mkdirSync(EVIDENCE_FOLDER, { recursive: true });
+    fs.writeFileSync(path.join(EVIDENCE_FOLDER, '07-get-api-orders-page-1.json'), orderListBody);
+    const ordersOnServer = (JSON.parse(orderListBody) as { data: OrderPageOnServer }).data.orders;
+    expect(ordersOnServer.map((orderOnServer) => [orderOnServer.status, orderOnServer.rejectReason])).toEqual([
+      ['rejected', PRICE_FIELD_REJECT_REASON],
+      ['rejected', LIMIT_REJECT_REASON],
+      ['accepted', null],
+    ]);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await expect(locateOrderListCard(page).locator('thead th')).toHaveText(ORDER_LIST_COLUMNS);
+    await expect(locateOrderListRows(page)).toHaveCount(3);
+    const [fieldRejectedRow, limitRejectedRow, acceptedRow] = [0, 1, 2].map((rowPosition) => locateOrderListRows(page).nth(rowPosition));
+    await expect(locateOrderRowCell(fieldRejectedRow, 'reject-reason')).toHaveText(PRICE_FIELD_REJECT_REASON);
+    await expect(locateOrderRowCell(fieldRejectedRow, 'price')).toHaveText('R$ 10,005');
+    await expect(locateOrderRowCell(limitRejectedRow, 'reject-reason')).toHaveText(LIMIT_REJECT_REASON);
+    await expect(locateOrderRowCell(acceptedRow, 'reject-reason')).toHaveText('—');
+    // Mockup-01: the reason is smaller than the row and wraps; the dash of the accepted row is dimmed.
+    const limitReasonCell = locateOrderRowCell(limitRejectedRow, 'reject-reason');
+    await expect(limitReasonCell).toHaveCSS('font-size', '12px');
+    await expect(limitReasonCell).toHaveCSS('white-space', 'normal');
+    await expect(limitReasonCell).toHaveCSS('color', 'rgb(201, 215, 213)');
+    expect(await countCellTextLines(limitReasonCell)).toBeGreaterThan(1);
+    await expect(locateOrderRowCell(acceptedRow, 'reject-reason').locator('.order-row-no-reason')).toHaveCSS('color', 'rgb(143, 163, 161)');
+    await checkNothingScrollsSideways(page);
+    await page.mouse.move(0, 0);
+    await locateOrderListCard(page).screenshot({ path: path.join(EVIDENCE_FOLDER, '07-coluna-motivo-1440.png') });
+  } finally {
+    await deleteAllOrdersOnServer(page);
+  }
 });

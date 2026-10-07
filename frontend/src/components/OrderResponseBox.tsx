@@ -1,4 +1,4 @@
-import { formatBrazilianReais, formatBrazilianWholeNumber } from '../lib/number-format/brazilianNumberFormat';
+import { formatBrazilianOrderPrice, formatBrazilianWholeNumber } from '../lib/number-format/brazilianNumberFormat';
 import type { AttemptedOrder, OrderSendResult } from '../services/ordersService';
 
 const SEND_OUTCOME_LABELS: Record<OrderSendResult['outcome'], string> = {
@@ -16,7 +16,7 @@ function describeOrderLine(attemptedOrder: AttemptedOrder) {
   const quantityOnLine =
     typeof attemptedOrder.quantity === 'number' ? formatBrazilianWholeNumber(attemptedOrder.quantity) : attemptedOrder.quantity;
   const priceOnLine =
-    typeof attemptedOrder.priceInReais === 'number' ? formatBrazilianReais(attemptedOrder.priceInReais) : `R$ ${attemptedOrder.priceInReais}`;
+    typeof attemptedOrder.priceInReais === 'number' ? formatBrazilianOrderPrice(attemptedOrder.priceInReais) : `R$ ${attemptedOrder.priceInReais}`;
   return `${attemptedOrder.symbol} · ${ORDER_SIDE_LABELS[attemptedOrder.side]} · ${quantityOnLine} × ${priceOnLine}`;
 }
 

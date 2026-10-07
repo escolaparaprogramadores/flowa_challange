@@ -11,7 +11,7 @@ const TEST_FOOTER = createElement('nav', { 'data-testid': 'test-footer' }, 'Pág
 
 const acceptedListedOrder: ListedOrder = {
   receivedAt: '2026-10-04T23:30:00Z', outcome: 'accepted', symbol: 'PETR4', side: 'buy',
-  quantity: 1_000, priceInReais: 10, orderId: 'a'.repeat(32), clOrdId: 'b'.repeat(32),
+  quantity: 1_000, priceInReais: 10, orderId: 'a'.repeat(32), clOrdId: 'b'.repeat(32), rejectReason: null,
 };
 
 const ORDER_LIST_STATES: Array<[string, OrderListState]> = [
@@ -136,5 +136,56 @@ describe('OrderListCard: response box of the last send (CA-3)', () => {
   it('RF-04: before any send there is no box', () => {
     const cardHtml = renderOrderListCard(ORDER_LIST_STATES[3][1]);
     expect(cardHtml).not.toContain('order-response-box');
+  });
+});
+
+const rejectedByLimitListedOrder: ListedOrder = {
+  ...acceptedListedOrder, outcome: 'rejected', quantity: 100, priceInReais: 10.005, orderId: 'c'.repeat(32), clOrdId: 'd'.repeat(32),
+  rejectReason: 'A exposição de PETR4 passaria do limite de 100.000.000,00.',
+};
+
+function renderOrderTable(listedOrders: ListedOrder[]) {
+  return renderOrderListCard({ status: 'ready', orderListPage: { page: 1, totalOrders: listedOrders.length, orders: listedOrders } });
+}
+
+function readOrderRowCells(cardHtml: string, rowPosition: number) {
+  const orderRowHtml = cardHtml.split('data-testid="linha-da-ordem"')[rowPosition + 1] ?? '';
+  return Object.fromEntries([...orderRowHtml.matchAll(/<td data-column="([^"]+)"[^>]*>([\s\S]*?)<\/td>/g)].map(([, columnName, cellHtml]) => [columnName, cellHtml]));
+}
+
+describe('OrderListCard: reason column and order price (CA-4, CA-10)', () => {
+  it('RF-01: the "Motivo" header comes right after "Status" and right before "Ativo"', () => {
+    const cardHtml = renderOrderTable([acceptedListedOrder]);
+    const tableHeaders = [...cardHtml.matchAll(/<th scope="col">([^<]*)<\/th>/g)].map(([, headerText]) => headerText);
+    expect(tableHeaders).toEqual(['Data', 'Status', 'Motivo', 'Ativo', 'Lado', 'Quantidade', 'Preço', 'Número da ordem', 'Identificador do envio']);
+  });
+
+  it('RF-02: the rejected row shows the stored reason, in the cell labeled "Motivo" between status and asset', () => {
+    const cardHtml = renderOrderTable([rejectedByLimitListedOrder]);
+    expect(cardHtml).toContain('<td data-column="reject-reason" data-label="Motivo" class="order-row-reject-reason">A exposição de PETR4 passaria do limite de 100.000.000,00.</td>');
+    expect(Object.keys(readOrderRowCells(cardHtml, 0)).slice(1, 4)).toEqual(['status', 'reject-reason', 'asset']);
+  });
+
+  it('RF-03: the accepted row shows a dimmed "—" in the reason cell', () => {
+    expect(readOrderRowCells(renderOrderTable([acceptedListedOrder]), 0)['reject-reason']).toBe('<span class="order-row-no-reason">—</span>');
+  });
+
+  it('ASSUMI: a rejected row with an empty reason also shows the dimmed "—", never a blank cell', () => {
+    const cardHtml = renderOrderTable([{ ...rejectedByLimitListedOrder, rejectReason: '' }]);
+    expect(readOrderRowCells(cardHtml, 0)['reject-reason']).toBe('<span class="order-row-no-reason">—</span>');
+  });
+
+  it('RF-05: the row shows the price as it was sent, 10.005 as "R$ 10,005", and 10 keeps two decimals', () => {
+    const cardHtml = renderOrderTable([rejectedByLimitListedOrder, acceptedListedOrder]);
+    expect(readOrderRowCells(cardHtml, 0).price).toBe('R$ 10,005');
+    expect(readOrderRowCells(cardHtml, 1).price).toBe('R$ 10,00');
+  });
+
+  it('RF-06: the response box shows the sent number price with all its decimals', () => {
+    const cardHtml = renderOrderListCardAfterSend({
+      outcome: 'rejected', serverMessage: 'A exposição de PETR4 passaria do limite de 100.000.000,00.', clOrdId: 'send-3', orderId: 'order-3',
+      symbol: 'PETR4', side: 'buy', quantity: 100, priceInReais: 10.005, attemptedOrder: { ...petr4BuyAttempt, priceInReais: 10.005 },
+    });
+    expect(readResponseBoxText(cardHtml, 'ordem-da-resposta')).toBe('PETR4 · Compra · 100 × R$ 10,005');
   });
 });
