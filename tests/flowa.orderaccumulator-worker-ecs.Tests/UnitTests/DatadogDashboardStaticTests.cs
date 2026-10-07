@@ -21,14 +21,14 @@ public sealed class DatadogDashboardStaticTests
     private static readonly string LockFile = ReadText(Path.Combine(DashboardDirectory, ".terraform.lock.hcl"));
 
     [Fact]
-    public void Workflow_runs_on_push_to_develop_filtered_by_the_painel_paths_and_by_hand()
+    public void Workflow_runs_on_push_to_develop_filtered_by_the_dashboard_paths_and_by_hand()
     {
-        var onBlock = Regex.Match(DashboardWorkflow, @"^on:\n(?<bloco>(?:[ #].*\n|\n)*?)(?=^\S)", RegexOptions.Multiline).Groups["bloco"].Value;
-        var triggerKeys = Regex.Matches(onBlock, @"^  (?<gatilho>[a-z_]+):", RegexOptions.Multiline).Select(gatilho => gatilho.Groups["gatilho"].Value);
+        var onBlock = Regex.Match(DashboardWorkflow, @"^on:\n(?<onBlockBody>(?:[ #].*\n|\n)*?)(?=^\S)", RegexOptions.Multiline).Groups["onBlockBody"].Value;
+        var triggerKeys = Regex.Matches(onBlock, @"^  (?<triggerKey>[a-z_]+):", RegexOptions.Multiline).Select(triggerKeyMatch => triggerKeyMatch.Groups["triggerKey"].Value);
 
         Assert.Equal(["push", "workflow_dispatch"], triggerKeys);
         Assert.Contains("    branches: [develop]\n", onBlock);
-        var pathFilters = Regex.Matches(onBlock, @"^      - ""(?<caminho>[^""]+)""", RegexOptions.Multiline).Select(caminho => caminho.Groups["caminho"].Value);
+        var pathFilters = Regex.Matches(onBlock, @"^      - ""(?<pathFilter>[^""]+)""", RegexOptions.Multiline).Select(pathFilterMatch => pathFilterMatch.Groups["pathFilter"].Value);
         Assert.Equal(["observability/datadog/**", ".github/workflows/2-develop-painel-datadog.yml"], pathFilters);
     }
 
@@ -61,9 +61,10 @@ public sealed class DatadogDashboardStaticTests
     }
 
     [Fact]
-    public void Workflow_keeps_the_painel_state_in_its_own_key_with_lock()
+    public void Workflow_keeps_the_dashboard_state_in_its_own_key_with_lock()
     {
-        Assert.Contains("working-directory: observability/datadog", DashboardWorkflow);
+        Assert.Equal(2, Regex.Matches(DashboardWorkflow, "working-directory: observability/datadog\n").Count);
+        Assert.DoesNotContain("observabilidade", DashboardWorkflow);
         Assert.Contains(@"-backend-config=""bucket=$TF_STATE_BUCKET""", DashboardWorkflow);
         Assert.Contains(@"-backend-config=""key=flowa/datadog-dev.tfstate""", DashboardWorkflow);
         Assert.Contains(@"-backend-config=""use_lockfile=true""", DashboardWorkflow);
@@ -84,20 +85,20 @@ public sealed class DatadogDashboardStaticTests
     [Fact]
     public void Workflow_pins_the_same_actions_by_sha_as_the_deploy_workflow()
     {
-        var painelActions = Regex.Matches(DashboardWorkflow, @"uses: (?<acao>\S+)").Select(acao => acao.Groups["acao"].Value).ToList();
-        var deployActions = Regex.Matches(DeployWorkflow, @"uses: (?<acao>\S+)").Select(acao => acao.Groups["acao"].Value).ToHashSet();
+        var dashboardWorkflowActions = Regex.Matches(DashboardWorkflow, @"uses: (?<actionReference>\S+)").Select(actionMatch => actionMatch.Groups["actionReference"].Value).ToList();
+        var deployActions = Regex.Matches(DeployWorkflow, @"uses: (?<actionReference>\S+)").Select(actionMatch => actionMatch.Groups["actionReference"].Value).ToHashSet();
 
         Assert.Equal(
             ["actions/checkout", "aws-actions/configure-aws-credentials", "hashicorp/setup-terraform"],
-            painelActions.Select(acao => acao.Split('@')[0]));
-        Assert.All(painelActions, acao => Assert.Matches(@"@[0-9a-f]{40}$", acao));
-        Assert.All(painelActions, acao => Assert.Contains(acao, deployActions));
+            dashboardWorkflowActions.Select(actionReference => actionReference.Split('@')[0]));
+        Assert.All(dashboardWorkflowActions, actionReference => Assert.Matches(@"@[0-9a-f]{40}$", actionReference));
+        Assert.All(dashboardWorkflowActions, actionReference => Assert.Contains(actionReference, deployActions));
     }
 
     [Fact]
     public void Dashboard_cannot_be_destroyed_by_terraform()
     {
-        var dashboardBlock = Regex.Match(DashboardTerraform, @"^resource ""datadog_dashboard"" ""ordens_e_exposicao"" \{\n(?<corpo>.*?)^\}", RegexOptions.Multiline | RegexOptions.Singleline).Groups["corpo"].Value;
+        var dashboardBlock = Regex.Match(DashboardTerraform, @"^resource ""datadog_dashboard"" ""ordens_e_exposicao"" \{\n(?<resourceBody>.*?)^\}", RegexOptions.Multiline | RegexOptions.Singleline).Groups["resourceBody"].Value;
 
         Assert.Contains("  lifecycle {\n    prevent_destroy = true\n  }\n", dashboardBlock);
         Assert.Single(Regex.Matches(DashboardTerraform, @"^resource """, RegexOptions.Multiline));
@@ -193,12 +194,12 @@ public sealed class DatadogDashboardStaticTests
         Regex.Match(DashboardTerraform, $@"title\s+= ""{Regex.Escape(chartTitle)}""\n(?<chartDefinition>.*?)\n      widget \{{\n", RegexOptions.Singleline).Groups["chartDefinition"].Value;
 
     [Fact]
-    public void Every_output_of_the_painel_is_sensitive()
+    public void Every_output_of_the_dashboard_is_sensitive()
     {
-        var outputBlocks = Regex.Matches(DashboardTerraform + MainTf, @"^output ""[^""]+"" \{\n(?<corpo>.*?)^\}", RegexOptions.Multiline | RegexOptions.Singleline);
+        var outputBlocks = Regex.Matches(DashboardTerraform + MainTf, @"^output ""[^""]+"" \{\n(?<outputBody>.*?)^\}", RegexOptions.Multiline | RegexOptions.Singleline);
 
         Assert.NotEmpty(outputBlocks);
-        Assert.All(outputBlocks, outputBlock => Assert.Contains("  sensitive   = true\n", outputBlock.Groups["corpo"].Value));
+        Assert.All(outputBlocks, outputBlock => Assert.Contains("  sensitive   = true\n", outputBlock.Groups["outputBody"].Value));
     }
 
     [Fact]
@@ -211,17 +212,17 @@ public sealed class DatadogDashboardStaticTests
     }
 
     [Fact]
-    public void Painel_files_carry_no_datadog_key_site_or_org_address()
+    public void Dashboard_files_carry_no_datadog_key_site_or_org_address()
     {
-        var painelFiles = Directory.GetFiles(DashboardDirectory, "*.tf").Select(ReadText).Append(DashboardWorkflow).ToList();
+        var dashboardFiles = Directory.GetFiles(DashboardDirectory, "*.tf").Select(ReadText).Append(DashboardWorkflow).ToList();
 
-        Assert.All(painelFiles, painelFile =>
+        Assert.All(dashboardFiles, dashboardFile =>
         {
             // Atributo do provider com a chave ou o site escrito no código; DD_API_KEY do ambiente não conta.
-            Assert.DoesNotMatch(new Regex(@"\b(api_key|app_key|api_url|validate)\s*="), painelFile);
-            Assert.DoesNotMatch(new Regex(@"datadoghq\.|ddog-gov\.|https?://", RegexOptions.IgnoreCase), painelFile);
+            Assert.DoesNotMatch(new Regex(@"\b(api_key|app_key|api_url|validate)\s*="), dashboardFile);
+            Assert.DoesNotMatch(new Regex(@"datadoghq\.|ddog-gov\.|https?://", RegexOptions.IgnoreCase), dashboardFile);
             // Chave de API do Datadog tem 32 hex e a de app, 40; o SHA das actions é o único hex longo aceito.
-            var linesWithoutActions = string.Join('\n', painelFile.Split('\n').Where(linha => !linha.TrimStart().StartsWith("- uses:") && !linha.TrimStart().StartsWith("uses:")));
+            var linesWithoutActions = string.Join('\n', dashboardFile.Split('\n').Where(dashboardFileLine => !dashboardFileLine.TrimStart().StartsWith("- uses:") && !dashboardFileLine.TrimStart().StartsWith("uses:")));
             Assert.DoesNotMatch(new Regex(@"\b[0-9a-f]{32,}\b", RegexOptions.IgnoreCase), linesWithoutActions);
         });
     }

@@ -118,7 +118,7 @@ public sealed class LayerDependencyTests
         AssertSourceFileNamespacesMatchTheirFolders(CommonsProjectFolderName, CommonsRootNamespace);
     }
 
-    // The Datadog client (StatsdClient) lives only in the Commons; the Entrypoint never talks to it directly (reviewer r1, F-01).
+    // The Datadog client (StatsdClient) lives only in the Commons; the Entrypoint never talks to it directly.
     [Fact]
     public void Entrypoint_does_not_use_the_datadog_client_directly()
     {
@@ -134,7 +134,10 @@ public sealed class LayerDependencyTests
     {
         var accumulatorTypes = Types.InAssembly(OrderAccumulatorAssembly);
         var metricsClientResult = accumulatorTypes.ShouldNot()
-            .HaveDependencyOnAny("StatsdClient", typeof(Flowa.Commons.Observability.IMetricsClient).FullName)
+            .HaveDependencyOnAny(
+                "StatsdClient",
+                typeof(Flowa.Commons.Observability.IMetricsClient).FullName,
+                typeof(Flowa.Commons.Observability.DogStatsdMetricsClient).FullName)
             .GetResult();
 
         Assert.NotEmpty(accumulatorTypes.GetTypes());
