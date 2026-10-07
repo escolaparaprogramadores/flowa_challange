@@ -70,7 +70,7 @@ conforme o limite de exposição por ativo, e a terceira manda as métricas ao D
 
 ## Sobre o projeto
 
-Uma boleta de ordens de ações para quem opera. O **OrderGenerator** mostra uma tela onde você monta ordens de
+A **Base investimentos** é uma boleta de ordens de ações para quem opera. O **OrderGenerator** mostra uma tela onde você monta ordens de
 compra e venda e as manda pelo protocolo FIX 4.4, o padrão do mercado financeiro, para o **OrderAccumulator**.
 Ele decide: aceita ou rejeita, conforme o limite de exposição por ativo, e a resposta volta para a tela. O que o
 sistema protege é o risco: nenhuma ordem pode deixar a exposição de um ativo passar de R$ 100 milhões.
