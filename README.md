@@ -412,7 +412,7 @@ Os testes vão do mais rápido ao mais completo. O CI roda todos em cada PR, men
 
 | Tipo | O que confere | Tecnologia | Onde fica |
 |---|---|---|---|
-| **Unitário (.NET)** | Regras de campo da ordem, limite de exposição, validador de formato do OrderGenerator, log JSON, log da sessão FIX, o rastro que vai na tag 5100 e as métricas do worker | xUnit 2.9 | `tests/*.Tests/UnitTests/` |
+| **Unitário (.NET)** | Regras de campo da ordem, limite de exposição, validador de formato do OrderGenerator, log JSON, log da sessão FIX e o rastro que vai na tag 5100 | xUnit 2.9 | `tests/*.Tests/UnitTests/` (OrderGenerator e OrderAccumulator) |
 | **Arquitetura** | Que cada camada só depende do que pode (Clean Architecture) e que o namespace bate com a pasta | xUnit + NetArchTest 1.3 | `tests/*.Tests/Camadas/` |
 | **Integração (.NET)** | O app rodando contra um **PostgreSQL de verdade** e uma sessão FIX de verdade: bordas do limite, 200 ordens simultâneas repetidas cinco vezes, ordem repetida, apagar tudo durante envios, rotas lendo o banco e a leitura do worker de métricas | xUnit, `WebApplicationFactory`, Testcontainers 4.15 e QuickFIX/n | `tests/flowa.ordergenerator-webapi-ecs.Tests/`, `tests/flowa.orderaccumulator-worker-ecs.Tests/`, `tests/flowa.datadog-metrics-worker-ecs.Tests/` |
 | **Integração do compose** | Sobe o `docker compose` inteiro em projetos separados (portas 18080 e 18093): ida e volta FIX entre os containers e a religação depois de recriar o OrderAccumulator | xUnit + Docker Compose | `tests/IntegrationTests/` |
