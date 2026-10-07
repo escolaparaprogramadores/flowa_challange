@@ -5,8 +5,8 @@
   --space-0-5: 2px;
   --size-empty-list-icon: 32px;
   --max-width-empty-list-text: 360px;
-  --min-width-reject-reason: 150px;
-  --max-width-reject-reason: 230px;
+  --min-width-reject-reason: 110px;
+  --max-width-reject-reason: 200px;
 }
 
 .order-list { grid-area: order-list; container-type: inline-size; }
@@ -79,7 +79,7 @@
 .order-table-frame { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-tab); background: var(--color-sunken); }
 .order-table { width: 100%; border-collapse: collapse; font-size: var(--font-size-label); }
 .order-table th {
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) var(--space-1-5);
   text-align: left;
   font-size: var(--font-size-table-header);
   font-weight: 700;
@@ -90,7 +90,7 @@
   white-space: nowrap;
 }
 .order-table td {
-  padding: var(--space-3) var(--space-2);
+  padding: var(--space-3) var(--space-1-5);
   border-top: 1px solid var(--color-divider);
   background: var(--color-card);
   color: var(--color-text);
@@ -102,8 +102,9 @@
 .order-table tbody tr:hover td { background: var(--color-hover); }
 .order-row-day, .order-row-time { display: block; }
 .order-row-time { margin-top: var(--space-0-5); font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-muted); }
-.order-row-code { font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-secondary); }
-/* The reason is the only free text in the row: smaller, and it wraps instead of widening the table. */
+.order-row-code { font-size: var(--font-size-table-header); font-weight: 600; color: var(--color-text-secondary); }
+/* The reason is the only free text in the row: smaller, and it wraps instead of widening the table. To fit it at
+   1440 px with both codes still on one line, cells use 6 px on the sides and the codes 11 px. */
 .order-table td.order-row-reject-reason {
   min-width: var(--min-width-reject-reason);
   max-width: var(--max-width-reject-reason);
@@ -161,7 +162,7 @@
     color: var(--color-text-label);
   }
   .order-table td.order-row-code { grid-column: span 2; }
-  .order-table td.order-row-reject-reason { grid-column: 1 / -1; min-width: 0; max-width: none; }
+  .order-table td.order-row-reject-reason { grid-column: span 2; min-width: 0; max-width: none; }
 }
 
 @container (max-width: 459px) {
