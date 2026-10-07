@@ -114,6 +114,7 @@ na lista e confirme, ou rode `docker compose down -v` e `docker compose up` de n
 | A página abre com exposição zero e lista vazia, logo depois de subir | na primeira subida o OrderAccumulator ainda está criando as tabelas; enquanto isso o OrderGenerator responde exposição zero e lista vazia, sem erro | Espere alguns segundos e recarregue a página. |
 | A primeira ordem volta com **Erro de comunicação** | a sessão FIX entre o OrderGenerator e o OrderAccumulator ainda está ligando | Espere alguns segundos e envie de novo. |
 | O build para com `No commit` | o projeto foi baixado em ZIP, sem a pasta `.git` | Baixe com `git clone`, como no passo 1. |
+| No Windows, o `git clone` termina com `Filename too long` | o Windows limita o caminho de um arquivo a 260 letras, e a pasta onde você clonou já usa boa parte delas | Apague a pasta criada e clone de novo numa pasta de caminho curto, como `C:\dev`, ou deixe o Git usar caminhos longos: `git clone -c core.longpaths=true https://github.com/escolaparaprogramadores/flowa_challange.git`. |
 
 <details>
 <summary><b>Sem Docker</b> (clique para abrir)</summary>
