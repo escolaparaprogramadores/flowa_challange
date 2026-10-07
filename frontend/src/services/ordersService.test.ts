@@ -308,8 +308,9 @@ describe('fetchOrderListPage', () => {
   });
 
   it('CA-4 and RF-04: an item without rejectReason (body of an older server) reads as null, never undefined', async () => {
-    const { rejectReason: _omittedRejectReason, ...itemWithoutReason } = contractPage.orders[1];
-    simulateServerAnsweringWithJson(200, buildSuccessDataMessage({ ...contractPage, total: 1, orders: [itemWithoutReason] }, 'Página de ordens lida.'));
+    const storedOrderWithoutReason: Record<string, unknown> = { ...contractPage.orders[1] };
+    delete storedOrderWithoutReason.rejectReason;
+    simulateServerAnsweringWithJson(200, buildSuccessDataMessage({ ...contractPage, total: 1, orders: [storedOrderWithoutReason] }, 'Página de ordens lida.'));
     expect((await fetchOrderListPage(1)).orders[0].rejectReason).toBeNull();
   });
 

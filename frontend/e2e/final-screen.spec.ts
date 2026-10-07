@@ -290,21 +290,21 @@ test('CA-40 and CA-43: when opening the full screen, nothing goes to an external
   await expect(page.getByRole('list', { name: 'Painéis do Datadog' }).locator('.datadog-dashboard-logo svg')).toHaveCount(3);
 });
 
-// Final check of the round (F4, F5, F6 and F7 together) against mockup-01 and mockup-02: one asset of each side,
+// Final check of the whole screen against mockup-01 and mockup-02: one asset of each side,
 // one row of each kind, the box after "Aceita" and after "Rejeitada", and the test mode on and off.
 const LIMIT_REJECT_REASON = 'Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.';
 const PRICE_FIELD_REJECT_REASON = 'O preço deve ser múltiplo de 0,01.';
 const THREE_FIELD_REJECT_REASON = 'Símbolo inválido. Use PETR4, VALE3 ou VIIA4. A quantidade deve ser um número inteiro. O preço deve ser múltiplo de 0,01.';
 
-async function createRoundStatesThroughApi(orderTicketPage: Page) {
-  const roundOrders = [
-    { roundOrder: { symbol: 'VALE3', side: 'sell', quantity: 200, price: 61.4 }, expectedStatus: 'accepted' },
-    { roundOrder: { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 }, expectedStatus: 'accepted' },
-    { roundOrder: { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 }, expectedStatus: 'rejected' },
-    { roundOrder: { symbol: 'PETR4', side: 'buy', quantity: '100', price: '10.005' }, expectedStatus: 'rejected' },
+async function createAcceptedAndRejectedOrdersThroughApi(orderTicketPage: Page) {
+  const seededOrders = [
+    { seededOrder: { symbol: 'VALE3', side: 'sell', quantity: 200, price: 61.4 }, expectedStatus: 'accepted' },
+    { seededOrder: { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 }, expectedStatus: 'accepted' },
+    { seededOrder: { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 }, expectedStatus: 'rejected' },
+    { seededOrder: { symbol: 'PETR4', side: 'buy', quantity: '100', price: '10.005' }, expectedStatus: 'rejected' },
   ];
-  for (const { roundOrder, expectedStatus } of roundOrders) {
-    const createResponse = await orderTicketPage.request.post(CREATE_ORDER_ROUTE, { data: roundOrder });
+  for (const { seededOrder, expectedStatus } of seededOrders) {
+    const createResponse = await orderTicketPage.request.post(CREATE_ORDER_ROUTE, { data: seededOrder });
     expect(createResponse.status()).toBe(200);
     expect(((await createResponse.json()) as { data: { status: string } }).data.status).toBe(expectedStatus);
   }
@@ -319,7 +319,7 @@ async function sendThroughTicketAndWaitForList(orderTicketPage: Page) {
 for (const viewportWidth of [1440, 860, 375]) {
   test(`CA-4, CA-8 and CA-10: at ${viewportWidth} px the whole screen shows Comprado, Vendido and Zerado, the three kinds of row and the box in both modes`, async ({ page }) => {
     await deleteAllOrdersOnServer(page);
-    await createRoundStatesThroughApi(page);
+    await createAcceptedAndRejectedOrdersThroughApi(page);
     await page.setViewportSize({ width: viewportWidth, height: 1000 });
     await page.goto('/');
     const orderListCard = page.getByRole('region', { name: 'Compra/Venda' });
@@ -349,6 +349,10 @@ for (const viewportWidth of [1440, 860, 375]) {
     await orderTicketForm.getByLabel('Preço por ação (R$)').fill('10,00');
     await sendThroughTicketAndWaitForList(page);
     await expect(orderListCard.getByTestId('caixa-de-resposta').getByTestId('status-da-ordem')).toHaveText('Aceita');
+    await expect(listedOrderRows).toHaveCount(5);
+    await expect(listedOrderRows.first().locator('td[data-column="asset"]')).toHaveText('VALE3');
+    await expect(listedOrderRows.first().locator('td[data-column="status"] .order-badge')).toHaveText('Aceita');
+    await expect(listedOrderRows.first().locator('td[data-column="reject-reason"]')).toHaveText('—');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewportWidth);
     await page.mouse.move(0, 0);
     await page.screenshot({ path: path.join(EVIDENCE_FOLDER, `07-tela-final-caixa-aceita-${viewportWidth}.png`), fullPage: true });
@@ -363,6 +367,8 @@ for (const viewportWidth of [1440, 860, 375]) {
     const rejectedResponseBox = orderListCard.getByTestId('caixa-de-resposta');
     await expect(rejectedResponseBox.getByTestId('status-da-ordem')).toHaveText('Rejeitada');
     await expect(rejectedResponseBox.getByTestId('mensagem-da-ordem')).toHaveText(THREE_FIELD_REJECT_REASON);
+    await expect(listedOrderRows).toHaveCount(6);
+    await expect(listedOrderRows.first().locator('td[data-column="asset"]')).toHaveText('ITUB4');
     await expect(listedOrderRows.first().locator('td[data-column="reject-reason"]')).toHaveText(THREE_FIELD_REJECT_REASON);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewportWidth);
     await page.mouse.move(0, 0);

@@ -410,6 +410,11 @@ test.describe('full list of wide orders', () => {
           expect(fieldBox.x, `${fieldName}: starts inside the card`).toBeGreaterThanOrEqual(cardBox.x);
           expect(fieldBox.x + fieldBox.width, `${fieldName}: ends inside the card`).toBeLessThanOrEqual(cardBox.x + cardBox.width);
         }
+        // The reason is free text: it takes two grid columns (the whole row in 2 columns), never a single one.
+        const reasonBox = (await locateOrderRowCell(orderRow, 'reject-reason').boundingBox())!;
+        const dateBox = (await locateOrderRowCell(orderRow, 'date').boundingBox())!;
+        const statusBox = (await locateOrderRowCell(orderRow, 'status').boundingBox())!;
+        expect(reasonBox.width, `row ${rowPosition + 1}: reason spans two columns`).toBeGreaterThanOrEqual(statusBox.x + statusBox.width - dateBox.x - 1);
       }
       if (windowWidth === 375) await page.screenshot({ path: path.join(EVIDENCE_FOLDER, '06-list-375.png'), fullPage: true });
     });
