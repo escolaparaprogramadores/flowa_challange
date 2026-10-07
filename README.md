@@ -109,11 +109,11 @@ na lista e confirme, ou rode `docker compose down -v` e `docker compose up` de n
 | O que acontece | Por quê | O que fazer |
 |---|---|---|
 | `docker compose up` para logo no começo com erro de conexão com o Docker | o Docker não está rodando | Abra o Docker Desktop e espere ele dizer que está rodando (no Linux, `sudo systemctl start docker`). Depois rode `docker compose up` de novo. |
-| Erro dizendo que a porta 8080 já está em uso (`port is already allocated`) | outro programa usa a 8080 | Escolha outra porta com `FLOWA_HTTP_PORT` e abra a página nela. No bash (Mac, Linux, Git Bash): `FLOWA_HTTP_PORT=9080 docker compose up`. No PowerShell: `$env:FLOWA_HTTP_PORT="9080"; docker compose up`. A página fica em http://localhost:9080. |
+| Erro dizendo que a porta 8080 já está em uso (`port is already allocated` ou `ports are not available`) | outro programa usa a 8080 | Escolha outra porta com `FLOWA_HTTP_PORT` e abra a página nela. No bash (Mac, Linux, Git Bash): `FLOWA_HTTP_PORT=9080 docker compose up`. No PowerShell: `$env:FLOWA_HTTP_PORT="9080"; docker compose up`. A página fica em http://localhost:9080. |
 | A primeira subida demora | o Docker baixa as imagens base e compila os três apps e a tela | Espere. As próximas vezes usam o cache e sobem em segundos. Está pronto quando a página abre. |
 | A página abre com exposição zero e lista vazia, logo depois de subir | na primeira subida o OrderAccumulator ainda está criando as tabelas; enquanto isso o OrderGenerator responde exposição zero e lista vazia, sem erro | Espere alguns segundos e recarregue a página. |
 | A primeira ordem volta com **Erro de comunicação** | a sessão FIX entre o OrderGenerator e o OrderAccumulator ainda está ligando | Espere alguns segundos e envie de novo. |
-| O build para com `No commit` | o projeto foi baixado em ZIP, sem a pasta `.git` | Baixe com `git clone`, como no passo 1. |
+| O build para com `"/.git": not found` | o projeto foi baixado em ZIP, sem a pasta `.git` | Baixe com `git clone`, como no passo 1. |
 | No Windows, o `git clone` termina com `Filename too long` | o Windows limita o caminho de um arquivo a 260 letras, e a pasta onde você clonou já usa boa parte delas | Apague a pasta criada e clone de novo numa pasta de caminho curto, como `C:\dev`, ou deixe o Git usar caminhos longos: `git clone -c core.longpaths=true https://github.com/escolaparaprogramadores/flowa_challange.git`. |
 
 <details>
