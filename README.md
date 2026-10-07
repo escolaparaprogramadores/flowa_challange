@@ -70,10 +70,10 @@ Para rodar com Docker não precisa de .NET nem de Node na máquina: o build acon
 |---|---|---|---|
 | Git | baixar o projeto | 2.54 | `git --version` |
 | Docker Desktop (Windows e Mac) ou Docker Engine (Linux) | construir e rodar as imagens | 29.5.3 | `docker version` |
-| Docker Compose, que já vem no Docker Desktop | o `docker compose up` | v5.1.4 | `docker compose version` |
+| Docker Compose v2 ou mais novo, que já vem no Docker Desktop | o `docker compose up` | v5.1.4 | `docker compose version` |
 
-O comando é `docker compose`, com espaço. Se algo falhar e a sua versão for bem mais antiga que as da tabela,
-atualize o Docker antes de qualquer outra coisa.
+O comando é `docker compose`, com espaço: é o Compose v2 em diante. Se algo falhar e a sua versão for bem mais
+antiga que as da tabela, atualize o Docker antes de qualquer outra coisa.
 
 ### O que sobe
 
