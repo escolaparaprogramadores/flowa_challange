@@ -62,6 +62,8 @@ demora alguns minutos.
 
 `Ctrl+C` para; `docker compose down -v` apaga também o banco.
 
+Se a porta 8080 estiver ocupada: `FLOWA_HTTP_PORT=9080 docker compose up` e abra http://localhost:9080.
+
 ### O que precisa estar instalado
 
 Para rodar com Docker não precisa de .NET nem de Node na máquina: o build acontece dentro das imagens.
