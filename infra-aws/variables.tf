@@ -36,14 +36,26 @@ variable "accumulator_image_tag" {
   }
 }
 
+variable "datadog_metrics_image_tag" {
+  description = "Tag da imagem do worker de métricas do Datadog no ECR (SHA completo do commit que a construiu)."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.datadog_metrics_image_tag == null || can(regex("^[0-9a-f]{40}$", coalesce(var.datadog_metrics_image_tag, "-")))
+    error_message = "datadog_metrics_image_tag tem de ser o SHA completo do commit (40 caracteres hexadecimais)."
+  }
+}
+
 locals {
   prefixo_dos_recursos_flowa  = "flowa-challenge"
   ambiente_dos_recursos_flowa = "dev"
 
   # Um repositório de imagem e um log group por app, com o mesmo nome.
   nomes_dos_servicos_flowa = {
-    generator   = "${local.prefixo_dos_recursos_flowa}-order-generator"
-    accumulator = "${local.prefixo_dos_recursos_flowa}-order-accumulator"
+    generator       = "${local.prefixo_dos_recursos_flowa}-order-generator"
+    accumulator     = "${local.prefixo_dos_recursos_flowa}-order-accumulator"
+    datadog_metrics = "${local.prefixo_dos_recursos_flowa}-datadog-metrics"
   }
 
   # Banco e usuário iguais aos do compose (docs/contracts/contracts.md, seção 4).
@@ -59,6 +71,9 @@ locals {
   # O mesmo teto no Accumulator: a decisão da ordem segura a conexão só durante a transação curta, e 10 + 10
   # por task (o dobro durante o deploy) ainda deixa folga para o worker de métricas na db.t3.micro.
   limite_do_pool_do_accumulator = 10
+
+  # O worker de métricas faz uma leitura de cada vez a cada 5 minutos: 2 conexões bastam.
+  limite_do_pool_do_datadog_metrics = 2
 
   porta_fix = 9876
 }

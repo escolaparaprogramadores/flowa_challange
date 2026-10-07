@@ -1,4 +1,4 @@
-# Os dois apps em ECS Fargate: uma cópia de cada, ARM64, a menor task. Lê da fatia de rede os locals de
+# Os três serviços em ECS Fargate: uma cópia de cada, ARM64, a menor task. Lê da fatia de rede os locals de
 # infra-aws/outputs.tf (subnets, SGs, namespace, segredo, ECR e log groups).
 
 locals {
@@ -17,8 +17,9 @@ locals {
   comando_health_check_do_generator = "exec 3<>/dev/tcp/127.0.0.1/${local.porta_http_do_generator} && printf 'GET /health HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q ' 200 '"
 
   log_group_por_servico_flowa = {
-    generator   = local.log_group_generator
-    accumulator = local.log_group_accumulator
+    generator       = local.log_group_generator
+    accumulator     = local.log_group_accumulator
+    datadog_metrics = local.log_group_datadog_metrics
   }
 }
 
@@ -88,7 +89,7 @@ resource "aws_iam_role_policy" "permissoes_de_execucao_dos_servicos_flowa" {
           Resource = "${aws_cloudwatch_log_group.logs_dos_servicos_flowa[each.key].arn}:*"
         },
       ],
-      contains(["generator", "accumulator"], each.key) ? [{
+      contains(["generator", "accumulator", "datadog_metrics"], each.key) ? [{
         Effect   = "Allow"
         Action   = "secretsmanager:GetSecretValue"
         Resource = local.db_secret_arn
@@ -217,6 +218,39 @@ resource "aws_ecs_task_definition" "tarefa_do_order_accumulator" {
   }], local.containers_do_agente_por_servico_flowa.accumulator, local.containers_do_coletor_por_servico_flowa.accumulator))
 }
 
+# Worker de métricas: lê o banco a cada 5 minutos e manda ao agente do Datadog da própria task (UDP 8125).
+# Sem porta e sem checagem de saúde (decisão 20).
+resource "aws_ecs_task_definition" "tarefa_do_datadog_metrics" {
+  family                   = local.nomes_dos_servicos_flowa.datadog_metrics
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = local.cpu_da_task_flowa
+  memory                   = local.memoria_da_task_flowa
+  execution_role_arn       = aws_iam_role.role_de_execucao_dos_servicos_flowa["datadog_metrics"].arn
+  task_role_arn            = var.datadog_ligado ? aws_iam_role.role_da_tarefa_dos_servicos_flowa["datadog_metrics"].arn : null
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "ARM64"
+  }
+
+  container_definitions = jsonencode(concat([{
+    name      = "datadog-metrics"
+    image     = "${local.ecr_datadog_metrics_url}:${var.datadog_metrics_image_tag}"
+    essential = true
+
+    environment = concat([
+      { name = "Database__MaximumPoolSize", value = tostring(local.limite_do_pool_do_datadog_metrics) },
+    ], local.variaveis_datadog_do_app_por_servico_flowa.datadog_metrics)
+
+    secrets = [
+      { name = "ConnectionStrings__Flowa", valueFrom = "${local.db_secret_arn}:connection_string::" },
+    ]
+
+    logConfiguration = local.configuracao_de_log_do_app_por_servico_flowa.datadog_metrics
+  }], local.containers_do_agente_por_servico_flowa.datadog_metrics, local.containers_do_coletor_por_servico_flowa.datadog_metrics))
+}
+
 # Registro A com TTL de 10 s: depois de um deploy o accumulator troca de IP, e o QuickFIX/n resolve o nome
 # de novo a cada tentativa de logon.
 resource "aws_service_discovery_service" "registro_dns_do_order_accumulator" {
@@ -337,6 +371,35 @@ resource "aws_ecs_service" "servico_do_order_generator" {
   triggers = {
     registro_no_cloud_map = "2026-10-03"
   }
+
+  # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
+  depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa, aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa]
+}
+
+# Uma cópia só, e o deploy para a velha antes de subir a nova: duas cópias contariam as mesmas ordens.
+# Ninguém chama o worker, então ele não entra no Cloud Map.
+resource "aws_ecs_service" "servico_do_datadog_metrics" {
+  name            = local.nomes_dos_servicos_flowa.datadog_metrics
+  cluster         = aws_ecs_cluster.cluster_dos_servicos_flowa.id
+  task_definition = aws_ecs_task_definition.tarefa_do_datadog_metrics.arn
+  launch_type     = "FARGATE"
+  desired_count   = 1
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = local.subnets_tarefas
+    security_groups  = [local.sg_datadog_metrics]
+    assign_public_ip = true
+  }
+
+  wait_for_steady_state = true
 
   # A task só sobe depois que a role já pode puxar a imagem, escrever o log e ler o segredo.
   depends_on = [aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa, aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa]

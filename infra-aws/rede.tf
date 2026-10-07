@@ -120,6 +120,14 @@ resource "aws_security_group" "accumulator" {
   tags = { Name = "${local.prefixo_dos_recursos_flowa}-accumulator" }
 }
 
+resource "aws_security_group" "datadog_metrics" {
+  name        = "${local.prefixo_dos_recursos_flowa}-datadog-metrics"
+  description = "Worker de metricas do Datadog: sem entrada; sai so para o banco e HTTPS."
+  vpc_id      = aws_vpc.rede_flowa.id
+
+  tags = { Name = "${local.prefixo_dos_recursos_flowa}-datadog-metrics" }
+}
+
 resource "aws_security_group" "banco" {
   name        = "${local.prefixo_dos_recursos_flowa}-banco"
   description = "PostgreSQL: 5432 so a partir do accumulator."
@@ -153,6 +161,15 @@ resource "aws_vpc_security_group_ingress_rule" "banco_postgres_do_generator" {
   from_port                    = local.banco_porta
   to_port                      = local.banco_porta
   referenced_security_group_id = aws_security_group.generator.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "banco_postgres_do_datadog_metrics" {
+  security_group_id            = aws_security_group.banco.id
+  description                  = "PostgreSQL vindo do worker de metricas"
+  ip_protocol                  = "tcp"
+  from_port                    = local.banco_porta
+  to_port                      = local.banco_porta
+  referenced_security_group_id = aws_security_group.datadog_metrics.id
 }
 
 # Saída só do necessário. HTTPS para fora: puxar imagem do ECR, ler o segredo e mandar log passam pela
@@ -197,6 +214,24 @@ resource "aws_vpc_security_group_egress_rule" "accumulator_https" {
 resource "aws_vpc_security_group_egress_rule" "accumulator_postgres" {
   security_group_id            = aws_security_group.accumulator.id
   description                  = "PostgreSQL do accumulator para o banco"
+  ip_protocol                  = "tcp"
+  from_port                    = local.banco_porta
+  to_port                      = local.banco_porta
+  referenced_security_group_id = aws_security_group.banco.id
+}
+
+resource "aws_vpc_security_group_egress_rule" "datadog_metrics_https" {
+  security_group_id = aws_security_group.datadog_metrics.id
+  description       = "HTTPS do worker de metricas (ECR, segredos, logs, Datadog)"
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_egress_rule" "datadog_metrics_postgres" {
+  security_group_id            = aws_security_group.datadog_metrics.id
+  description                  = "PostgreSQL do worker de metricas para o banco"
   ip_protocol                  = "tcp"
   from_port                    = local.banco_porta
   to_port                      = local.banco_porta
