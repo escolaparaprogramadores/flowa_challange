@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Flowa.Commons</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Log em JSON e injeção de dependência vêm do framework compartilhado do ASP.NET Core, como nas apps. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.89" />
+    <PackageReference Include="DogStatsD-CSharp-Client" Version="9.2.1" />
+    <PackageReference Include="Npgsql" Version="10.0.3" />
+  </ItemGroup>
+
+  <!-- Um só dicionário FIX 4.4 com a tag 5100 para as duas apps: a referência de projeto o leva para o lado do executável de cada uma. -->
+  <ItemGroup>
+    <None Update="Fix\FIX44-flowa.xml" Link="FIX44-flowa.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

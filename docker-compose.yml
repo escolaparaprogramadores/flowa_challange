@@ -1,6 +1,6 @@
 # Sobe tudo com um comando: docker compose up
-# Só a página (OrderGenerator) fica exposta, e só nesta máquina (127.0.0.1); o FIX, a API do
-# OrderAccumulator e o banco ficam na rede interna do compose.
+# Só a página (OrderGenerator) fica exposta, e só nesta máquina (127.0.0.1); o FIX do
+# OrderAccumulator (worker sem HTTP) e o banco ficam na rede interna do compose.
 name: flowa
 
 services:
@@ -23,15 +23,15 @@ services:
   orderaccumulator:
     build:
       context: .
-      dockerfile: src/app-base-order-accumulator-webapi-ecs/Dockerfile
+      dockerfile: src/flowa.orderaccumulator-worker-ecs/Dockerfile
       args:
         SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
     # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
     pull_policy: build
     environment:
-      ASPNETCORE_HTTP_PORTS: "8081"
       Fix__AcceptorPort: "9876"
       ConnectionStrings__Flowa: "Host=postgres;Port=5432;Database=flowa;Username=flowa;Password=${POSTGRES_PASSWORD:-flowa_dev}"
+      Database__MaximumPoolSize: "10"
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,7 +40,7 @@ services:
   ordergenerator:
     build:
       context: .
-      dockerfile: src/app-base-order-generator-webapi-ecs/Dockerfile
+      dockerfile: src/flowa.ordergenerator-webapi-ecs/Dockerfile
       args:
         SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
     # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
@@ -49,11 +49,34 @@ services:
       ASPNETCORE_HTTP_PORTS: "8080"
       Fix__AcceptorHost: orderaccumulator
       Fix__AcceptorPort: "9876"
-      OrderAccumulator__BaseUrl: http://orderaccumulator:8081
+      # Mesmo usuário e senha do OrderAccumulator: o Generator lê a exposição e as ordens e apaga direto no banco.
+      ConnectionStrings__Flowa: "Host=postgres;Port=5432;Database=flowa;Username=flowa;Password=${POSTGRES_PASSWORD:-flowa_dev}"
+      Database__MaximumPoolSize: "10"
     ports:
       - "127.0.0.1:${FLOWA_HTTP_PORT:-8080}:8080"
     depends_on:
-      - orderaccumulator
+      postgres:
+        condition: service_healthy
+      orderaccumulator:
+        condition: service_started
+    restart: unless-stopped
+
+  # Manda ao Datadog, a cada 5 minutos, a exposição e a contagem de ordens que lê no banco. Sem porta e sem
+  # checagem de saúde (decisão 20); sem agente do Datadog aqui, o envio por UDP só não chega a lugar nenhum.
+  datadogmetrics:
+    build:
+      context: .
+      dockerfile: src/flowa.datadog-metrics-worker-ecs/Dockerfile
+      args:
+        SOURCE_REVISION_ID: ${SOURCE_REVISION_ID:-}
+    # Reconstrói sempre no up (com cache): imagem antiga de mesmo nome subiria com outro commit.
+    pull_policy: build
+    environment:
+      ConnectionStrings__Flowa: "Host=postgres;Port=5432;Database=flowa;Username=flowa;Password=${POSTGRES_PASSWORD:-flowa_dev}"
+      Database__MaximumPoolSize: "2"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

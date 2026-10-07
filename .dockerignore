@@ -8,7 +8,7 @@
 **/TestResults/
 **/playwright-report/
 **/test-results/
-src/app-base-order-generator-webapi-ecs/wwwroot/
+src/flowa.ordergenerator-webapi-ecs/wwwroot/
 .env
 .env.*
 *.log

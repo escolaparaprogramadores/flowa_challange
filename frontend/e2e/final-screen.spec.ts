@@ -92,7 +92,7 @@ for (const viewportWidth of [860, 375]) {
     expect(orderListBox.y).toBeGreaterThanOrEqual(orderTicketBox.y + orderTicketBox.height);
 
     // ASSUMI-06 (F6 decision, its ASSUMI-04): instead of scrolling sideways, the list fits entirely in the card.
-    // At 860 the table stays whole with its header; at 375 each order becomes a block with the 8 labelled fields.
+    // At 860 the table stays whole with its header; at 375 each order becomes a block with the 9 labelled fields.
     const orderTableFrame = page.getByRole('region', { name: 'Compra/Venda' }).locator('.order-table-frame');
     const orderTableFrameBox = await assertVisibleAndReadElementBox(orderTableFrame, 'order list frame');
     expect(orderTableFrameBox.x + orderTableFrameBox.width).toBeLessThanOrEqual(orderListBox.x + orderListBox.width + 0.5);
@@ -106,11 +106,11 @@ for (const viewportWidth of [860, 375]) {
       isHeaderVisible: getComputedStyle(orderRowOnPage.closest('table')!.querySelector('thead')!).display !== 'none',
       fieldLabels: [...orderRowOnPage.querySelectorAll('td')].map((orderField) => getComputedStyle(orderField, '::before').content),
     }));
-    const expectedFieldLabels = ['"Data"', '"Status"', '"Ativo"', '"Lado"', '"Quantidade"', '"Preço"', '"Número da ordem"', '"Identificador do envio"'];
+    const expectedFieldLabels = ['"Data"', '"Status"', '"Motivo"', '"Ativo"', '"Lado"', '"Quantidade"', '"Preço"', '"Número da ordem"', '"Identificador do envio"'];
     if (viewportWidth === 375) {
       expect(orderListLayout).toEqual({ rowDisplay: 'grid', isHeaderVisible: false, fieldLabels: expectedFieldLabels });
     } else {
-      expect(orderListLayout).toEqual({ rowDisplay: 'table-row', isHeaderVisible: true, fieldLabels: Array(8).fill('none') });
+      expect(orderListLayout).toEqual({ rowDisplay: 'table-row', isHeaderVisible: true, fieldLabels: Array(9).fill('none') });
     }
 
     // Datadog links and badge wrap without overlapping the logo and without leaving the screen.
@@ -289,3 +289,96 @@ test('CA-40 and CA-43: when opening the full screen, nothing goes to an external
   // The Datadog logo of the 3 links is an SVG inside the page.
   await expect(page.getByRole('list', { name: 'Painéis do Datadog' }).locator('.datadog-dashboard-logo svg')).toHaveCount(3);
 });
+
+// Final check of the whole screen against mockup-01 and mockup-02: one asset of each side,
+// one row of each kind, the box after "Aceita" and after "Rejeitada", and the test mode on and off.
+const LIMIT_REJECT_REASON = 'Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.';
+const PRICE_FIELD_REJECT_REASON = 'O preço deve ser múltiplo de 0,01.';
+const THREE_FIELD_REJECT_REASON = 'Símbolo inválido. Use PETR4, VALE3 ou VIIA4. A quantidade deve ser um número inteiro. O preço deve ser múltiplo de 0,01.';
+
+async function createAcceptedAndRejectedOrdersThroughApi(orderTicketPage: Page) {
+  const seededOrders = [
+    { seededOrder: { symbol: 'VALE3', side: 'sell', quantity: 200, price: 61.4 }, expectedStatus: 'accepted' },
+    { seededOrder: { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 }, expectedStatus: 'accepted' },
+    { seededOrder: { symbol: 'PETR4', side: 'buy', quantity: 99_999, price: 999.99 }, expectedStatus: 'rejected' },
+    { seededOrder: { symbol: 'PETR4', side: 'buy', quantity: '100', price: '10.005' }, expectedStatus: 'rejected' },
+  ];
+  for (const { seededOrder, expectedStatus } of seededOrders) {
+    const createResponse = await orderTicketPage.request.post(CREATE_ORDER_ROUTE, { data: seededOrder });
+    expect(createResponse.status()).toBe(200);
+    expect(((await createResponse.json()) as { data: { status: string } }).data.status).toBe(expectedStatus);
+  }
+}
+
+async function sendThroughTicketAndWaitForList(orderTicketPage: Page) {
+  const orderListReread = orderTicketPage.waitForResponse((httpResponse) => httpResponse.request().method() === 'GET' && new URL(httpResponse.url()).pathname === ORDERS_ROUTE);
+  await orderTicketPage.getByRole('form', { name: 'Boleta de ordem' }).getByRole('button', { name: /^Enviar ordem/ }).click();
+  await orderListReread;
+}
+
+for (const viewportWidth of [1440, 860, 375]) {
+  test(`CA-4, CA-8 and CA-10: at ${viewportWidth} px the whole screen shows Comprado, Vendido and Zerado, the three kinds of row and the box in both modes`, async ({ page }) => {
+    await deleteAllOrdersOnServer(page);
+    await createAcceptedAndRejectedOrdersThroughApi(page);
+    await page.setViewportSize({ width: viewportWidth, height: 1000 });
+    await page.goto('/');
+    const orderListCard = page.getByRole('region', { name: 'Compra/Venda' });
+    const listedOrderRows = orderListCard.getByTestId('linha-da-ordem');
+    await expect(listedOrderRows).toHaveCount(4);
+    await page.evaluate(() => document.fonts.ready);
+    for (const [exposureSymbol, exposureSideLabel] of [['PETR4', 'Comprado'], ['VALE3', 'Vendido'], ['VIIA4', 'Zerado']]) {
+      await expect(page.getByTestId('exposicao-' + exposureSymbol).getByTestId('exposicao-lado'), exposureSymbol).toHaveText(exposureSideLabel);
+    }
+    const expectedRows = [
+      ['Rejeitada', PRICE_FIELD_REJECT_REASON],
+      ['Rejeitada', LIMIT_REJECT_REASON],
+      ['Aceita', '—'],
+      ['Aceita', '—'],
+    ];
+    for (const [rowPosition, [expectedBadge, expectedReason]] of expectedRows.entries()) {
+      const listedOrderRow = listedOrderRows.nth(rowPosition);
+      await expect(listedOrderRow.locator('td[data-column="status"] .order-badge'), `row ${rowPosition + 1}`).toHaveText(expectedBadge);
+      await expect(listedOrderRow.locator('td[data-column="reject-reason"]'), `row ${rowPosition + 1}`).toHaveText(expectedReason);
+    }
+    await expect(listedOrderRows.nth(0).locator('td[data-column="price"]')).toHaveText('R$ 10,005');
+
+    const orderTicketForm = page.getByRole('form', { name: 'Boleta de ordem' });
+    await orderTicketForm.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'VALE3', exact: true }).click();
+    await orderTicketForm.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: 'Venda' }).click();
+    await orderTicketForm.getByLabel(/^Quantidade de/).fill('1');
+    await orderTicketForm.getByLabel('Preço por ação (R$)').fill('10,00');
+    await sendThroughTicketAndWaitForList(page);
+    await expect(orderListCard.getByTestId('caixa-de-resposta').getByTestId('status-da-ordem')).toHaveText('Aceita');
+    await expect(listedOrderRows).toHaveCount(5);
+    await expect(listedOrderRows.first().locator('td[data-column="asset"]')).toHaveText('VALE3');
+    await expect(listedOrderRows.first().locator('td[data-column="status"] .order-badge')).toHaveText('Aceita');
+    await expect(listedOrderRows.first().locator('td[data-column="reject-reason"]')).toHaveText('—');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewportWidth);
+    await page.mouse.move(0, 0);
+    await page.screenshot({ path: path.join(EVIDENCE_FOLDER, `07-tela-final-caixa-aceita-${viewportWidth}.png`), fullPage: true });
+
+    await orderTicketForm.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'VALE3', exact: true }).dblclick();
+    await expect(orderTicketForm.getByText('Modo de teste', { exact: true })).toBeVisible();
+    await orderTicketForm.getByRole('group', { name: 'Lado da ordem' }).getByRole('button', { name: 'Compra' }).click();
+    await orderTicketForm.getByRole('textbox', { name: 'Símbolo', exact: true }).fill('ITUB4');
+    await orderTicketForm.getByLabel('Quantidade', { exact: true }).fill('1,5');
+    await orderTicketForm.getByLabel('Preço por ação (R$)').fill('10,005');
+    await sendThroughTicketAndWaitForList(page);
+    const rejectedResponseBox = orderListCard.getByTestId('caixa-de-resposta');
+    await expect(rejectedResponseBox.getByTestId('status-da-ordem')).toHaveText('Rejeitada');
+    await expect(rejectedResponseBox.getByTestId('mensagem-da-ordem')).toHaveText(THREE_FIELD_REJECT_REASON);
+    await expect(listedOrderRows).toHaveCount(6);
+    await expect(listedOrderRows.first().locator('td[data-column="asset"]')).toHaveText('ITUB4');
+    await expect(listedOrderRows.first().locator('td[data-column="reject-reason"]')).toHaveText(THREE_FIELD_REJECT_REASON);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewportWidth);
+    await page.mouse.move(0, 0);
+    await page.screenshot({ path: path.join(EVIDENCE_FOLDER, `07-tela-final-modo-teste-${viewportWidth}.png`), fullPage: true });
+
+    await orderTicketForm.getByRole('textbox', { name: 'Símbolo', exact: true }).dblclick();
+    await expect(orderTicketForm.getByText('Modo de teste', { exact: true })).toHaveCount(0);
+    await expect(orderTicketForm.getByRole('group', { name: 'Símbolo' }).getByRole('button', { name: 'PETR4', exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(viewportWidth);
+    await page.mouse.move(0, 0);
+    await page.screenshot({ path: path.join(EVIDENCE_FOLDER, `07-tela-final-modo-normal-${viewportWidth}.png`), fullPage: true });
+  });
+}

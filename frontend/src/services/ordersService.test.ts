@@ -48,15 +48,56 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const testModeOrder: OrderToSend = { mode: 'test', symbol: 'ITUB4', side: 'buy', quantityText: '1,5', priceText: '10,005' };
+const buyOrderAsAttempted = { symbol: 'PETR4', side: 'buy', quantity: 100, priceInReais: 10.5 };
+
+function simulateServerAnsweringWithProblemCode(problemHttpStatus: number, problemErrorCode: string, problemDetail: string) {
+  const apiProblem = {
+    type: `urn:base-investimentos:problem:${problemErrorCode}`, title: 'Serviço indisponível', status: problemHttpStatus,
+    detail: problemDetail, instance: '/api/orders', success: false, errors: [],
+  };
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(apiProblem), {
+    status: problemHttpStatus, headers: { 'Content-Type': 'application/problem+json' },
+  })));
+}
+
+function stubFetchAnsweringAccepted() {
+  const screenFetch = vi.fn(async () => new Response(JSON.stringify({ status: 'accepted' }), { status: 200 }));
+  vi.stubGlobal('fetch', screenFetch);
+  return screenFetch;
+}
+
+function readSentOrderBody(screenFetch: ReturnType<typeof stubFetchAnsweringAccepted>) {
+  const [, callOptions] = screenFetch.mock.calls[0] as unknown as [string, RequestInit];
+  return JSON.parse(String(callOptions.body));
+}
+
 describe('sendOrder', () => {
   it('sends the body in the contract format, with the side in English and the price in reais', async () => {
-    const screenFetch = vi.fn(async () => new Response(JSON.stringify({ status: 'accepted' }), { status: 200 }));
-    vi.stubGlobal('fetch', screenFetch);
+    const screenFetch = stubFetchAnsweringAccepted();
     await sendOrder({ ...buyOrder, side: 'sell' });
     const [calledRoute, callOptions] = screenFetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(calledRoute).toBe('/api/orders');
     expect(callOptions.method).toBe('POST');
     expect(JSON.parse(String(callOptions.body))).toEqual({ symbol: 'PETR4', side: 'sell', quantity: 100, price: 10.5 });
+  });
+
+  it('RF-03: the normal order with an explicit mode sends the same numeric body', async () => {
+    const screenFetch = stubFetchAnsweringAccepted();
+    await sendOrder({ ...buyOrder, mode: 'normal' });
+    expect(readSentOrderBody(screenFetch)).toEqual({ symbol: 'PETR4', side: 'buy', quantity: 100, price: 10.5 });
+  });
+
+  it('CA-26 and RF-02: the test mode sends the typed text, only with the decimal comma turned into a dot', async () => {
+    const screenFetch = stubFetchAnsweringAccepted();
+    await sendOrder(testModeOrder);
+    expect(readSentOrderBody(screenFetch)).toEqual({ symbol: 'ITUB4', side: 'buy', quantity: '1.5', price: '10.005' });
+  });
+
+  it('CA-26 and RF-02: text that is not a number goes exactly as typed', async () => {
+    const screenFetch = stubFetchAnsweringAccepted();
+    await sendOrder({ mode: 'test', symbol: 'PETR4', side: 'sell', quantityText: 'abc', priceText: '10,00' });
+    expect(readSentOrderBody(screenFetch)).toEqual({ symbol: 'PETR4', side: 'sell', quantity: 'abc', price: '10.00' });
   });
 
   it('CA-4: converts the accepted order DataMessage for the screen, with the server message', async () => {
@@ -65,7 +106,7 @@ describe('sendOrder', () => {
       'Ordem aceita.'));
     expect(await sendOrder(buyOrder)).toEqual({
       outcome: 'accepted', serverMessage: 'Ordem aceita.', clOrdId: 'send-1', orderId: 'order-1',
-      symbol: 'PETR4', side: 'sell', quantity: 100, priceInReais: 10.5,
+      symbol: 'PETR4', side: 'sell', quantity: 100, priceInReais: 10.5, attemptedOrder: buyOrderAsAttempted,
     });
   });
 
@@ -76,7 +117,16 @@ describe('sendOrder', () => {
     expect(await sendOrder(buyOrder)).toEqual({
       outcome: 'rejected', serverMessage: 'Ordem rejeitada: a exposição de VIIA4 passaria do limite de 100.000.000,00.',
       clOrdId: 'send-2', orderId: 'order-2', symbol: 'VIIA4', side: 'buy', quantity: 99_999, priceInReais: 999.99,
+      attemptedOrder: buyOrderAsAttempted,
     });
+  });
+
+  it('RF-13: in the test mode the attempted order keeps the typed text, not a rounded number', async () => {
+    simulateServerAnsweringWithJson(200, buildSuccessDataMessage(
+      { status: 'rejected', clOrdId: 'send-3', orderId: 'order-3', symbol: 'ITUB4', side: 'buy', quantity: 1.5, price: 10.005 },
+      'Símbolo inválido.'));
+    const orderSendResult = await sendOrder(testModeOrder);
+    expect(orderSendResult.attemptedOrder).toEqual({ symbol: 'ITUB4', side: 'buy', quantity: '1,5', priceInReais: '10,005' });
   });
 
   it('RF-25 and CA-5: translates the server 400 problem+json into the message of each field', async () => {
@@ -85,14 +135,64 @@ describe('sendOrder', () => {
       outcome: 'invalid',
       serverMessage: 'A ordem tem campos inválidos.',
       fieldErrors: ['O preço deve ser múltiplo de 0,01.'],
+      attemptedOrder: buyOrderAsAttempted,
     });
   });
 
-  it('RF-23: a server 503 becomes "order not confirmed", without the internal service name', async () => {
+  it('CA-26 and RF-07: the 400 of a quantity "abc" brings the field message and the typed text', async () => {
+    simulateServerAnsweringWithProblem(400, 'A ordem tem campos inválidos.', ['A quantidade deve ser um número inteiro.']);
+    expect(await sendOrder({ mode: 'test', symbol: 'PETR4', side: 'buy', quantityText: 'abc', priceText: '10,00' })).toEqual({
+      outcome: 'invalid',
+      serverMessage: 'A ordem tem campos inválidos.',
+      fieldErrors: ['A quantidade deve ser um número inteiro.'],
+      attemptedOrder: { symbol: 'PETR4', side: 'buy', quantity: 'abc', priceInReais: '10,00' },
+    });
+  });
+
+  it('G-2 and RF-08: the 422 fix-order-rejected says the order did not enter, with the reject text', async () => {
+    simulateServerAnsweringWithProblemCode(422, 'fix-order-rejected', 'Required tag missing (35=3, 371=54).');
+    expect(await sendOrder(buyOrder)).toEqual({
+      outcome: 'not-entered', serverMessage: 'Required tag missing (35=3, 371=54).', attemptedOrder: buyOrderAsAttempted,
+    });
+  });
+
+  for (const maybeAcceptedErrorCode of ['execution-report-timeout', 'fix-session-lost']) {
+    it(`CA-11 and RF-10: the 503 ${maybeAcceptedErrorCode} says the order may have been accepted, never "try again"`, async () => {
+      simulateServerAnsweringWithProblemCode(503, maybeAcceptedErrorCode, 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.');
+      const orderSendResult = await sendOrder(buyOrder);
+      expect(orderSendResult).toEqual({
+        outcome: 'maybe-accepted',
+        serverMessage: 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.',
+        attemptedOrder: buyOrderAsAttempted,
+      });
+      expect(orderSendResult.serverMessage).not.toContain('Tente de novo');
+    });
+  }
+
+  it('CA-23 and RF-09: the 503 without a FIX session stays a communication failure, without the internal service name', async () => {
+    simulateServerAnsweringWithProblemCode(503, 'fix-session-not-logged-on', 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.');
+    expect(await sendOrder(buyOrder)).toEqual({
+      outcome: 'communication-failure',
+      serverMessage: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
+      attemptedOrder: buyOrderAsAttempted,
+    });
+  });
+
+  it('RF-23: a server 503 of another code becomes "order not confirmed", without the internal service name', async () => {
     simulateServerAnsweringWithProblem(503, 'Não foi possível falar com o OrderAccumulator. Tente de novo em instantes.');
     expect(await sendOrder(buyOrder)).toEqual({
       outcome: 'communication-failure',
       serverMessage: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
+      attemptedOrder: buyOrderAsAttempted,
+    });
+  });
+
+  it('RF-09: a call that fails before any answer (network down) is a communication failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    expect(await sendOrder(buyOrder)).toEqual({
+      outcome: 'communication-failure',
+      serverMessage: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
+      attemptedOrder: buyOrderAsAttempted,
     });
   });
 
@@ -101,6 +201,7 @@ describe('sendOrder', () => {
     expect(await sendOrder(buyOrder)).toEqual({
       outcome: 'communication-failure',
       serverMessage: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
+      attemptedOrder: buyOrderAsAttempted,
     });
   });
 
@@ -109,6 +210,7 @@ describe('sendOrder', () => {
     expect(await sendOrder(buyOrder)).toEqual({
       outcome: 'communication-failure',
       serverMessage: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
+      attemptedOrder: buyOrderAsAttempted,
     });
   });
 
@@ -117,10 +219,11 @@ describe('sendOrder', () => {
     expect(await sendOrder(buyOrder)).toEqual({
       outcome: 'communication-failure',
       serverMessage: 'A ordem não foi confirmada: o servidor de ordens teve um erro inesperado. Tente de novo em instantes.',
+      attemptedOrder: buyOrderAsAttempted,
     });
   });
 
-  it('RF-23: a server that does not answer is awaited for 6 s, and no less, and becomes a communication failure', async () => {
+  it('CA-11 and RF-10: a server that does not answer is awaited for 6 s, and no less, and the order may have been accepted', async () => {
     vi.useFakeTimers();
     simulateServerThatNeverAnswers();
     let orderSendFinished = false;
@@ -129,13 +232,14 @@ describe('sendOrder', () => {
     expect(orderSendFinished).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await pendingOrderSend).toEqual({
-      outcome: 'communication-failure',
-      serverMessage: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
+      outcome: 'maybe-accepted',
+      serverMessage: 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.',
+      attemptedOrder: buyOrderAsAttempted,
     });
     expect(SCREEN_MAX_WAIT_IN_MS).toBe(6_000);
   });
 
-  it('RF-23: headers that arrive with a stalled body are also abandoned at the deadline', async () => {
+  it('CA-11 and RF-10: headers that arrive with a stalled body are also abandoned at the deadline, as "may have been accepted"', async () => {
     vi.useFakeTimers();
     const fetchWithStalledBody = async (...[, callOptions]: [string, RequestInit]) => {
       const bodyThatNeverEnds = new ReadableStream({
@@ -149,8 +253,9 @@ describe('sendOrder', () => {
     const pendingOrderSend = sendOrder(buyOrder);
     await vi.advanceTimersByTimeAsync(SCREEN_MAX_WAIT_IN_MS);
     expect(await pendingOrderSend).toEqual({
-      outcome: 'communication-failure',
-      serverMessage: 'A ordem não foi confirmada: o servidor de ordens não respondeu. Tente de novo em instantes.',
+      outcome: 'maybe-accepted',
+      serverMessage: 'A ordem pode ter sido aceita. Confira a lista antes de enviar de novo.',
+      attemptedOrder: buyOrderAsAttempted,
     });
   });
 });
@@ -174,8 +279,8 @@ describe('fetchOrderListPage', () => {
     pageSize: 10,
     total: 2,
     orders: [
-      { receivedAt: '2026-10-04T09:34:23.390427Z', status: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, price: 12.34, orderId: 'order-2', clOrdId: 'send-2' },
-      { receivedAt: '2026-10-04T09:30:00Z', status: 'rejected', symbol: null, side: null, quantity: 5, price: 1.1, orderId: 'order-1', clOrdId: 'send-1' },
+      { receivedAt: '2026-10-04T09:34:23.390427Z', status: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, price: 12.34, orderId: 'order-2', clOrdId: 'send-2', rejectReason: null },
+      { receivedAt: '2026-10-04T09:30:00Z', status: 'rejected', symbol: null, side: null, quantity: 5, price: 1.1, orderId: 'order-1', clOrdId: 'send-1', rejectReason: 'O preço deve ser múltiplo de 0,01.' },
     ],
   };
 
@@ -196,10 +301,17 @@ describe('fetchOrderListPage', () => {
       page: 1,
       totalOrders: 2,
       orders: [
-        { receivedAt: '2026-10-04T09:34:23.390427Z', outcome: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, priceInReais: 12.34, orderId: 'order-2', clOrdId: 'send-2' },
-        { receivedAt: '2026-10-04T09:30:00Z', outcome: 'rejected', symbol: null, side: null, quantity: 5, priceInReais: 1.1, orderId: 'order-1', clOrdId: 'send-1' },
+        { receivedAt: '2026-10-04T09:34:23.390427Z', outcome: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, priceInReais: 12.34, orderId: 'order-2', clOrdId: 'send-2', rejectReason: null },
+        { receivedAt: '2026-10-04T09:30:00Z', outcome: 'rejected', symbol: null, side: null, quantity: 5, priceInReais: 1.1, orderId: 'order-1', clOrdId: 'send-1', rejectReason: 'O preço deve ser múltiplo de 0,01.' },
       ],
     });
+  });
+
+  it('CA-4 and RF-04: an item without rejectReason (body of an older server) reads as null, never undefined', async () => {
+    const storedOrderWithoutReason: Record<string, unknown> = { ...contractPage.orders[1] };
+    delete storedOrderWithoutReason.rejectReason;
+    simulateServerAnsweringWithJson(200, buildSuccessDataMessage({ ...contractPage, total: 1, orders: [storedOrderWithoutReason] }, 'Página de ordens lida.'));
+    expect((await fetchOrderListPage(1)).orders[0].rejectReason).toBeNull();
   });
 
   it('CA-11: "sell" stays the sell side', async () => {

@@ -65,10 +65,10 @@ jobs:
         id: infra
         if: steps.develop_tip.outputs.publish == 'true'
         run: |
-          if [ -d infra ]; then
+          if [ -d infra-aws ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "nothing to apply: infra/ does not exist"
+            echo "nothing to apply: infra-aws/ does not exist"
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -138,8 +138,9 @@ jobs:
             echo "${image_in_use##*:}"
           }
 
-          for service_container_and_folder in flowa-challenge-order-generator:generator:app-base-order-generator-webapi-ecs \
-                                           flowa-challenge-order-accumulator:accumulator:app-base-order-accumulator-webapi-ecs; do
+          for service_container_and_folder in flowa-challenge-order-generator:generator:flowa.ordergenerator-webapi-ecs \
+                                           flowa-challenge-order-accumulator:accumulator:flowa.orderaccumulator-worker-ecs \
+                                           flowa-challenge-datadog-metrics:datadog-metrics:flowa.datadog-metrics-worker-ecs; do
             IFS=: read -r ecs_service_name container_name service_folder <<< "$service_container_and_folder"
             tag_in_use=$(service_image_tag_in_use "$ecs_service_name" "$container_name")
             mapfile -t image_inputs < <(service_image_inputs "src/$service_folder/Dockerfile")
@@ -182,7 +183,7 @@ jobs:
 
       - name: terraform init and ECR repositories
         if: steps.infra.outputs.exists == 'true'
-        working-directory: infra
+        working-directory: infra-aws
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
         run: |
@@ -198,7 +199,7 @@ jobs:
           mapfile -t ecr_repository_targets < <(grep -hoE '^resource "aws_ecr_repository" "[A-Za-z0-9_-]+"' ./*.tf |
             awk -F'"' '{ print "-target=aws_ecr_repository." $4 }')
           if [ "${#ecr_repository_targets[@]}" -eq 0 ]; then
-            echo "no resource \"aws_ecr_repository\" in infra/*.tf" >&2
+            echo "no resource \"aws_ecr_repository\" in infra-aws/*.tf" >&2
             exit 1
           fi
           terraform_quieto apply -auto-approve "${ecr_repository_targets[@]}"
@@ -211,10 +212,12 @@ jobs:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
           BUILD_GENERATOR_IMAGE: ${{ steps.tags.outputs.generator_build }}
           BUILD_ACCUMULATOR_IMAGE: ${{ steps.tags.outputs.accumulator_build }}
+          BUILD_DATADOG_METRICS_IMAGE: ${{ steps.tags.outputs['datadog-metrics_build'] }}
         run: |
           for service_repository_and_decision in \
-              "app-base-order-generator-webapi-ecs:flowa-challenge-order-generator:$BUILD_GENERATOR_IMAGE" \
-              "app-base-order-accumulator-webapi-ecs:flowa-challenge-order-accumulator:$BUILD_ACCUMULATOR_IMAGE"; do
+              "flowa.ordergenerator-webapi-ecs:flowa-challenge-order-generator:$BUILD_GENERATOR_IMAGE" \
+              "flowa.orderaccumulator-worker-ecs:flowa-challenge-order-accumulator:$BUILD_ACCUMULATOR_IMAGE" \
+              "flowa.datadog-metrics-worker-ecs:flowa-challenge-datadog-metrics:$BUILD_DATADOG_METRICS_IMAGE"; do
             IFS=: read -r service_folder ecr_repository build_service_image <<< "$service_repository_and_decision"
             if [ "$build_service_image" != "true" ]; then
               echo "$service_folder: no new image; the running one stays"
@@ -254,7 +257,7 @@ jobs:
             exit 1
           fi
           if grep -q '"AWSCURRENT"' <<< "$version_stages"; then
-            echo "Datadog vault has the key: the agent starts in both tasks"
+            echo "Datadog vault has the key: the agent starts in every task"
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::The Datadog vault does not have the key yet; the tasks start without the agent."
@@ -263,37 +266,61 @@ jobs:
 
       - name: terraform plan and apply
         if: steps.infra.outputs.exists == 'true'
-        working-directory: infra
+        working-directory: infra-aws
         env:
           GENERATOR_IMAGE_TAG: ${{ steps.tags.outputs.generator_tag }}
           ACCUMULATOR_IMAGE_TAG: ${{ steps.tags.outputs.accumulator_tag }}
+          DATADOG_METRICS_IMAGE_TAG: ${{ steps.tags.outputs['datadog-metrics_tag'] }}
           AGENTE_DATADOG_LIGADO: ${{ steps.datadog.outputs.enabled }}
         run: |
           source "$RUNNER_TEMP/terraform-quieto.sh"
           terraform_quieto plan -out=tfplan \
             -var "generator_image_tag=$GENERATOR_IMAGE_TAG" \
             -var "accumulator_image_tag=$ACCUMULATOR_IMAGE_TAG" \
+            -var "datadog_metrics_image_tag=$DATADOG_METRICS_IMAGE_TAG" \
             -var "datadog_ligado=$AGENTE_DATADOG_LIGADO"
           grep -E '^(Plan:|No changes|Changes to Outputs)' "$TERRAFORM_LOG" || echo "plan without a summary line"
           grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
-          # Plan guard: only the two task definitions may be destroyed or replaced (every image deploy replaces
-          # them); only they and the log collector's task roles may be created, and those roles may only be
-          # removed when Datadog is switched off. Anything else stops the run here, before apply. The plan JSON
-          # stays on the runner. New resources in infra/ must be added to these lists.
+          # Plan guard: only the three task definitions may be destroyed or replaced (every image deploy replaces
+          # them); only they, the log collector's task roles, the OrderGenerator's database rules and the
+          # resources of the datadog-metrics worker may be created, and those roles may only be removed when
+          # Datadog is switched off. The two HTTP rules from the OrderGenerator to the OrderAccumulator may only
+          # be deleted (the OrderAccumulator is a worker without HTTP). Anything else stops the run here, before
+          # apply. The plan JSON stays on the runner. New resources in infra-aws/ must be added to these lists.
           terraform show -json tfplan > "$RUNNER_TEMP/deploy-plan.json"
           jq -r '.resource_changes[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])
             | "plan: \(.change.actions | join("/")) \(.address)"' "$RUNNER_TEMP/deploy-plan.json"
           replaceable_task_definitions='["aws_ecs_task_definition.tarefa_do_order_generator",
-            "aws_ecs_task_definition.tarefa_do_order_accumulator"]'
+            "aws_ecs_task_definition.tarefa_do_order_accumulator",
+            "aws_ecs_task_definition.tarefa_do_datadog_metrics"]'
           log_collector_roles='["aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"generator\"]",
             "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"accumulator\"]",
+            "aws_iam_role.role_da_tarefa_dos_servicos_flowa[\"datadog_metrics\"]",
             "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"generator\"]",
-            "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"accumulator\"]"]'
+            "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"accumulator\"]",
+            "aws_iam_role_policy.permissoes_da_tarefa_dos_servicos_flowa[\"datadog_metrics\"]"]'
+          generator_database_rules='["aws_vpc_security_group_ingress_rule.banco_postgres_do_generator",
+            "aws_vpc_security_group_egress_rule.generator_postgres"]'
+          datadog_metrics_worker_resources='["aws_ecr_repository.imagens_dos_servicos_flowa[\"datadog_metrics\"]",
+            "aws_ecr_lifecycle_policy.limpeza_das_imagens_dos_servicos_flowa[\"datadog_metrics\"]",
+            "aws_cloudwatch_log_group.logs_dos_servicos_flowa[\"datadog_metrics\"]",
+            "aws_iam_role.role_de_execucao_dos_servicos_flowa[\"datadog_metrics\"]",
+            "aws_iam_role_policy.permissoes_de_execucao_dos_servicos_flowa[\"datadog_metrics\"]",
+            "aws_security_group.datadog_metrics",
+            "aws_vpc_security_group_ingress_rule.banco_postgres_do_datadog_metrics",
+            "aws_vpc_security_group_egress_rule.datadog_metrics_https",
+            "aws_vpc_security_group_egress_rule.datadog_metrics_postgres",
+            "aws_ecs_service.servico_do_datadog_metrics"]'
+          removed_accumulator_http_rules='["aws_vpc_security_group_ingress_rule.accumulator_http",
+            "aws_vpc_security_group_egress_rule.generator_http"]'
           disallowed_plan_changes=$(jq -r --arg datadog_enabled "$AGENTE_DATADOG_LIGADO" \
             --argjson replaceable "$replaceable_task_definitions" --argjson collector_roles "$log_collector_roles" \
-            '($replaceable + (if $datadog_enabled == "true" then [] else $collector_roles end)) as $deletable
-            | ($replaceable + $collector_roles) as $creatable
+            --argjson generator_database_rules "$generator_database_rules" \
+            --argjson datadog_metrics_worker_resources "$datadog_metrics_worker_resources" \
+            --argjson removed_accumulator_http_rules "$removed_accumulator_http_rules" \
+            '($replaceable + $removed_accumulator_http_rules + (if $datadog_enabled == "true" then [] else $collector_roles end)) as $deletable
+            | ($replaceable + $collector_roles + $generator_database_rules + $datadog_metrics_worker_resources) as $creatable
             | .resource_changes[]
             | select(((.change.actions | index("delete")) and (.address | IN($deletable[]) | not))
               or ((.change.actions | index("create")) and (.address | IN($creatable[]) | not)))

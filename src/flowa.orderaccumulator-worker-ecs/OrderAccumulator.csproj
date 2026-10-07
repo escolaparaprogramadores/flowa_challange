@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <RootNamespace>Flowa.OrderAccumulator</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Infrastructure\Persistence\Schema.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QuickFIXn.Core" Version="1.14.1" />
+    <PackageReference Include="QuickFIXn.FIX44" Version="1.14.1" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\flowa.commons\Commons.csproj" />
+  </ItemGroup>
+
+  <!-- A sessão FIX e os dicionários FIX 4.4 ficam ao lado do executável: o do pacote vem daqui, o com a tag 5100 vem da Commons. -->
+  <ItemGroup>
+    <None Update="acceptor.cfg" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(PkgQuickFIXn_FIX44)\DataDictionary\FIX44.xml" Link="FIX44.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
