@@ -6,6 +6,7 @@
   --glow-submit-buy: 0 10px 28px -6px rgba(79, 227, 176, 0.45);
   --glow-submit-sell: 0 10px 28px -6px rgba(255, 164, 151, 0.42);
   --field-focus-ring: 0 0 0 3px rgba(79, 227, 176, 0.22);
+  --field-focus-ring-test-mode: 0 0 0 3px rgba(242, 184, 75, 0.22);
   --radius-field: var(--radius-quantity-stepper);
   --focus-inset-on-step: -4px;
   --height-submit-button: 52px;
@@ -68,6 +69,8 @@
 .order-summary-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); font-size: var(--font-size-body-small); color: var(--color-text-tertiary); padding: var(--space-2-5) 0; }
 .order-summary-row + .order-summary-row { border-top: 1px solid var(--color-divider); }
 .order-summary-row dd { margin: 0; color: var(--color-text); font-weight: 700; text-align: right; }
+/* Only the test mode takes numbers of any length; breaking them there keeps the summary inside the ticket. */
+.order-ticket.test-mode-on .order-summary-row dd { min-width: 0; overflow-wrap: anywhere; }
 .order-summary-row .order-summary-total { font-family: var(--font-display); font-size: var(--font-size-large-figure); font-weight: 600; }
 .submit-order-button { height: var(--height-submit-button); border: 0; border-radius: var(--radius-field); font-size: var(--font-size-body); font-weight: 800; transition: filter var(--transition), background var(--transition), color var(--transition), box-shadow var(--transition); }
 .submit-order-button.buy { background: var(--color-accent); color: var(--color-text-on-accent); box-shadow: var(--glow-submit-buy); }
@@ -76,3 +79,11 @@
 .submit-order-button:disabled { background: var(--color-disabled-background); color: var(--color-disabled-text); box-shadow: none; cursor: progress; filter: none; }
 .disclaimer { margin: 0; display: flex; align-items: flex-start; gap: var(--space-2-5); padding: var(--space-3) var(--space-3-5); border-radius: var(--radius-field); border: 1px solid var(--color-track-border); background: var(--color-sunken); color: var(--color-text-label); font-size: var(--font-size-label); line-height: 1.5; }
 .disclaimer-icon { flex: none; width: var(--size-disclaimer-icon); height: var(--size-disclaimer-icon); margin-top: var(--divider-thickness); color: var(--color-accent); }
+.quantity-stepper button:disabled { background: var(--color-sunken); color: var(--color-border-strong); cursor: not-allowed; }
+.order-ticket-header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2-5); }
+.test-mode-badge { padding: var(--space-1) var(--space-2-5); border-radius: var(--radius-pill); border: 1px solid var(--color-warning-text); background: var(--color-warning-background); color: var(--color-warning-text); font-size: var(--font-size-caption); font-weight: 700; line-height: 1.2; white-space: nowrap; }
+.test-mode-notice { margin: 0; color: var(--color-warning-text); font-size: var(--font-size-label); line-height: 1.5; }
+.text-input.test-mode-symbol, .text-input.test-mode-symbol:focus { border-color: var(--color-warning-text); }
+.text-input.test-mode-symbol:focus { box-shadow: var(--field-focus-ring-test-mode); }
+/* The border is already yellow without focus, so the keyboard focus needs a solid outline of its own. */
+.text-input.test-mode-symbol:focus-visible { outline: 2px solid var(--color-warning-text); outline-offset: 2px; }
