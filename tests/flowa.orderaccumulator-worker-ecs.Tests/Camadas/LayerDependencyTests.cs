@@ -129,6 +129,18 @@ public sealed class LayerDependencyTests
         Assert.True(entrypointDatadogResult.IsSuccessful, DescribeFailingTypes(entrypointDatadogResult));
     }
 
+    [Fact]
+    public void No_accumulator_type_sends_metrics_through_the_datadog_client()
+    {
+        var accumulatorTypes = Types.InAssembly(OrderAccumulatorAssembly);
+        var metricsClientResult = accumulatorTypes.ShouldNot()
+            .HaveDependencyOnAny("StatsdClient", typeof(Flowa.Commons.Observability.IMetricsClient).FullName)
+            .GetResult();
+
+        Assert.NotEmpty(accumulatorTypes.GetTypes());
+        Assert.True(metricsClientResult.IsSuccessful, DescribeFailingTypes(metricsClientResult));
+    }
+
     // Proves the allow list really refuses: the Domain list applied to the Infrastructure, whose FIX session log
     // uses QuickFIX/n, has to fail and name the class.
     [Fact]
