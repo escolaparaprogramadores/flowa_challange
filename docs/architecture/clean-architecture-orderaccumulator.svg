@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="926" height="790" viewBox="0 0 926 790" font-family="Segoe UI, system-ui, -apple-system, Helvetica, Arial, sans-serif">
+  <title>Clean Architecture no OrderAccumulator</title>
+  <defs>
+    <marker id="ponta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10" fill="none" stroke="#BDBDBD" stroke-width="1.6"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="926" height="790" rx="16" fill="#171717"/>
+
+  <!-- Entrypoint -->
+  <rect x="106" y="59" width="537" height="100" rx="10" fill="#0E5A47" stroke="#2E8B6E"/>
+  <text x="374.5" y="93" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">Entrypoint · porta de entrada (só FIX, sem HTTP)</text>
+  <text x="374.5" y="120" text-anchor="middle" font-size="14" fill="#6EE7B7">NewOrderSingleConsumer · FixAcceptorBackgroundService</text>
+  <text x="374.5" y="142" text-anchor="middle" font-size="14" fill="#6EE7B7">OrderAccumulatorUseCaseDurationMetric · Program</text>
+
+  <!-- Infrastructure -->
+  <rect x="106" y="214" width="537" height="122" rx="10" fill="#0E5A47" stroke="#2E8B6E"/>
+  <text x="374.5" y="248" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">Infrastructure · implementa as interfaces</text>
+  <text x="374.5" y="275" text-anchor="middle" font-size="14" fill="#6EE7B7">OrderRepository · ExposureRepository</text>
+  <text x="374.5" y="297" text-anchor="middle" font-size="14" fill="#6EE7B7">FixOrderTraceProvider · FixSessionLog</text>
+  <text x="374.5" y="319" text-anchor="middle" font-size="14" fill="#6EE7B7">Persistence/Schema.sql, criado na subida</text>
+
+  <!-- Application -->
+  <rect x="106" y="392" width="537" height="145" rx="10" fill="#3B2F8C" stroke="#6D5FD3"/>
+  <text x="374.5" y="426" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">Application · caso de uso</text>
+  <text x="374.5" y="453" text-anchor="middle" font-size="14" fill="#C4B5FD">DecideIncomingOrderUseCase</text>
+  <text x="374.5" y="475" text-anchor="middle" font-size="14" fill="#C4B5FD">DecideIncomingOrderResponse</text>
+  <text x="374.5" y="497" text-anchor="middle" font-size="14" fill="#C4B5FD">UseCaseFailureDataMessageMapper</text>
+  <text x="374.5" y="519" text-anchor="middle" font-size="14" fill="#C4B5FD">usa IUnitOfWork e IOperationMonitoring da Commons</text>
+
+  <!-- Domain -->
+  <rect x="106" y="592" width="537" height="122" rx="10" fill="#3B2F8C" stroke="#6D5FD3"/>
+  <text x="374.5" y="626" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">Domain · regras do negócio</text>
+  <text x="374.5" y="653" text-anchor="middle" font-size="14" fill="#C4B5FD">OrderDecisionDomainService · OrderFieldPolicy</text>
+  <text x="374.5" y="675" text-anchor="middle" font-size="14" fill="#C4B5FD">ExposureLimitPolicy · Order · IncomingOrder</text>
+  <text x="374.5" y="697" text-anchor="middle" font-size="14" fill="#C4B5FD">interfaces: IOrderRepository · IExposureRepository</text>
+
+  <!-- Commons e externos -->
+  <rect x="684" y="214" width="197" height="195" rx="10" fill="#3F3F3B" stroke="#6B6B66"/>
+  <text x="782.5" y="248" text-anchor="middle" font-size="17" font-weight="700" fill="#FFFFFF">Commons</text>
+  <text x="782.5" y="273" text-anchor="middle" font-size="14" fill="#D4D4D4">peças técnicas</text>
+  <text x="782.5" y="303" text-anchor="middle" font-size="14" fill="#E5E5E5">IDatabase · IUnitOfWork</text>
+  <text x="782.5" y="325" text-anchor="middle" font-size="14" fill="#E5E5E5">Dapper + Npgsql</text>
+  <text x="782.5" y="347" text-anchor="middle" font-size="14" fill="#E5E5E5">IApplicationLogger</text>
+  <text x="782.5" y="369" text-anchor="middle" font-size="14" fill="#E5E5E5">IOperationMonitoring</text>
+  <text x="782.5" y="391" text-anchor="middle" font-size="14" fill="#E5E5E5">rastros pelo tracer</text>
+
+  <rect x="684" y="460" width="135" height="55" rx="8" fill="none" stroke="#5A5A5A" stroke-dasharray="5 4"/>
+  <text x="751.5" y="493" text-anchor="middle" font-size="16" font-weight="700" fill="#FFFFFF">PostgreSQL</text>
+  <rect x="746" y="547" width="135" height="55" rx="8" fill="none" stroke="#5A5A5A" stroke-dasharray="5 4"/>
+  <text x="813.5" y="580" text-anchor="middle" font-size="16" font-weight="700" fill="#FFFFFF">Datadog</text>
+
+  <!-- setas: "depende de" -->
+  <g fill="none" stroke="#BDBDBD" stroke-width="1.6" marker-end="url(#ponta)">
+    <path d="M374.5 159 V208"/>
+    <path d="M374.5 537 V586"/>
+    <path d="M106 109 H86 V465 H100"/>
+    <path d="M643 302 H662 V653 H649"/>
+    <path d="M643 241 H678"/>
+    <path d="M733 409 V454"/>
+    <path d="M856 409 V541"/>
+  </g>
+  <g font-size="14" fill="#D4D4D4">
+    <text x="387" y="191">Program registra (DI)</text>
+    <text x="99" y="191">chama o caso de uso</text>
+    <text x="462" y="570">implementa os repositórios</text>
+  </g>
+
+  <!-- legenda -->
+  <g font-size="14" fill="#D4D4D4">
+    <rect x="106" y="751" width="15" height="15" rx="2" fill="#3B2F8C" stroke="#6D5FD3"/>
+    <text x="130" y="764">núcleo (regras)</text>
+    <rect x="280" y="751" width="15" height="15" rx="2" fill="#0E5A47" stroke="#2E8B6E"/>
+    <text x="303" y="764">borda (entrada e infra)</text>
+    <rect x="518" y="751" width="15" height="15" rx="2" fill="#3F3F3B" stroke="#6B6B66"/>
+    <text x="542" y="764">técnico e externo</text>
+    <path d="M706 759 H742" fill="none" stroke="#BDBDBD" stroke-width="1.6" marker-end="url(#ponta)"/>
+    <text x="754" y="764">depende de</text>
+  </g>
+</svg>
