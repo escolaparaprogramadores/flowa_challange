@@ -1,11 +1,13 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/flowa.commons/Commons.csproj" />
+    <Project Path="src/flowa.datadog-metrics-worker-ecs/DatadogMetrics.csproj" />
     <Project Path="src/flowa.orderaccumulator-worker-ecs/OrderAccumulator.csproj" />
     <Project Path="src/flowa.ordergenerator-webapi-ecs/OrderGenerator.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/IntegrationTests/IntegrationTests.csproj" />
+    <Project Path="tests/flowa.datadog-metrics-worker-ecs.Tests/DatadogMetrics.Tests.csproj" />
     <Project Path="tests/flowa.orderaccumulator-worker-ecs.Tests/OrderAccumulator.Tests.csproj" />
     <Project Path="tests/flowa.ordergenerator-webapi-ecs.Tests/OrderGenerator.Tests.csproj" />
   </Folder>
