@@ -3,7 +3,7 @@ import { DocumentIcon } from './Icons';
 import { OrderResponseBox } from './OrderResponseBox';
 import type { OrderListState } from '../hooks/useOrdersAndExposures';
 import { formatInstantInBrasiliaTime } from '../lib/brasilia-time/brasiliaTime';
-import { formatBrazilianReais, formatBrazilianWholeNumber } from '../lib/number-format/brazilianNumberFormat';
+import { formatBrazilianOrderPrice, formatBrazilianWholeNumber } from '../lib/number-format/brazilianNumberFormat';
 import type { ListedOrder, OrderSendResult } from '../services/ordersService';
 
 type OrderListCardProps = {
@@ -55,6 +55,7 @@ function OrderTable({ listedOrders }: { listedOrders: ListedOrder[] }) {
           <tr>
             <th scope="col">Data</th>
             <th scope="col">Status</th>
+            <th scope="col">Motivo</th>
             <th scope="col">Ativo</th>
             <th scope="col">Lado</th>
             <th scope="col">Quantidade</th>
@@ -86,10 +87,13 @@ function OrderRow({ listedOrder }: { listedOrder: ListedOrder }) {
       <td data-column="status" data-label="Status">
         <span className={`order-badge order-badge-${listedOrder.outcome}`}>{STORED_ORDER_OUTCOME_LABELS[listedOrder.outcome]}</span>
       </td>
+      <td data-column="reject-reason" data-label="Motivo" className="order-row-reject-reason">
+        {listedOrder.rejectReason ? listedOrder.rejectReason : <span className="order-row-no-reason">—</span>}
+      </td>
       <td data-column="asset" data-label="Ativo">{listedOrder.symbol ?? '—'}</td>
       <td data-column="side" data-label="Lado">{listedOrder.side ? ORDER_SIDE_LABELS[listedOrder.side] : '—'}</td>
       <td data-column="quantity" data-label="Quantidade" className="numeric">{formatBrazilianWholeNumber(listedOrder.quantity)}</td>
-      <td data-column="price" data-label="Preço" className="numeric">{formatBrazilianReais(listedOrder.priceInReais)}</td>
+      <td data-column="price" data-label="Preço" className="numeric">{formatBrazilianOrderPrice(listedOrder.priceInReais)}</td>
       <td data-column="order-number" data-label="Número da ordem" className="numeric order-row-code">{listedOrder.orderId}</td>
       <td data-column="send-identifier" data-label="Identificador do envio" className="numeric order-row-code">{listedOrder.clOrdId}</td>
     </tr>

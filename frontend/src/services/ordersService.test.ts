@@ -279,8 +279,8 @@ describe('fetchOrderListPage', () => {
     pageSize: 10,
     total: 2,
     orders: [
-      { receivedAt: '2026-10-04T09:34:23.390427Z', status: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, price: 12.34, orderId: 'order-2', clOrdId: 'send-2' },
-      { receivedAt: '2026-10-04T09:30:00Z', status: 'rejected', symbol: null, side: null, quantity: 5, price: 1.1, orderId: 'order-1', clOrdId: 'send-1' },
+      { receivedAt: '2026-10-04T09:34:23.390427Z', status: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, price: 12.34, orderId: 'order-2', clOrdId: 'send-2', rejectReason: null },
+      { receivedAt: '2026-10-04T09:30:00Z', status: 'rejected', symbol: null, side: null, quantity: 5, price: 1.1, orderId: 'order-1', clOrdId: 'send-1', rejectReason: 'O preço deve ser múltiplo de 0,01.' },
     ],
   };
 
@@ -301,10 +301,16 @@ describe('fetchOrderListPage', () => {
       page: 1,
       totalOrders: 2,
       orders: [
-        { receivedAt: '2026-10-04T09:34:23.390427Z', outcome: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, priceInReais: 12.34, orderId: 'order-2', clOrdId: 'send-2' },
-        { receivedAt: '2026-10-04T09:30:00Z', outcome: 'rejected', symbol: null, side: null, quantity: 5, priceInReais: 1.1, orderId: 'order-1', clOrdId: 'send-1' },
+        { receivedAt: '2026-10-04T09:34:23.390427Z', outcome: 'accepted', symbol: 'PETR4', side: 'buy', quantity: 1_000, priceInReais: 12.34, orderId: 'order-2', clOrdId: 'send-2', rejectReason: null },
+        { receivedAt: '2026-10-04T09:30:00Z', outcome: 'rejected', symbol: null, side: null, quantity: 5, priceInReais: 1.1, orderId: 'order-1', clOrdId: 'send-1', rejectReason: 'O preço deve ser múltiplo de 0,01.' },
       ],
     });
+  });
+
+  it('CA-4 and RF-04: an item without rejectReason (body of an older server) reads as null, never undefined', async () => {
+    const { rejectReason: _omittedRejectReason, ...itemWithoutReason } = contractPage.orders[1];
+    simulateServerAnsweringWithJson(200, buildSuccessDataMessage({ ...contractPage, total: 1, orders: [itemWithoutReason] }, 'Página de ordens lida.'));
+    expect((await fetchOrderListPage(1)).orders[0].rejectReason).toBeNull();
   });
 
   it('CA-11: "sell" stays the sell side', async () => {

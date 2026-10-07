@@ -11,7 +11,7 @@ import {
 const sentPetr4Buy: AttemptedOrder = { symbol: 'PETR4', side: 'buy', quantity: 100, priceInReais: 10 };
 
 function buildListedOrder(clOrdId: string, symbol: string, side: 'buy' | 'sell'): ListedOrder {
-  return { receivedAt: '2026-10-06T12:00:00Z', outcome: 'accepted', symbol, side, quantity: 100, priceInReais: 10, orderId: `order-${clOrdId}`, clOrdId };
+  return { receivedAt: '2026-10-06T12:00:00Z', outcome: 'accepted', symbol, side, quantity: 100, priceInReais: 10, orderId: `order-${clOrdId}`, clOrdId, rejectReason: null };
 }
 
 

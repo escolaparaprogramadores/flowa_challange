@@ -5,6 +5,8 @@
   --space-0-5: 2px;
   --size-empty-list-icon: 32px;
   --max-width-empty-list-text: 360px;
+  --min-width-reject-reason: 150px;
+  --max-width-reject-reason: 230px;
 }
 
 .order-list { grid-area: order-list; container-type: inline-size; }
@@ -101,6 +103,18 @@
 .order-row-day, .order-row-time { display: block; }
 .order-row-time { margin-top: var(--space-0-5); font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-muted); }
 .order-row-code { font-size: var(--font-size-caption); font-weight: 600; color: var(--color-text-secondary); }
+/* The reason is the only free text in the row: smaller, and it wraps instead of widening the table. */
+.order-table td.order-row-reject-reason {
+  min-width: var(--min-width-reject-reason);
+  max-width: var(--max-width-reject-reason);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.order-row-no-reason { color: var(--color-text-label); }
 
 /* Three ways to show the same list, by the width of the card itself (the page grid changes its width
    without following the window):
@@ -147,6 +161,7 @@
     color: var(--color-text-label);
   }
   .order-table td.order-row-code { grid-column: span 2; }
+  .order-table td.order-row-reject-reason { grid-column: 1 / -1; min-width: 0; max-width: none; }
 }
 
 @container (max-width: 459px) {

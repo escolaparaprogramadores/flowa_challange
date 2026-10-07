@@ -56,6 +56,7 @@ export type ListedOrder = {
   priceInReais: number;
   orderId: string;
   clOrdId: string;
+  rejectReason: string | null;
 };
 
 export type OrderListPage = { page: number; totalOrders: number; orders: ListedOrder[] };
@@ -69,7 +70,7 @@ type ExposuresResponseData = { exposures?: Array<{ symbol: string; exposure: num
 
 type StoredOrderResponseData = {
   receivedAt: string; status: string; symbol: string | null; side: string | null;
-  quantity: number; price: number; orderId: string; clOrdId: string;
+  quantity: number; price: number; orderId: string; clOrdId: string; rejectReason?: string | null;
 };
 
 type OrdersPageResponseData = { page?: number; total?: number; orders?: StoredOrderResponseData[] };
@@ -235,6 +236,7 @@ export async function fetchOrderListPage(requestedPage: number): Promise<OrderLi
       priceInReais: storedOrder.price,
       orderId: storedOrder.orderId,
       clOrdId: storedOrder.clOrdId,
+      rejectReason: storedOrder.rejectReason ?? null,
     })),
   };
 }
