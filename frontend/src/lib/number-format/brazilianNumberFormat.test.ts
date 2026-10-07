@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBrazilianOrderPrice, formatBrazilianReais, formatBrazilianWholeNumber } from './brazilianNumberFormat';
+import { formatBrazilianOrderPrice, formatBrazilianOrderQuantity, formatBrazilianReais, formatBrazilianWholeNumber } from './brazilianNumberFormat';
 
 describe('formatting for the screen', () => {
   it('formats reais with decimal comma and thousands dot', () => {
@@ -35,5 +35,16 @@ describe('order price as it was sent', () => {
     [0.00000001, 'R$ 0,00000001'],
   ])('formats the order price %d as %s', (priceInReais, expectedText) => {
     expect(formatBrazilianOrderPrice(priceInReais)).toBe(expectedText);
+  });
+});
+
+describe('order quantity as it was stored', () => {
+  it.each([
+    [1.5, '1,5'],
+    [99_999, '99.999'],
+    [100, '100'],
+    [12_345.25, '12.345,25'],
+  ])('formats the order quantity %d as %s, never rounding it', (orderQuantity, expectedText) => {
+    expect(formatBrazilianOrderQuantity(orderQuantity)).toBe(expectedText);
   });
 });

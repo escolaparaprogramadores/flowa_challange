@@ -3,7 +3,7 @@ import { DocumentIcon } from './Icons';
 import { OrderResponseBox } from './OrderResponseBox';
 import type { OrderListState } from '../hooks/useOrdersAndExposures';
 import { formatInstantInBrasiliaTime } from '../lib/brasilia-time/brasiliaTime';
-import { formatBrazilianOrderPrice, formatBrazilianWholeNumber } from '../lib/number-format/brazilianNumberFormat';
+import { formatBrazilianOrderPrice, formatBrazilianOrderQuantity } from '../lib/number-format/brazilianNumberFormat';
 import type { ListedOrder, OrderSendResult } from '../services/ordersService';
 
 type OrderListCardProps = {
@@ -92,7 +92,7 @@ function OrderRow({ listedOrder }: { listedOrder: ListedOrder }) {
       </td>
       <td data-column="asset" data-label="Ativo">{listedOrder.symbol ?? '—'}</td>
       <td data-column="side" data-label="Lado">{listedOrder.side ? ORDER_SIDE_LABELS[listedOrder.side] : '—'}</td>
-      <td data-column="quantity" data-label="Quantidade" className="numeric">{formatBrazilianWholeNumber(listedOrder.quantity)}</td>
+      <td data-column="quantity" data-label="Quantidade" className="numeric">{formatBrazilianOrderQuantity(listedOrder.quantity)}</td>
       <td data-column="price" data-label="Preço" className="numeric">{formatBrazilianOrderPrice(listedOrder.priceInReais)}</td>
       <td data-column="order-number" data-label="Número da ordem" className="numeric order-row-code">{listedOrder.orderId}</td>
       <td data-column="send-identifier" data-label="Identificador do envio" className="numeric order-row-code">{listedOrder.clOrdId}</td>
