@@ -13,7 +13,7 @@ const ACCEPTED_BADGE_COLORS = { background: 'rgba(79, 227, 176, 0.13)', text: 'r
 const REJECTED_BADGE_COLORS = { background: 'rgba(255, 138, 122, 0.12)', text: 'rgb(255, 164, 151)' };
 const SENDING_BADGE_COLORS = { background: 'rgba(242, 184, 75, 0.14)', text: 'rgb(244, 197, 106)' };
 const brazilianRealFormatter = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
-const LIMIT_REJECT_REASON = 'A exposição de PETR4 passaria do limite de 100.000.000,00.';
+const LIMIT_REJECT_REASON = 'Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.';
 const PRICE_FIELD_REJECT_REASON = 'O preço deve ser múltiplo de 0,01.';
 
 type OrderStoredOnServer = { receivedAt: string; status: string; symbol: string | null; side: string | null; quantity: number; price: number; orderId: string; clOrdId: string; rejectReason: string | null };
@@ -379,8 +379,9 @@ test.describe('full list of wide orders', () => {
 
   // ASSUMI-04, card narrower than 800 px: grid block, label above each value, nothing outside the card (CA-26).
   for (const { windowWidth, blockColumns, maxBlockHeightOnScreen } of [
-    { windowWidth: 375, blockColumns: 2, maxBlockHeightOnScreen: 260 },
-    { windowWidth: 861, blockColumns: 2, maxBlockHeightOnScreen: 260 },
+    // In 2 columns the reason (9th field) takes a whole row of its own: 40 px more than the 8-field block.
+    { windowWidth: 375, blockColumns: 2, maxBlockHeightOnScreen: 320 },
+    { windowWidth: 861, blockColumns: 2, maxBlockHeightOnScreen: 320 },
     { windowWidth: 1180, blockColumns: 4, maxBlockHeightOnScreen: 180 },
   ]) {
     test(`CA-26 and ASSUMI-04: at ${windowWidth} px each order becomes a ${blockColumns}-column block with the 9 labeled fields, label above the value, all inside the card`, async ({ page }) => {

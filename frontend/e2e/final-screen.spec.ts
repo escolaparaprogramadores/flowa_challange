@@ -292,7 +292,7 @@ test('CA-40 and CA-43: when opening the full screen, nothing goes to an external
 
 // Final check of the round (F4, F5, F6 and F7 together) against mockup-01 and mockup-02: one asset of each side,
 // one row of each kind, the box after "Aceita" and after "Rejeitada", and the test mode on and off.
-const LIMIT_REJECT_REASON = 'A exposição de PETR4 passaria do limite de 100.000.000,00.';
+const LIMIT_REJECT_REASON = 'Ordem rejeitada: a exposição de PETR4 passaria do limite de 100.000.000,00.';
 const PRICE_FIELD_REJECT_REASON = 'O preço deve ser múltiplo de 0,01.';
 const THREE_FIELD_REJECT_REASON = 'Símbolo inválido. Use PETR4, VALE3 ou VIIA4. A quantidade deve ser um número inteiro. O preço deve ser múltiplo de 0,01.';
 
