@@ -18,6 +18,4 @@ public sealed record OrderAnswer
     public static OrderAnswer AnswerNewOrder(Order answeredOrder) => new(answeredOrder, isRepeat: false);
 
     public static OrderAnswer RepeatStoredAnswer(Order storedOrder) => new(storedOrder, isRepeat: true);
-
-    public bool ShouldCountInOrderMetrics() => !IsRepeat;
 }

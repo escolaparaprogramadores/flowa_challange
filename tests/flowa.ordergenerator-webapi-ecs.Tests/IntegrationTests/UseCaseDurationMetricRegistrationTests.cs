@@ -30,6 +30,6 @@ public sealed class UseCaseDurationMetricRegistrationTests
         {
         }
 
-        Assert.Equal(("Base.OrderGenerator", "ordergenerator.usecase.duration", "s"), Assert.Single(recordedUseCaseDurations));
+        Assert.Equal(("Flowa.OrderGenerator", "ordergenerator.usecase.duration", "s"), Assert.Single(recordedUseCaseDurations));
     }
 }

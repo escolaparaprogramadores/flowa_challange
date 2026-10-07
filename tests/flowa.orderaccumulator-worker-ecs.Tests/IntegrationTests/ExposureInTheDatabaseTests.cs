@@ -28,7 +28,7 @@ public sealed class ExposureInTheDatabaseTests(OrderAccumulatorPostgresFixture o
         var exposuresStoredAfterTheRejectedOrder = await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync();
 
         // Assert
-        SymbolExposure[] exposuresAfterTheAcceptedOrders = [new("PETR4", 1_050.00m), new("VALE3", -500.00m), new("VIIA4", 0m)];
+        StoredSymbolExposure[] exposuresAfterTheAcceptedOrders = [new("PETR4", 1_050.00m), new("VALE3", -500.00m), new("VIIA4", 0m)];
         Assert.Equal(exposuresAfterTheAcceptedOrders, exposuresStoredAfterTheAcceptedOrders);
         Assert.Equal(QuickFix.Fields.ExecType.REJECTED, rejectedOrderExecutionReport.ExecType.Value);
         Assert.Equal("A quantidade deve ser menor que 100.000.", rejectedOrderExecutionReport.Text.Value);
@@ -57,7 +57,7 @@ public sealed class ExposureInTheDatabaseTests(OrderAccumulatorPostgresFixture o
         Assert.False(largeOrderBeforeTheZero.Accepted);
         Assert.Equal(ExposureLimitPolicy.BuildExposureLimitRejectionText("PETR4"), largeOrderBeforeTheZero.RejectReason);
         Assert.True(largeOrderAfterTheZero.Accepted, largeOrderAfterTheZero.RejectReason);
-        SymbolExposure[] exposuresAfterTheLargeOrder = [new("PETR4", 1_000_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
+        StoredSymbolExposure[] exposuresAfterTheLargeOrder = [new("PETR4", 1_000_000.00m), new("VALE3", 0m), new("VIIA4", 0m)];
         Assert.Equal(exposuresAfterTheLargeOrder, await orderAccumulatorDatabase.ExposureReader.GetSymbolExposuresAsync());
         Assert.Equal(1L, await orderAccumulatorDatabase.CountStoredOrdersAsync());
     }

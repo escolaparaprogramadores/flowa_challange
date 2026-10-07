@@ -118,8 +118,7 @@ public sealed class LayerDependencyTests
         AssertSourceFileNamespacesMatchTheirFolders(CommonsProjectFolderName, CommonsRootNamespace);
     }
 
-    // The Datadog client (StatsdClient) is wrapped by the Infrastructure adapter behind IOrderMetricsPort;
-    // the Entrypoint never talks to it directly (reviewer r1, F-01).
+    // The Datadog client (StatsdClient) lives only in the Commons; the Entrypoint never talks to it directly.
     [Fact]
     public void Entrypoint_does_not_use_the_datadog_client_directly()
     {
@@ -128,6 +127,21 @@ public sealed class LayerDependencyTests
 
         Assert.NotEmpty(entrypointTypes.GetTypes());
         Assert.True(entrypointDatadogResult.IsSuccessful, DescribeFailingTypes(entrypointDatadogResult));
+    }
+
+    [Fact]
+    public void No_accumulator_type_sends_metrics_through_the_datadog_client()
+    {
+        var accumulatorTypes = Types.InAssembly(OrderAccumulatorAssembly);
+        var metricsClientResult = accumulatorTypes.ShouldNot()
+            .HaveDependencyOnAny(
+                "StatsdClient",
+                typeof(Flowa.Commons.Observability.IMetricsClient).FullName,
+                typeof(Flowa.Commons.Observability.DogStatsdMetricsClient).FullName)
+            .GetResult();
+
+        Assert.NotEmpty(accumulatorTypes.GetTypes());
+        Assert.True(metricsClientResult.IsSuccessful, DescribeFailingTypes(metricsClientResult));
     }
 
     // Proves the allow list really refuses: the Domain list applied to the Infrastructure, whose FIX session log

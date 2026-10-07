@@ -6,7 +6,6 @@ internal static class InfrastructureServiceCollectionExtensions
         this IServiceCollection orderAccumulatorServices, string orderDatabaseConnectionString, IConfiguration orderAccumulatorConfiguration)
     {
         orderAccumulatorServices.AddOrderAccumulatorPersistence(orderDatabaseConnectionString, orderAccumulatorConfiguration);
-        orderAccumulatorServices.AddOrderMetrics(orderAccumulatorConfiguration);
         return orderAccumulatorServices;
     }
 }

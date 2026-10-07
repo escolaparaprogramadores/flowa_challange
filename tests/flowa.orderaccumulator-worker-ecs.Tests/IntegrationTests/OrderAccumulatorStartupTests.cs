@@ -67,7 +67,7 @@ public sealed class OrderAccumulatorStartupTests(OrderAccumulatorPostgresFixture
         {
         }
 
-        Assert.Equal(("Base.OrderAccumulator", "orderaccumulator.usecase.duration", "s"), Assert.Single(recordedUseCaseDurations));
+        Assert.Equal(("Flowa.OrderAccumulator", "orderaccumulator.usecase.duration", "s"), Assert.Single(recordedUseCaseDurations));
     }
 
     [Fact]

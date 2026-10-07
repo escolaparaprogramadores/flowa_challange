@@ -1,5 +1,4 @@
 using System.Runtime.ExceptionServices;
-using Flowa.OrderAccumulator.Application.Orders.Interfaces;
 using Flowa.OrderAccumulator.Application.Orders.Responses;
 using Flowa.OrderAccumulator.Application.Orders.UseCases;
 using Flowa.Commons.Database;
@@ -19,16 +18,10 @@ namespace Flowa.OrderAccumulator.Tests;
 // order, against the test database. The order repository can be wrapped to make it fail on purpose.
 public sealed class DecideIncomingOrderTestRunner(
     IDatabaseConnectionSource orderDatabaseConnectionSource,
-    IOrderMetricsPort orderMetrics,
     Func<IOrderRepository, IOrderRepository>? wrapOrderRepository = null,
     IOperationMonitoring? operationMonitoring = null,
     IApplicationLogger<DecideIncomingOrderUseCase>? orderDecisionLogger = null)
 {
-    public DecideIncomingOrderTestRunner(IDatabaseConnectionSource orderDatabaseConnectionSource)
-        : this(orderDatabaseConnectionSource, new UncountedOrderMetrics())
-    {
-    }
-
     public async Task<DecideIncomingOrderResponse> DecideIncomingOrderAsync(IncomingOrder incomingOrder, CancellationToken cancellationToken = default) =>
         DecidedOrderMessages.ReadDecidedOrder(await DecideIncomingOrderMessageAsync(incomingOrder, cancellationToken));
 
@@ -44,21 +37,9 @@ public sealed class DecideIncomingOrderTestRunner(
             orderDatabaseUnitOfWork,
             orderRepository,
             new OrderDecisionDomainService(new ExposureRepository(orderDatabase)),
-            orderMetrics,
             operationMonitoring ?? TestObservability.CreateOperationMonitoring(),
             orderDecisionLogger ?? TestObservability.CreateDiscardingLogger<DecideIncomingOrderUseCase>());
         return await decideIncomingOrderUseCase.DecideIncomingOrderAsync(incomingOrder, cancellationToken);
-    }
-}
-
-public sealed class UncountedOrderMetrics : IOrderMetricsPort
-{
-    public void CountAnsweredOrder(string? orderSymbol, char orderSide, bool orderAccepted)
-    {
-    }
-
-    public void SendSymbolExposureGauge(string orderSymbol, decimal symbolExposure)
-    {
     }
 }
 

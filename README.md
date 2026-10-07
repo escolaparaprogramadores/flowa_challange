@@ -218,7 +218,7 @@ na solução `Flowa.slnx`. Dentro de cada app, as camadas são pastas, com o nam
 - **Application**: os casos de uso. Cada um só organiza o passo a passo, sem regra de negócio.
 - **Domain**: as regras do negócio: a ordem, a regra de campo, o limite de exposição. Não usa nenhuma
   biblioteca de fora.
-- **Infrastructure**: o SQL do PostgreSQL, o cliente FIX e as métricas do Datadog. Banco e Datadog
+- **Infrastructure**: o SQL do PostgreSQL, o cliente FIX e, no worker datadog-metrics, as métricas do Datadog. Banco e Datadog
   passam pela Commons; fora daqui, só o Entrypoint usa a QuickFIX/n, na sessão FIX do OrderAccumulator.
 
 A **Commons** é a parte técnica dividida pelos dois apps: banco (Dapper e Npgsql atrás de `IDatabase`), log,
@@ -235,18 +235,17 @@ pasta por tipo de classe (`UseCases`, `Responses`, `Interfaces`, `Repositories`.
 src/flowa.orderaccumulator-worker-ecs/
 ├─ Entrypoint/
 │  ├─ Fix/                  NewOrderSingleConsumer: recebe a ordem FIX e responde o ExecutionReport
-│  ├─ BackgroundService/    sessão FIX (acceptor) e a métrica da exposição
+│  ├─ BackgroundService/    sessão FIX (acceptor)
 │  └─ Observability/
 ├─ Application/
-│  ├─ Orders/       DecideIncomingOrder (UseCases), Responses, Interfaces
-│  ├─ Exposures/    Interfaces (leitura da exposição para a métrica)
+│  ├─ Orders/       DecideIncomingOrder (UseCases), Responses
 │  └─ ErrorHandling/
 ├─ Domain/
 │  ├─ Orders/           Order, regra de campo (OrderFieldPolicy), IOrderRepository
-│  ├─ Exposures/        SymbolExposure, limite de exposição, IExposureRepository
+│  ├─ Exposures/        limite de exposição, IExposureRepository
 │  └─ DomainServices/   OrderDecisionDomainService
 └─ Infrastructure/
-   ├─ Orders/, Exposures/    Repositories (SQL); em Orders, também Adapters (métricas do Datadog) e Options
+   ├─ Orders/, Exposures/    Repositories (SQL); em Orders, também Options
    ├─ Fix/                   rastro na tag 5100 e log da sessão FIX
    ├─ Persistence/           Schema.sql, criado na subida
    └─ DependencyInjection/
@@ -277,9 +276,8 @@ A página não fica no OrderGenerator: o código dela está em `frontend/`, e o 
 `wwwroot` dele.
 
 No OrderAccumulator, cada agregado tem um repositório: `IOrderRepository` e `IExposureRepository`, com a
-interface no Domain e o SQL na Infrastructure. As leituras têm repositório próprio, com a interface na
-Application: no OrderAccumulator, `ISymbolExposureReadRepository` (para a métrica da exposição); no
-OrderGenerator, `IStoredOrderRepository` e `ISymbolExposureRepository` (para a tela).
+interface no Domain e o SQL na Infrastructure. As leituras da tela têm repositório próprio, com a
+interface na Application do OrderGenerator: `IStoredOrderRepository` e `ISymbolExposureRepository`.
 
 ## Na nuvem (AWS)
 
@@ -324,22 +322,22 @@ o rastro de cada ordem, do `POST /api/orders` até o Postgres, passando pelo FIX
 ![Painel da jornada da ordem](docs/observability/painel-jornada-da-ordem.png)
 
 Na AWS, cada task roda um agente do Datadog ao lado do app. Os dois apps mandam rastros para o agente
-em `localhost:8126`, o OrderAccumulator manda também métricas em `localhost:8125`, e o agente envia
+em `localhost:8126`, o worker datadog-metrics manda as métricas em `localhost:8125`, e o agente envia
 tudo ao Datadog por HTTPS. Uma ordem
 aparece como um rastro só, da tela até o OrderAccumulator: o OrderGenerator põe o contexto do rastro
 numa tag FIX própria da `NewOrderSingle`, a 5100 (`TraceParent`), e o OrderAccumulator continua o
-mesmo rastro (`Infrastructure/Fix/FixOrderTraceProvider.cs` em cada app). O OrderAccumulator conta
-`flowa.ordens.aceitas` e `flowa.ordens.rejeitadas` por ativo e lado, e publica `flowa.exposicao` por
-ativo (`src/flowa.orderaccumulator-worker-ecs/Infrastructure/Orders/Adapters/DatadogOrderMetricsAdapter.cs`). O ClOrdID não vira etiqueta, para o
-número de séries ficar pequeno.
+mesmo rastro (`Infrastructure/Fix/FixOrderTraceProvider.cs` em cada app). A cada 5 minutos, o worker
+datadog-metrics lê o banco, conta `flowa.ordens.aceitas` e `flowa.ordens.rejeitadas` por ativo e lado e
+publica `flowa.exposicao` por ativo (`src/flowa.datadog-metrics-worker-ecs/Infrastructure/Orders/Adapters/DatadogOrderMetricsAdapter.cs`
+e `src/flowa.datadog-metrics-worker-ecs/Infrastructure/Exposures/Adapters/DatadogExposureMetricsAdapter.cs`).
+O OrderAccumulator não manda métrica. O ClOrdID não vira etiqueta, para o número de séries ficar pequeno.
 
 A esteira só põe o agente nas tasks quando o cofre do Datadog no Secrets Manager já tem a chave
-(`infra-aws/datadog-agente.tf`, variável `datadog_ligado`). O painel de ordens e exposição nasceu no
-Terraform de `observabilidade/datadog/`, aplicado pelo workflow
-`.github/workflows/2-develop-painel-datadog.yml`, com quatro gráficos. Depois ele foi ampliado direto no
-Datadog, e essa versão, a do print, ainda não voltou para o código: um novo apply desse workflow volta o
-painel aos quatro gráficos. Os outros dois painéis foram montados direto no Datadog e não estão no
-repositório. As chaves do Datadog ficam no Secrets Manager e nos secrets do GitHub, nunca no
+(`infra-aws/datadog-agente.tf`, variável `datadog_ligado`). O painel de ordens e exposição, com todos os
+gráficos do print, vive no Terraform de `observability/datadog/`, aplicado pelo workflow
+`.github/workflows/2-develop-painel-datadog.yml`: ordens e exposição vêm do serviço `datadog-metrics`, e os
+gráficos de saúde, dos rastros do OrderAccumulator. Os outros dois painéis foram montados direto no
+Datadog e não estão no repositório. As chaves do Datadog ficam no Secrets Manager e nos secrets do GitHub, nunca no
 repositório. A conta do Datadog está no período de teste grátis até 15/10/2026; sem
 plano contratado, os três painéis param de receber dado novo depois disso.
 
