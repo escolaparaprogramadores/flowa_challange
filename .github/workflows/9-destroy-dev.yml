@@ -91,8 +91,8 @@ jobs:
             -var "accumulator_image_tag=$GITHUB_SHA" \
             -var "datadog_metrics_image_tag=$GITHUB_SHA"
           grep -E '^(Plan:|No changes)' "$TERRAFORM_LOG" || echo "plan without a summary line"
-          run_terraform_quietly show -json tfplan
-          jq -r '.resource_changes[] | select(.change.actions == ["delete"]) | "destroy: \(.address)"' "$TERRAFORM_LOG"
+          # Same listing as the deploy; an empty state (a second run) has no line and is not an error.
+          grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
 
           run_terraform_quietly apply tfplan
           grep -E '^(Apply complete!|Destroy complete!)' "$TERRAFORM_LOG"
