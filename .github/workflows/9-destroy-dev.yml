@@ -91,8 +91,8 @@ jobs:
             -var "accumulator_image_tag=$GITHUB_SHA" \
             -var "datadog_metrics_image_tag=$GITHUB_SHA"
           grep -E '^(Plan:|No changes)' "$TERRAFORM_LOG" || echo "plan without a summary line"
-          terraform show -json tfplan |
-            jq -r '.resource_changes[] | select(.change.actions == ["delete"]) | "destroy: \(.address)"'
+          run_terraform_quietly show -json tfplan
+          jq -r '.resource_changes[] | select(.change.actions == ["delete"]) | "destroy: \(.address)"' "$TERRAFORM_LOG"
 
           run_terraform_quietly apply tfplan
           grep -E '^(Apply complete!|Destroy complete!)' "$TERRAFORM_LOG"
@@ -100,8 +100,14 @@ jobs:
       - name: Nothing left in the state
         working-directory: infra-aws
         run: |
-          # Apart, so that a failed read of the state fails the step instead of looking empty.
-          state_resources=$(terraform state list)
+          # Apart, so that a failed read of the state fails the step instead of looking empty. Its error goes
+          # to a file first: an AWS error carries the ARN of the caller.
+          state_list_errors="$RUNNER_TEMP/terraform-state-list.log"
+          if ! state_resources=$(terraform state list 2> "$state_list_errors"); then
+            sed -E 's/arn:aws[^ "]*/<hidden arn>/g' "$state_list_errors" >&2
+            echo "could not read the state after the destroy" >&2
+            exit 1
+          fi
           remaining_resources=$(grep -v '^data\.' <<< "$state_resources" || true)
           if [ -n "$remaining_resources" ]; then
             echo "still in the state after the destroy:" >&2

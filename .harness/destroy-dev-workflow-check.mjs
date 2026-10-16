@@ -23,7 +23,14 @@ const destroyTriggerNames = [...destroyTriggerBlock.matchAll(/^ {2}([a-z_]+):/gm
 if (destroyTriggerNames.join(',') !== 'workflow_dispatch') {
   failures.push(`${destroyWorkflowPath}: triggers are [${destroyTriggerNames.join(', ')}], expected only workflow_dispatch`);
 }
-requireInDestroyWorkflow("    if: github.ref == 'refs/heads/develop' && inputs.confirmation == 'destruir'\n", 'only from develop and with the word typed');
+const destroyJobNames = [...(destroyWorkflow.match(/^jobs:\n((?:[ #].*\n|\n)*)/m)?.[1] ?? '').matchAll(/^ {2}([A-Za-z0-9_-]+):/gm)]
+  .map((jobMatch) => jobMatch[1]);
+if (destroyJobNames.join(',') !== 'destroy') {
+  failures.push(`${destroyWorkflowPath}: jobs are [${destroyJobNames.join(', ')}], expected only "destroy", so that the guard covers all of them`);
+}
+if (!/^ {4}if: github\.ref == 'refs\/heads\/develop' && inputs\.confirmation == 'destruir'$/m.test(destroyWorkflow)) {
+  failures.push(`${destroyWorkflowPath}: the destroy job has no guard "if: github.ref == 'refs/heads/develop' && inputs.confirmation == 'destruir'"`);
+}
 requireInDestroyWorkflow('    concurrency:\n      group: deploy-dev\n      cancel-in-progress: false\n', 'same queue as the deploy, never cancelled');
 if (!deployWorkflow.includes('      group: deploy-dev\n')) failures.push(`${deployWorkflowPath}: the deploy queue is no longer deploy-dev`);
 requireInDestroyWorkflow('          terraform_wrapper: false\n', 'the wrapper would echo the whole output in the public log');
@@ -48,11 +55,23 @@ if (destroyBackendConfigs.length === 0 || destroyBackendConfigs.join(' ') !== de
   failures.push(`state backend differs: destroy [${destroyBackendConfigs.join(' ')}], deploy [${deployBackendConfigs.join(' ')}]`);
 }
 
+// Only two raw calls are allowed: the one inside the helper and the state read, whose error goes to a file and
+// through the ARN filter (proved below by running it). Step names, comments and echo texts are not calls.
+const allowedRawTerraformCalls = [
+  'if ! terraform "$terraform_subcommand" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then',
+  'if ! state_resources=$(terraform state list 2> "$state_list_errors"); then',
+];
 const terraformCallsOutsideTheQuietHelper = destroyWorkflow
   .split('\n')
-  .filter((workflowLine) => /^\s*terraform (init|plan|apply|destroy|refresh|import)\b/.test(workflowLine));
+  .map((workflowLine) => workflowLine.trim())
+  .filter((workflowLine) => !/^(#|- name:|name:|echo )/.test(workflowLine))
+  .filter((workflowLine) => /(^|[\s$(|;&])terraform\s+["$a-z]/.test(workflowLine))
+  .filter((workflowLine) => !workflowLine.includes('run_terraform_quietly') && !allowedRawTerraformCalls.includes(workflowLine));
 for (const terraformCall of terraformCallsOutsideTheQuietHelper) {
-  failures.push(`${destroyWorkflowPath}: "${terraformCall.trim()}" runs outside run_terraform_quietly and would print to the public log`);
+  failures.push(`${destroyWorkflowPath}: "${terraformCall}" runs outside run_terraform_quietly and its error would reach the public log`);
+}
+for (const allowedRawTerraformCall of allowedRawTerraformCalls) {
+  if (!destroyWorkflow.includes(allowedRawTerraformCall)) failures.push(`${destroyWorkflowPath}: missing ${allowedRawTerraformCall}`);
 }
 
 const declaredImageTagVariables = readdirSync('infra-aws')
@@ -72,6 +91,13 @@ for (const imageTagVariable of declaredImageTagVariables) {
   }
 }
 
+const destroyPlanAndApplyStep = destroyWorkflow.match(/- name: terraform plan -destroy and apply\n((?: {8}.*\n|\n)*)/)?.[1] ?? '';
+const destroyPlanPosition = destroyPlanAndApplyStep.indexOf('run_terraform_quietly plan -destroy -out=tfplan');
+const destroyApplyPosition = destroyPlanAndApplyStep.indexOf('run_terraform_quietly apply tfplan');
+if (destroyPlanPosition < 0 || destroyApplyPosition < destroyPlanPosition) {
+  failures.push(`${destroyWorkflowPath}: the step "terraform plan -destroy and apply" does not apply the same tfplan after the plan -destroy`);
+}
+
 const emptyStateStepScript = destroyWorkflow
   .match(/- name: Nothing left in the state\n(?: {8}.*\n)*? {8}run: \|\n((?: {10}.*\n|\n)*)/)?.[1]
   ?.replace(/^ {10}/gm, '');
@@ -82,19 +108,31 @@ if (!emptyStateStepScript) {
     'empty state': { fakeTerraform: 'terraform() { return 0; }', expectedSuccess: true },
     'only data sources left': { fakeTerraform: "terraform() { echo 'data.aws_caller_identity.conta'; }", expectedSuccess: true },
     'a resource left': { fakeTerraform: "terraform() { printf 'data.aws_region.atual\\naws_db_instance.banco\\n'; }", expectedSuccess: false },
-    'state read fails': { fakeTerraform: "terraform() { echo 'Error: Failed to load state' >&2; return 1; }", expectedSuccess: false },
+    'state read fails': {
+      fakeTerraform: "terraform() { echo 'Error: AccessDenied for arn:aws:iam::123456789012:role/flowa-gha' >&2; return 1; }",
+      expectedSuccess: false,
+      forbiddenOutput: 'arn:aws',
+      expectedOutput: '<hidden arn>',
+    },
   };
   const stepScriptFolder = mkdtempSync(join(tmpdir(), 'destroy-dev-step-'));
   try {
-    for (const [stateCaseName, { fakeTerraform, expectedSuccess }] of Object.entries(fakeTerraformByStateCase)) {
+    for (const [stateCaseName, { fakeTerraform, expectedSuccess, forbiddenOutput, expectedOutput }] of Object.entries(fakeTerraformByStateCase)) {
       const stepScriptPath = join(stepScriptFolder, 'step.sh');
-      writeFileSync(stepScriptPath, `${fakeTerraform}\n${emptyStateStepScript}`);
+      writeFileSync(stepScriptPath, `RUNNER_TEMP='${stepScriptFolder.replace(/\\/g, '/')}'\n${fakeTerraform}\n${emptyStateStepScript}`);
       // Same flags as the shell: bash of the job on the runner.
       const stepRun = spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', stepScriptPath.replace(/\\/g, '/')], { encoding: 'utf8' });
       if (stepRun.error) {
         failures.push(`could not run bash for the case "${stateCaseName}": ${stepRun.error.message}`);
       } else if ((stepRun.status === 0) !== expectedSuccess) {
         failures.push(`last step with ${stateCaseName}: exit ${stepRun.status}, expected ${expectedSuccess ? 'success' : 'failure'}`);
+      }
+      const stepOutput = `${stepRun.stdout ?? ''}${stepRun.stderr ?? ''}`;
+      if (forbiddenOutput && stepOutput.includes(forbiddenOutput)) {
+        failures.push(`last step with ${stateCaseName}: the log shows "${forbiddenOutput}"`);
+      }
+      if (expectedOutput && !stepOutput.includes(expectedOutput)) {
+        failures.push(`last step with ${stateCaseName}: the log does not show "${expectedOutput}"`);
       }
     }
   } finally {
