@@ -50,49 +50,55 @@ jobs:
 
       - name: Prepare Terraform without echo in the log
         run: |
-          cat > "$RUNNER_TEMP/terraform-quieto.sh" <<'FIM'
-          terraform_quieto() {
-            subcomando_terraform=$1
+          cat > "$RUNNER_TEMP/terraform-quietly.sh" <<'END'
+          run_terraform_quietly() {
+            terraform_subcommand=$1
             shift
-            TERRAFORM_LOG="$RUNNER_TEMP/terraform-$subcomando_terraform-$(date +%s%N).log"
-            if ! terraform "$subcomando_terraform" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
+            TERRAFORM_LOG="$RUNNER_TEMP/terraform-$terraform_subcommand-$(date +%s%N).log"
+            if ! terraform "$terraform_subcommand" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
               grep -E 'Error' "$TERRAFORM_LOG" | sed -E 's/arn:aws[^ "]*/<arn oculto>/g' >&2 || true
-              echo "terraform $subcomando_terraform falhou; a saída completa fica só no runner" >&2
+              echo "terraform $terraform_subcommand falhou; a saída completa fica só no runner" >&2
               return 1
             fi
           }
-          FIM
+          END
 
       - name: terraform init
         working-directory: infra-aws
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
         run: |
-          source "$RUNNER_TEMP/terraform-quieto.sh"
-          terraform_quieto init \
+          source "$RUNNER_TEMP/terraform-quietly.sh"
+          run_terraform_quietly init \
             -backend-config="bucket=$TF_STATE_BUCKET" \
             -backend-config="key=flowa/dev.tfstate" \
             -backend-config="region=$AWS_REGION" \
             -backend-config="use_lockfile=true"
           echo "terraform init ok"
 
-      # The image tags only feed the task definitions, which go away with everything else.
+      # The refresh before the plan still reads the task definitions, and a null image tag breaks their
+      # interpolation. Any valid SHA does: the task definitions go away with everything else.
       - name: terraform plan -destroy and apply
         working-directory: infra-aws
         run: |
-          source "$RUNNER_TEMP/terraform-quieto.sh"
-          terraform_quieto plan -destroy -out=tfplan
+          source "$RUNNER_TEMP/terraform-quietly.sh"
+          run_terraform_quietly plan -destroy -out=tfplan \
+            -var "generator_image_tag=$GITHUB_SHA" \
+            -var "accumulator_image_tag=$GITHUB_SHA" \
+            -var "datadog_metrics_image_tag=$GITHUB_SHA"
           grep -E '^(Plan:|No changes)' "$TERRAFORM_LOG" || echo "plan without a summary line"
           terraform show -json tfplan |
             jq -r '.resource_changes[] | select(.change.actions == ["delete"]) | "destroy: \(.address)"'
 
-          terraform_quieto apply tfplan
+          run_terraform_quietly apply tfplan
           grep -E '^(Apply complete!|Destroy complete!)' "$TERRAFORM_LOG"
 
       - name: Nothing left in the state
         working-directory: infra-aws
         run: |
-          remaining_resources=$(terraform state list | grep -v '^data\.' || true)
+          # Apart, so that a failed read of the state fails the step instead of looking empty.
+          state_resources=$(terraform state list)
+          remaining_resources=$(grep -v '^data\.' <<< "$state_resources" || true)
           if [ -n "$remaining_resources" ]; then
             echo "still in the state after the destroy:" >&2
             echo "$remaining_resources" >&2

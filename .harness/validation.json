@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "feature": "destroy-dev",
+  "requirements": [
+    "RF-01",
+    "RF-02",
+    "RF-03",
+    "RNF-01"
+  ],
+  "requirementsText": {
+    "RF-01": "Workflow manual (workflow_dispatch) que roda terraform destroy do infra-aws no state flowa/dev.tfstate, só a partir de develop e só com a palavra \"destruir\" digitada, na mesma fila do deploy.",
+    "RF-02": "O plan -destroy não quebra com as tags de imagem nulas: passa -var para cada variável *_image_tag com default null.",
+    "RF-03": "Depois do apply o state fica vazio; falha ao ler o state derruba o passo em vez de parecer vazio.",
+    "RNF-01": "Nada da conta no log público; pins de actions e versão do Terraform iguais aos do 2-develop.yml; actionlint sem erro."
+  },
+  "backendTests": {
+    "required": true,
+    "rationale": "A entrega é só YAML de workflow, sem código .NET nem tela; mas um erro faz o destroy parar no meio ou declarar sucesso falso, então a prova por comando é necessária.",
+    "risks": "plan -destroy quebrar no refresh por tag nula (achado F-01 do reviewer); falha do terraform state list ser engolida pelo pipe (F-02); workflow inválido para o GitHub.",
+    "coverage": "actionlint valida a sintaxe e as expressões do workflow. .harness/destroy-dev-workflow-check.mjs lê as variáveis *_image_tag com default null em infra-aws/*.tf (âncora: zero variáveis reprova) e confere que o plan -destroy passa -var de cada uma, e que o state list é lido em linha própria. O comportamento do Terraform foi provado à parte no 1.15.5 local (plan -destroy sem -var: exit 1 Invalid template interpolation value; com -var: 1 destroyed, state vazio). Lacuna: o destroy real só se prova no run da esteira, na conta do Flowa."
+  },
+  "scenarios": [
+    {
+      "id": "actionlint-destroy-dev",
+      "requirements": [
+        "RF-01",
+        "RNF-01"
+      ],
+      "kind": "command",
+      "command": [
+        "C:/Users/mark/.local/bin/actionlint.exe",
+        "-no-color",
+        ".github/workflows/9-destroy-dev.yml"
+      ]
+    },
+    {
+      "id": "destroy-dev-workflow-check",
+      "requirements": [
+        "RF-02",
+        "RF-03"
+      ],
+      "kind": "command",
+      "command": [
+        "node",
+        ".harness/destroy-dev-workflow-check.mjs"
+      ]
+    }
+  ]
+}
