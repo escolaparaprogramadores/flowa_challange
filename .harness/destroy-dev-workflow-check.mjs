@@ -20,7 +20,8 @@ if (nullImageTagVariables.length === 0) {
   failures.push('no image tag variable with default null found in infra-aws/*.tf: the check would pass empty');
 }
 
-const destroyPlanCommand = destroyWorkflow.match(/run_terraform_quietly plan -destroy[^\n]*(?:\\\n[^\n]*)*/)?.[0] ?? '';
+// The checkout on Windows turns the line ends into CRLF.
+const destroyPlanCommand = destroyWorkflow.match(/run_terraform_quietly plan -destroy(?:[^\n]*\\\r?\n)*[^\n]*/)?.[0] ?? '';
 if (!destroyPlanCommand) {
   failures.push(`${destroyWorkflowPath}: no "run_terraform_quietly plan -destroy" command`);
 }
