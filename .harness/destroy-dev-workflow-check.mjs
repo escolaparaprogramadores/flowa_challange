@@ -139,13 +139,15 @@ const shellSwitchesThatMustBeFound = {
 for (const [shellSwitchForm, workflowSample] of Object.entries(shellSwitchesThatMustBeFound)) {
   if (shellSwitchLinesOf(workflowSample).length === 0) failures.push(`the shell check misses ${shellSwitchForm}`);
 }
-for (const terraformLine of terraformLines) {
-  if (!reviewedTerraformLines.includes(terraformLine)) {
-    failures.push(`${destroyWorkflowPath}: "${terraformLine}" calls terraform outside the reviewed list (it would bypass the quiet helper)`);
-  }
+// Compared as a multiset: a copy of a reviewed line in a new step (with its output unfiltered) also fails.
+const differsFromReviewedTerraformLines = (foundTerraformLines) =>
+  [...foundTerraformLines].sort().join('\n') !== [...reviewedTerraformLines].sort().join('\n');
+if (differsFromReviewedTerraformLines(terraformLines)) {
+  failures.push(`${destroyWorkflowPath}: lines naming terraform are\n  ${terraformLines.join('\n  ')}\nexpected exactly the reviewed list\n  ${reviewedTerraformLines.join('\n  ')}`);
 }
-for (const reviewedTerraformLine of reviewedTerraformLines) {
-  if (!terraformLines.includes(reviewedTerraformLine)) failures.push(`${destroyWorkflowPath}: missing ${reviewedTerraformLine}`);
+const reviewedStateReadCopiedIntoANewStep = [...reviewedTerraformLines, 'if ! state_resources=$(terraform state list 2> "$state_list_errors"); then'];
+if (!differsFromReviewedTerraformLines(reviewedStateReadCopiedIntoANewStep)) {
+  failures.push('the closed list of terraform calls accepts a second copy of a reviewed line');
 }
 
 const declaredImageTagVariables = readdirSync('infra-aws')
