@@ -45,6 +45,37 @@ if (!deployWorkflow.includes('      group: deploy-dev\n')) failures.push(`${depl
 requireInDestroyWorkflow('          terraform_wrapper: false\n', 'the wrapper would echo the whole output in the public log');
 requireInDestroyWorkflow('          mask-aws-account-id: true\n', 'the account id must not show in the public log');
 requireInDestroyWorkflow('    defaults:\n      run:\n        shell: bash\n', 'pipefail in every step');
+const shellKeyLines = destroyWorkflow.split('\n').filter((workflowLine) => /^\s*shell:/.test(workflowLine));
+if (shellKeyLines.join('|') !== '        shell: bash') {
+  failures.push(`${destroyWorkflowPath}: shell keys are [${shellKeyLines.map((shellKeyLine) => shellKeyLine.trim()).join(', ')}]; only the job default may set the shell, or a step loses pipefail`);
+}
+
+// The checks below read the shell code only from "run: |" blocks of named steps, so any other way of writing
+// a run (one line, no name, |-, >) is refused instead of escaping them.
+function findRunFormProblems(workflowText) {
+  const runFormProblems = [];
+  for (const workflowLine of workflowText.split('\n')) {
+    if (/^\s*(- )?run:/.test(workflowLine) && workflowLine !== '        run: |' && workflowLine !== '      run:') {
+      runFormProblems.push(`"${workflowLine.trim()}" is not a "run: |" block of a named step`);
+    }
+  }
+  for (const workflowStep of workflowText.split(/^ {6}- /m).slice(1)) {
+    if (workflowStep.includes('\n        run: |\n') && !workflowStep.startsWith('name: ')) {
+      runFormProblems.push(`a step with a run block has no name: "${workflowStep.split('\n')[0]}"`);
+    }
+  }
+  return runFormProblems;
+}
+for (const runFormProblem of findRunFormProblems(destroyWorkflow)) failures.push(`${destroyWorkflowPath}: ${runFormProblem}`);
+const runFormsThatMustBeRefused = {
+  'one-line run': '      - name: Read state\n        run: terraform state list\n',
+  'step without name': '      - run: |\n          terraform state list\n',
+  'folded strip run': '      - name: Read state\n        run: |-\n          terraform state list\n',
+  'folded run': '      - name: Read state\n        run: >\n          terraform state list\n',
+};
+for (const [runFormName, workflowSample] of Object.entries(runFormsThatMustBeRefused)) {
+  if (findRunFormProblems(workflowSample).length === 0) failures.push(`the run form check lets a ${runFormName} through`);
+}
 
 const destroyActionPins = [...destroyWorkflow.matchAll(/uses: (\S+@\S+)/g)].map((pinMatch) => pinMatch[1]);
 if (destroyActionPins.length === 0) failures.push(`${destroyWorkflowPath}: no pinned action found`);
@@ -114,7 +145,47 @@ function runShellStep(stepScript, shellPrelude) {
   }
 }
 
-// The plan step sources the helper from RUNNER_TEMP; a fake one there records the calls and writes the log.
+// The real helper, as the Prepare step writes it, run against a fake terraform.
+const prepareTerraformScript = shellScriptOfStep('Prepare Terraform without echo in the log');
+const helperCallByCase = {
+  'terraform fails with an ARN in the error': {
+    fakeTerraform: "terraform() { echo 'Error: AccessDenied for arn:aws:iam::123456789012:role/flowa-gha' >&2; return 1; }",
+    helperCall: 'run_terraform_quietly plan -destroy -out=tfplan\necho "the step went on after a failed terraform"',
+    expectedSuccess: false,
+    expectedOutput: '<hidden arn>',
+    forbiddenOutputs: ['arn:aws', 'the step went on'],
+  },
+  'terraform succeeds': {
+    fakeTerraform: "terraform() { echo 'Plan: 0 to add, 0 to change, 1 to destroy.'; }",
+    helperCall: [
+      'run_terraform_quietly plan -destroy -out=tfplan > "$RUNNER_TEMP/helper-stdout.txt"',
+      '[ ! -s "$RUNNER_TEMP/helper-stdout.txt" ] || { echo "the helper printed the terraform output"; exit 3; }',
+      'grep -q "1 to destroy" "$TERRAFORM_LOG" || { echo "the terraform output is not in TERRAFORM_LOG"; exit 4; }',
+    ].join('\n'),
+    expectedSuccess: true,
+    forbiddenOutputs: ['1 to destroy'],
+  },
+};
+for (const [helperCaseName, { fakeTerraform, helperCall, expectedSuccess, expectedOutput, forbiddenOutputs }] of Object.entries(helperCallByCase)) {
+  const { stepRun, stepOutput } = runShellStep(
+    `${prepareTerraformScript}\nsource "$RUNNER_TEMP/terraform-quietly.sh"\n${helperCall}`,
+    () => fakeTerraform,
+  );
+  if (stepRun.error) {
+    failures.push(`could not run bash for the helper: ${stepRun.error.message}`);
+    continue;
+  }
+  if ((stepRun.status === 0) !== expectedSuccess) {
+    failures.push(`helper when ${helperCaseName}: exit ${stepRun.status}, expected ${expectedSuccess ? 'success' : 'failure'}\n${stepOutput}`);
+  }
+  if (expectedOutput && !stepOutput.includes(expectedOutput)) failures.push(`helper when ${helperCaseName}: the log does not show "${expectedOutput}"`);
+  for (const forbiddenOutput of forbiddenOutputs) {
+    if (stepOutput.includes(forbiddenOutput)) failures.push(`helper when ${helperCaseName}: the log shows "${forbiddenOutput}"`);
+  }
+}
+
+// The plan step sources the helper from RUNNER_TEMP; a fake one there records the calls and writes the log, and
+// a fake terraform records any raw call instead of running the real binary.
 const destroyPlanAndApplyScript = shellScriptOfStep('terraform plan -destroy and apply');
 const expectedPlanCall = ['plan -destroy -out=tfplan', ...declaredImageTagVariables.map((imageTagVariable) => `-var ${imageTagVariable}=${'a'.repeat(40)}`)].join(' ');
 const terraformPlanLogByCase = {
@@ -122,7 +193,8 @@ const terraformPlanLogByCase = {
   'empty state (second run)': 'No changes. No objects need to be destroyed.',
 };
 for (const [planCaseName, terraformPlanLog] of Object.entries(terraformPlanLogByCase)) {
-  const { stepRun, stepOutput, recordedCalls } = runShellStep(destroyPlanAndApplyScript, (runnerTempFolder) => `cat > "${runnerTempFolder}/terraform-quietly.sh" <<'END'
+  const { stepRun, stepOutput, recordedCalls } = runShellStep(destroyPlanAndApplyScript, (runnerTempFolder) => `terraform() { echo "raw terraform $*" >> "$RUNNER_TEMP/calls.txt"; }
+cat > "${runnerTempFolder}/terraform-quietly.sh" <<'END'
 run_terraform_quietly() {
   echo "$*" >> "$RUNNER_TEMP/calls.txt"
   TERRAFORM_LOG="$RUNNER_TEMP/terraform-$1.log"
@@ -172,5 +244,6 @@ console.log(
   `ok: manual and guarded, same queue, pins (${destroyActionPins.length}), Terraform and state as the deploy; ` +
   `${terraformLines.length} terraform lines, all reviewed; ` +
   `plan step calls plan -destroy with ${declaredImageTagVariables.length} image tags then apply tfplan, also on an empty state; ` +
+  'real helper hides the ARN, fails the step and keeps the output in TERRAFORM_LOG; only named "run: |" steps and the job shell; ' +
   'last step: empty and data-only pass, leftover and failed read fail, ARN hidden',
 );
