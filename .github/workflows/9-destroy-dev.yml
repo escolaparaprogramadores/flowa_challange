@@ -1,0 +1,117 @@
+name: Destroy dev
+
+# Removes everything that infra-aws/ created in the flowa account: services, database, images, logs and
+# vaults. Manual only, from develop, and only with the word typed in the confirmation field. What gives the
+# pipeline its access (OIDC role and state bucket) is not in infra-aws/ and stays.
+# The repository is public: the Terraform output stays in a file on the runner, with only the summary in the log.
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type "destruir" to remove the whole dev environment of the flowa account'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  destroy:
+    if: github.ref == 'refs/heads/develop' && inputs.confirmation == 'destruir'
+    permissions:
+      id-token: write
+      contents: read
+    # Same group as the deploy: a destroy never runs on top of an apply, and neither is cancelled.
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04-arm
+    environment: dev
+    timeout-minutes: 45
+    # pipefail: a failing terraform before a pipe fails the step instead of passing through it.
+    defaults:
+      run:
+        shell: bash
+    env:
+      AWS_REGION: us-east-1
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          mask-aws-account-id: true
+
+      # Without the wrapper: it would repeat the whole Terraform output in the log.
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      - name: Prepare Terraform without echo in the log
+        run: |
+          cat > "$RUNNER_TEMP/terraform-quietly.sh" <<'END'
+          run_terraform_quietly() {
+            terraform_subcommand=$1
+            shift
+            TERRAFORM_LOG="$RUNNER_TEMP/terraform-$terraform_subcommand-$(date +%s%N).log"
+            if ! terraform "$terraform_subcommand" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
+              grep -E 'Error' "$TERRAFORM_LOG" | sed -E 's/arn:aws[^ "]*/<hidden arn>/g' >&2 || true
+              echo "terraform $terraform_subcommand failed; the full output stays only on the runner" >&2
+              return 1
+            fi
+          }
+          END
+
+      - name: terraform init
+        working-directory: infra-aws
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+        run: |
+          source "$RUNNER_TEMP/terraform-quietly.sh"
+          run_terraform_quietly init \
+            -backend-config="bucket=$TF_STATE_BUCKET" \
+            -backend-config="key=flowa/dev.tfstate" \
+            -backend-config="region=$AWS_REGION" \
+            -backend-config="use_lockfile=true"
+          echo "terraform init ok"
+
+      # The refresh before the plan still reads the task definitions, and a null image tag breaks their
+      # interpolation. Any valid SHA does: the task definitions go away with everything else.
+      - name: terraform plan -destroy and apply
+        working-directory: infra-aws
+        run: |
+          source "$RUNNER_TEMP/terraform-quietly.sh"
+          run_terraform_quietly plan -destroy -out=tfplan \
+            -var "generator_image_tag=$GITHUB_SHA" \
+            -var "accumulator_image_tag=$GITHUB_SHA" \
+            -var "datadog_metrics_image_tag=$GITHUB_SHA"
+          grep -E '^(Plan:|No changes)' "$TERRAFORM_LOG" || echo "plan without a summary line"
+          # Same listing as the deploy; an empty state (a second run) has no line and is not an error.
+          grep -E '^  # [a-z]' "$TERRAFORM_LOG" | sed -E 's/^  # //' || true
+
+          run_terraform_quietly apply tfplan
+          grep -E '^(Apply complete!|Destroy complete!)' "$TERRAFORM_LOG"
+
+      - name: Nothing left in the state
+        working-directory: infra-aws
+        run: |
+          # Apart, so that a failed read of the state fails the step instead of looking empty. Its error goes
+          # to a file first: an AWS error carries the ARN of the caller.
+          state_list_errors="$RUNNER_TEMP/terraform-state-list.log"
+          if ! state_resources=$(terraform state list 2> "$state_list_errors"); then
+            sed -E 's/arn:aws[^ "]*/<hidden arn>/g' "$state_list_errors" >&2
+            echo "could not read the state after the destroy" >&2
+            exit 1
+          fi
+          remaining_resources=$(grep -v '^data\.' <<< "$state_resources" || true)
+          if [ -n "$remaining_resources" ]; then
+            echo "still in the state after the destroy:" >&2
+            echo "$remaining_resources" >&2
+            exit 1
+          fi
+          echo "state is empty: the dev environment of the flowa account was removed"
