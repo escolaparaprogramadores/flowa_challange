@@ -28,6 +28,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     environment: dev
     timeout-minutes: 45
+    # pipefail: a failing terraform before a pipe fails the step instead of passing through it.
+    defaults:
+      run:
+        shell: bash
     env:
       AWS_REGION: us-east-1
       TF_IN_AUTOMATION: "true"
@@ -56,8 +60,8 @@ jobs:
             shift
             TERRAFORM_LOG="$RUNNER_TEMP/terraform-$terraform_subcommand-$(date +%s%N).log"
             if ! terraform "$terraform_subcommand" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then
-              grep -E 'Error' "$TERRAFORM_LOG" | sed -E 's/arn:aws[^ "]*/<arn oculto>/g' >&2 || true
-              echo "terraform $terraform_subcommand falhou; a saída completa fica só no runner" >&2
+              grep -E 'Error' "$TERRAFORM_LOG" | sed -E 's/arn:aws[^ "]*/<hidden arn>/g' >&2 || true
+              echo "terraform $terraform_subcommand failed; the full output stays only on the runner" >&2
               return 1
             fi
           }

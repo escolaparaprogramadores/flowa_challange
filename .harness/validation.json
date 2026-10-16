@@ -11,13 +11,13 @@
     "RF-01": "Workflow manual (workflow_dispatch) que roda terraform destroy do infra-aws no state flowa/dev.tfstate, só a partir de develop e só com a palavra \"destruir\" digitada, na mesma fila do deploy.",
     "RF-02": "O plan -destroy não quebra com as tags de imagem nulas: passa -var para cada variável *_image_tag com default null.",
     "RF-03": "Depois do apply o state fica vazio; falha ao ler o state derruba o passo em vez de parecer vazio.",
-    "RNF-01": "Nada da conta no log público; pins de actions e versão do Terraform iguais aos do 2-develop.yml; actionlint sem erro."
+    "RNF-01": "Nada da conta no log público (conta mascarada, wrapper desligado, todo terraform pelo run_terraform_quietly); pins, versão do Terraform e backend do state iguais aos do 2-develop.yml; pipefail em todo passo; actionlint sem erro."
   },
   "backendTests": {
     "required": true,
     "rationale": "A entrega é só YAML de workflow, sem código .NET nem tela; mas um erro faz o destroy parar no meio ou declarar sucesso falso, então a prova por comando é necessária.",
-    "risks": "plan -destroy quebrar no refresh por tag nula (achado F-01 do reviewer); falha do terraform state list ser engolida pelo pipe (F-02); workflow inválido para o GitHub.",
-    "coverage": "actionlint valida a sintaxe e as expressões do workflow. .harness/destroy-dev-workflow-check.mjs lê as variáveis *_image_tag com default null em infra-aws/*.tf (âncora: zero variáveis reprova) e confere que o plan -destroy passa -var de cada uma, e que o state list é lido em linha própria. O comportamento do Terraform foi provado à parte no 1.15.5 local (plan -destroy sem -var: exit 1 Invalid template interpolation value; com -var: 1 destroyed, state vazio). Lacuna: o destroy real só se prova no run da esteira, na conta do Flowa."
+    "risks": "plan -destroy quebrar no refresh por tag nula; falha do terraform state list parecer state vazio; recurso que sobra passar verde; chave de state diferente da do deploy (destroy verde sem apagar nada); gatilho automático ou guarda frouxa; pin, versão ou máscara divergindo do deploy; workflow inválido para o GitHub.",
+    "coverage": "actionlint valida sintaxe e expressões. .harness/destroy-dev-workflow-check.mjs compara o workflow com o 2-develop.yml lido do disco (gatilho só workflow_dispatch, if exato com develop e a palavra, fila deploy-dev sem cancelar, -backend-config iguais, pins e terraform_version iguais, terraform_wrapper false, mask-aws-account-id true, shell bash com pipefail, nenhum terraform fora do run_terraform_quietly), exige -var no plan -destroy para toda variável *_image_tag declarada em infra-aws/*.tf (âncora: zero reprova) e executa o bloco run do passo final sob bash -eo pipefail com um terraform falso: state vazio e só data sources passam, recurso que sobra e leitura que falha reprovam. Reprova as árvores de e8a593d e 3bd6e35. O comportamento do Terraform foi provado à parte no 1.15.5 local (sem -var: exit 1 Invalid template interpolation value; com -var: destroyed, state vazio). Lacuna: o destroy real só se prova no run da esteira, na conta do Flowa."
   },
   "scenarios": [
     {
@@ -36,8 +36,10 @@
     {
       "id": "destroy-dev-workflow-check",
       "requirements": [
+        "RF-01",
         "RF-02",
-        "RF-03"
+        "RF-03",
+        "RNF-01"
       ],
       "kind": "command",
       "command": [
