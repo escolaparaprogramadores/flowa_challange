@@ -45,10 +45,6 @@ if (!deployWorkflow.includes('      group: deploy-dev\n')) failures.push(`${depl
 requireInDestroyWorkflow('          terraform_wrapper: false\n', 'the wrapper would echo the whole output in the public log');
 requireInDestroyWorkflow('          mask-aws-account-id: true\n', 'the account id must not show in the public log');
 requireInDestroyWorkflow('    defaults:\n      run:\n        shell: bash\n', 'pipefail in every step');
-const shellKeyLines = destroyWorkflow.split('\n').filter((workflowLine) => /^\s*shell:/.test(workflowLine));
-if (shellKeyLines.join('|') !== '        shell: bash') {
-  failures.push(`${destroyWorkflowPath}: shell keys are [${shellKeyLines.map((shellKeyLine) => shellKeyLine.trim()).join(', ')}]; only the job default may set the shell, or a step loses pipefail`);
-}
 
 // The checks below read the shell code only from "run: |" blocks of named steps, so any other way of writing
 // a run (one line, no name, |-, >) is refused instead of escaping them.
@@ -95,20 +91,54 @@ if (destroyBackendConfigs.length === 0 || destroyBackendConfigs.join(' ') !== de
   failures.push(`state backend differs: destroy [${destroyBackendConfigs.join(' ')}], deploy [${deployBackendConfigs.join(' ')}]`);
 }
 
-// Closed list: every shell line that names the terraform binary (word "terraform" not glued to _ - or .),
-// however it is written (path, quotes, -chdir, after ; or &&). A new one fails until it is reviewed here:
-// the raw call inside the helper, the state read whose error goes through the ARN filter, and two echo texts.
+// Closed list over EVERY line of the file (not only run blocks, so no YAML form escapes): each one that names the
+// terraform binary (word "terraform" not glued to _ - or .), however written (path, quotes, -chdir, after ; or &&).
+// A new one fails until it is reviewed here: the raw call inside the helper, the state read whose error goes
+// through the ARN filter, two echo texts and two step names.
 const reviewedTerraformLines = [
   'if ! terraform "$terraform_subcommand" -no-color "$@" > "$TERRAFORM_LOG" 2>&1; then',
   'echo "terraform $terraform_subcommand failed; the full output stays only on the runner" >&2',
   'echo "terraform init ok"',
   'if ! state_resources=$(terraform state list 2> "$state_list_errors"); then',
+  '- name: terraform init',
+  '- name: terraform plan -destroy and apply',
 ];
-const allShellLines = [...destroyWorkflow.matchAll(/ {8}run: \|\n((?: {10}.*\n|\n)*)/g)]
-  .flatMap((runBlockMatch) => runBlockMatch[1].split('\n'))
-  .map((shellLine) => shellLine.trim())
-  .filter((shellLine) => shellLine && !shellLine.startsWith('#'));
-const terraformLines = allShellLines.filter((shellLine) => /(?<![\w-])terraform(?![\w.-])/.test(shellLine));
+const uncommentedLinesOf = (workflowText) => workflowText
+  .split('\n')
+  .map((workflowLine) => workflowLine.trim())
+  .filter((workflowLine) => workflowLine && !workflowLine.startsWith('#'));
+const terraformLinesOf = (workflowText) => uncommentedLinesOf(workflowText)
+  .filter((workflowLine) => /(?<![\w-])terraform(?![\w.-])/.test(workflowLine));
+const terraformLines = terraformLinesOf(destroyWorkflow);
+const terraformCallsThatMustBeFound = {
+  'run block indented 9 spaces': '      - name: Read state\n        run: |\n         terraform state list\n',
+  'run value on the next line': '      - name: Read state\n        run:\n          terraform state list\n',
+  'step as a flow map': '      - { name: Read state, run: terraform state list }\n',
+  'quoted run key': '      - name: Read state\n        "run": |\n          terraform state list\n',
+};
+for (const [terraformCallForm, workflowSample] of Object.entries(terraformCallsThatMustBeFound)) {
+  if (!terraformLinesOf(workflowSample).some((terraformLine) => !reviewedTerraformLines.includes(terraformLine))) {
+    failures.push(`the closed list of terraform calls misses a ${terraformCallForm}`);
+  }
+}
+
+// pipefail can be lost by a shell key in any YAML form or by set/shopt inside a script: only the job default
+// may name the shell, and no line may run set or shopt.
+const shellSwitchLinesOf = (workflowText) => uncommentedLinesOf(workflowText)
+  .filter((workflowLine) => /(^|[{,\s"'])shell["']?\s*:/.test(workflowLine) || /(?<![\w-])(set|shopt)\s+[-+]/.test(workflowLine));
+const shellSwitchLines = shellSwitchLinesOf(destroyWorkflow);
+if (shellSwitchLines.join('|') !== 'shell: bash') {
+  failures.push(`${destroyWorkflowPath}: shell switches are [${shellSwitchLines.join(', ')}]; only the job default "shell: bash" is allowed, or a step loses pipefail`);
+}
+const shellSwitchesThatMustBeFound = {
+  'set +o pipefail': '          set +o pipefail\n',
+  'set +e': '          terraform_quietly_ready=1; set +e\n',
+  'shell in a flow map': '      - { name: Read state, shell: sh, run: echo }\n',
+  'quoted shell key': '        "shell": sh\n',
+};
+for (const [shellSwitchForm, workflowSample] of Object.entries(shellSwitchesThatMustBeFound)) {
+  if (shellSwitchLinesOf(workflowSample).length === 0) failures.push(`the shell check misses ${shellSwitchForm}`);
+}
 for (const terraformLine of terraformLines) {
   if (!reviewedTerraformLines.includes(terraformLine)) {
     failures.push(`${destroyWorkflowPath}: "${terraformLine}" calls terraform outside the reviewed list (it would bypass the quiet helper)`);
@@ -242,7 +272,7 @@ if (failures.length > 0) {
 }
 console.log(
   `ok: manual and guarded, same queue, pins (${destroyActionPins.length}), Terraform and state as the deploy; ` +
-  `${terraformLines.length} terraform lines, all reviewed; ` +
+  `${terraformLines.length} lines naming terraform in the whole file, all reviewed; no shell switch but the job default; ` +
   `plan step calls plan -destroy with ${declaredImageTagVariables.length} image tags then apply tfplan, also on an empty state; ` +
   'real helper hides the ARN, fails the step and keeps the output in TERRAFORM_LOG; only named "run: |" steps and the job shell; ' +
   'last step: empty and data-only pass, leftover and failed read fail, ARN hidden',
